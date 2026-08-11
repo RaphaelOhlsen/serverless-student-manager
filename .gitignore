@@ -50,3 +50,4 @@ override.tf.json
 *.log
 tmp/
 temp/
+infra/bootstrap/backend.hcl
