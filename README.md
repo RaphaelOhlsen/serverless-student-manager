@@ -36,17 +36,22 @@ futuras funções Lambda.
 
 ## Comandos locais
 
-| Comando             | Finalidade                                            |
-| ------------------- | ----------------------------------------------------- |
-| `make setup`        | Preparar o ambiente local de desenvolvimento          |
-| `make format`       | Formatar os arquivos atualmente suportados            |
-| `make format-check` | Verificar formatação sem alterar arquivos             |
-| `make lint`         | Executar Ruff e ESLint                                |
-| `make typecheck`    | Executar os verificadores aplicáveis de tipos         |
-| `make test`         | Executar as suítes de testes existentes               |
-| `make coverage`     | Aplicar os gates de cobertura disponíveis             |
-| `make security`     | Auditar dependências Python e Node.js                 |
-| `make check`        | Executar todos os quality gates atualmente aplicáveis |
+| Comando                | Finalidade                                                   |
+| ---------------------- | ------------------------------------------------------------ |
+| `make setup`           | Preparar o ambiente local de desenvolvimento                 |
+| `make format`          | Formatar os arquivos atualmente suportados                   |
+| `make format-check`    | Verificar formatação sem alterar arquivos                    |
+| `make lint`            | Executar Ruff e ESLint                                       |
+| `make typecheck`       | Executar os verificadores aplicáveis de tipos                |
+| `make test`            | Executar as suítes de testes existentes                      |
+| `make coverage`        | Aplicar os gates de cobertura disponíveis                    |
+| `make security`        | Auditar dependências Python e Node.js                        |
+| `make terraform-init`  | Instalar providers localmente, sem configurar backend remoto |
+| `make tflint-init`     | Instalar o ruleset AWS do TFLint                             |
+| `make terraform-check` | Executar os gates Terraform após as inicializações           |
+| `make check`           | Executar todos os quality gates atualmente aplicáveis        |
 
-Terraform e OpenAPI serão incluídos no gate agregado somente quando seus artefatos reais forem
+Os gates Terraform fazem parte dos comandos agregados. Antes da primeira execução, rode
+`make terraform-init` e `make tflint-init`; esses comandos baixam dependências, mas não acessam uma
+conta AWS nem configuram o backend remoto. OpenAPI será incluído quando seus artefatos reais forem
 introduzidos.
