@@ -18,6 +18,26 @@ variable "github_repository" {
   }
 }
 
+variable "github_owner_id" {
+  description = "Immutable numeric GitHub owner ID used in OIDC subject claims."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[0-9]+$", var.github_owner_id))
+    error_message = "github_owner_id must contain only numeric characters."
+  }
+}
+
+variable "github_repository_id" {
+  description = "Immutable numeric GitHub repository ID used in OIDC subject claims."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[0-9]+$", var.github_repository_id))
+    error_message = "github_repository_id must contain only numeric characters."
+  }
+}
+
 variable "state_bucket_name" {
   description = "Globally unique name for the private Terraform state bucket."
   type        = string

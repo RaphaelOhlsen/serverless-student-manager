@@ -1,3 +1,5 @@
-aws_region        = "us-east-1"
-state_bucket_name = "replace-with-a-globally-unique-state-bucket-name"
-github_repository = "replace-owner/replace-repository"
+aws_region           = "us-east-1"
+state_bucket_name    = "replace-with-a-globally-unique-state-bucket-name"
+github_repository    = "replace-owner/replace-repository"
+github_owner_id      = "replace-with-github-owner-id"
+github_repository_id = "replace-with-github-repository-id"
