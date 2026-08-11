@@ -35,6 +35,8 @@ venv/
 .terraform/
 *.tfstate
 *.tfstate.*
+*.tfvars
+!*.tfvars.example
 *.tfplan
 *.tflock
 crash.log
