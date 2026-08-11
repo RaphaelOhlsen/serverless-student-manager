@@ -10,8 +10,16 @@ locals {
 
   github_oidc_url      = "https://token.actions.githubusercontent.com"
   github_oidc_audience = "sts.amazonaws.com"
-  github_dev_subject   = "repo:${var.github_repository}:ref:refs/heads/main"
-  github_prod_subject  = "repo:${var.github_repository}:environment:prod"
+
+  github_repository_parts = split("/", var.github_repository)
+
+  github_owner           = local.github_repository_parts[0]
+  github_repository_name = local.github_repository_parts[1]
+
+  github_immutable_repository = "${local.github_owner}@${var.github_owner_id}/${local.github_repository_name}@${var.github_repository_id}"
+
+  github_dev_subject  = "repo:${local.github_immutable_repository}:ref:refs/heads/main"
+  github_prod_subject = "repo:${local.github_immutable_repository}:environment:prod"
 
   common_tags = {
     Project   = local.project_name
