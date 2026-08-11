@@ -1,0 +1,55 @@
+[tool.pytest.ini_options]
+minversion = "9.0"
+addopts = [
+  "--strict-config",
+  "--strict-markers",
+]
+testpaths = [
+  "backend",
+  "tools",
+]
+
+[tool.coverage.run]
+branch = true
+source = [
+  "backend",
+  "tools",
+]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+skip_covered = true
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+extend-exclude = [
+  ".terraform",
+  "node_modules",
+]
+
+[tool.ruff.lint]
+select = [
+  "E",
+  "F",
+  "I",
+  "UP",
+  "B",
+  "SIM",
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+warn_unreachable = true
+pretty = true
+exclude = [
+  "(^|/)node_modules/",
+  "(^|/)\\.terraform/",
+]

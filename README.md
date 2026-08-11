@@ -8,3 +8,45 @@ Antes de planejar ou implementar mudanças, consulte:
 
 - [`AGENTS.md`](AGENTS.md);
 - [guia canônico de leitura](docs/serverless-student-manager-ordem-de-leitura.md).
+
+## Baselines de desenvolvimento
+
+- Python 3.13;
+- Node.js 24.x;
+- Terraform CLI 1.15.8.
+
+## Pré-requisitos
+
+- Python 3.13 com suporte a `venv`;
+- Node.js 24.x e npm;
+- GNU Make;
+- Terraform CLI 1.15.8 somente quando os artefatos de infraestrutura forem introduzidos.
+
+## Setup local
+
+Instale as dependências de desenvolvimento com:
+
+```shell
+make setup
+```
+
+O comando cria `.venv`, instala o tooling Python de `requirements-dev.txt` e instala as
+dependências Node.js registradas em `package-lock.json`. Ele não instala dependências de runtime das
+futuras funções Lambda.
+
+## Comandos locais
+
+| Comando             | Finalidade                                            |
+| ------------------- | ----------------------------------------------------- |
+| `make setup`        | Preparar o ambiente local de desenvolvimento          |
+| `make format`       | Formatar os arquivos atualmente suportados            |
+| `make format-check` | Verificar formatação sem alterar arquivos             |
+| `make lint`         | Executar Ruff e ESLint                                |
+| `make typecheck`    | Executar os verificadores aplicáveis de tipos         |
+| `make test`         | Executar as suítes de testes existentes               |
+| `make coverage`     | Aplicar os gates de cobertura disponíveis             |
+| `make security`     | Auditar dependências Python e Node.js                 |
+| `make check`        | Executar todos os quality gates atualmente aplicáveis |
+
+Terraform e OpenAPI serão incluídos no gate agregado somente quando seus artefatos reais forem
+introduzidos.

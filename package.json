@@ -1,0 +1,23 @@
+{
+  "name": "serverless-student-manager-tooling",
+  "version": "0.0.0",
+  "private": true,
+  "engines": {
+    "node": "24.x"
+  },
+  "scripts": {
+    "format": "prettier --write package.json eslint.config.mjs README.md",
+    "format:check": "prettier --check package.json eslint.config.mjs README.md",
+    "lint": "eslint eslint.config.mjs",
+    "openapi:lint": "redocly lint openapi/openapi.yaml"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@redocly/cli": "2.46.0",
+    "eslint": "10.8.1",
+    "prettier": "3.9.6",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.67.0",
+    "vitest": "4.1.10"
+  }
+}
