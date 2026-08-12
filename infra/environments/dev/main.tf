@@ -6,3 +6,12 @@ module "student_store" {
   point_in_time_recovery_enabled = false
   deletion_protection_enabled    = false
 }
+
+module "user_store" {
+  source = "../../modules/user_store"
+
+  table_name = "serverless-student-manager-dev-users"
+
+  point_in_time_recovery_enabled = false
+  deletion_protection_enabled    = false
+}

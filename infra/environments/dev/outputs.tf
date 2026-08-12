@@ -22,3 +22,13 @@ output "students_table_arn" {
   description = "ARN of the students DynamoDB table."
   value       = module.student_store.table_arn
 }
+
+output "users_table_name" {
+  description = "Name of the users DynamoDB table."
+  value       = module.user_store.table_name
+}
+
+output "users_table_arn" {
+  description = "ARN of the users DynamoDB table."
+  value       = module.user_store.table_arn
+}
