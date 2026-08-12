@@ -96,6 +96,11 @@ run "plans_identity" {
   }
 
   assert {
+    condition     = one(aws_cognito_user_pool_client.this.refresh_token_rotation).retry_grace_period_seconds == 0
+    error_message = "Refresh token retry grace period must be 0 seconds."
+  }
+
+  assert {
     condition     = aws_cognito_user_pool.this.tags["Component"] == "identity"
     error_message = "The Component tag must be identity."
   }
