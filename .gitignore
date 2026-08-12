@@ -52,3 +52,4 @@ tmp/
 temp/
 infra/bootstrap/backend.hcl
 infra/environments/*/backend.hcl
+infra/modules/*/.terraform.lock.hcl
