@@ -32,3 +32,23 @@ output "users_table_arn" {
   description = "ARN of the users DynamoDB table."
   value       = module.user_store.table_arn
 }
+
+output "cognito_user_pool_id" {
+  description = "ID of the Cognito User Pool."
+  value       = module.identity.user_pool_id
+}
+
+output "cognito_user_pool_arn" {
+  description = "ARN of the Cognito User Pool."
+  value       = module.identity.user_pool_arn
+}
+
+output "cognito_user_pool_client_id" {
+  description = "ID of the Cognito application client."
+  value       = module.identity.user_pool_client_id
+}
+
+output "cognito_issuer" {
+  description = "OIDC issuer URL of the Cognito User Pool."
+  value       = module.identity.issuer
+}

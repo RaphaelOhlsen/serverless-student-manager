@@ -15,3 +15,10 @@ module "user_store" {
   point_in_time_recovery_enabled = false
   deletion_protection_enabled    = false
 }
+
+module "identity" {
+  source = "../../modules/identity"
+
+  user_pool_name        = "serverless-student-manager-dev-user-pool"
+  user_pool_client_name = "serverless-student-manager-dev-web"
+}
