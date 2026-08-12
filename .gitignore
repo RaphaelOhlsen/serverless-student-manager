@@ -51,3 +51,4 @@ override.tf.json
 tmp/
 temp/
 infra/bootstrap/backend.hcl
+infra/environments/*/backend.hcl
