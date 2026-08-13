@@ -12,3 +12,17 @@ args = [
   "hashicorp/terraform-mcp-server"
 ]
 enabled = true
+default_tools_approval_mode = "prompt"
+
+[mcp_servers.aws-serverless-mcp]
+command = "uvx"
+args = [
+  "awslabs.aws-serverless-mcp-server@latest"
+]
+env = {
+  AWS_PROFILE = "default",
+  AWS_REGION = "us-east-1",
+  FASTMCP_LOG_LEVEL = "ERROR"
+}
+enabled = true
+default_tools_approval_mode = "prompt"
