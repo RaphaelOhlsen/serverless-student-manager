@@ -1,6 +1,6 @@
 # Modelo de dados
 
-**Versão:** 2.3  
+**Versão:** 2.4  
 **Status:** Approved
 
 ## 1. Estratégia
@@ -21,15 +21,23 @@ Modelagem orientada a access patterns.
 
 ### Chave primária
 
-Tabela com PK simples `PK`.
+Tabela com chave composta `PK` + `SK`.
 
-Itens:
+Item principal do estudante:
 
 ```text
-STUDENT#<studentId>
+PK = STUDENT#<studentId>
+SK = PROFILE
+```
+
+Itens técnicos de unicidade continuam fazendo parte do modelo:
+
+```text
 UNIQUE#REGISTRATION#<registrationNumber>
 UNIQUE#EMAIL#<normalizedEmail>
 ```
+
+A convenção de `SK` dos itens técnicos de unicidade será definida junto ao fluxo de escrita.
 
 ### GSIs
 

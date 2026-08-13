@@ -1,0 +1,30 @@
+{
+  "version": "2.0",
+  "routeKey": "GET /students/{studentId}",
+  "rawPath": "/students/student-123",
+  "rawQueryString": "",
+  "headers": {
+    "accept": "application/json",
+    "host": "localhost",
+    "user-agent": "pytest"
+  },
+  "requestContext": {
+    "accountId": "123456789012",
+    "apiId": "local",
+    "domainName": "localhost",
+    "domainPrefix": "localhost",
+    "http": {
+      "method": "GET",
+      "path": "/students/student-123",
+      "protocol": "HTTP/1.1",
+      "sourceIp": "127.0.0.1",
+      "userAgent": "pytest"
+    },
+    "requestId": "local-get-student-request",
+    "routeKey": "GET /students/{studentId}",
+    "stage": "$default",
+    "time": "13/Aug/2026:16:55:00 -0300",
+    "timeEpoch": 1786650900000
+  },
+  "isBase64Encoded": false
+}

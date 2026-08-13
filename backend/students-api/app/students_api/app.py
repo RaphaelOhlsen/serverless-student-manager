@@ -7,10 +7,13 @@ from aws_lambda_powertools.metrics import MetricUnit
 from aws_lambda_powertools.utilities.typing import LambdaContext
 
 from students_api.config import METRICS_NAMESPACE, SERVICE_NAME
+from students_api.routes.students import register_student_routes
 
 logger = Logger(service=SERVICE_NAME)
 metrics = Metrics(namespace=METRICS_NAMESPACE, service=SERVICE_NAME)
 app = APIGatewayHttpResolver()
+
+register_student_routes(app)
 
 
 @app.get("/health")
