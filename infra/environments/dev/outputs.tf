@@ -52,3 +52,33 @@ output "cognito_issuer" {
   description = "OIDC issuer URL of the Cognito User Pool."
   value       = module.identity.issuer
 }
+
+output "students_api_function_name" {
+  description = "Name of the students-api Lambda function."
+  value       = module.students_api.function_name
+}
+
+output "students_api_function_arn" {
+  description = "ARN of the students-api Lambda function."
+  value       = module.students_api.function_arn
+}
+
+output "students_api_execution_role_arn" {
+  description = "ARN of the students-api Lambda execution role."
+  value       = module.students_api.execution_role_arn
+}
+
+output "students_api_log_group_name" {
+  description = "CloudWatch Log Group used by the students-api Lambda function."
+  value       = module.students_api.log_group_name
+}
+
+output "students_api_alias_name" {
+  description = "Stable alias of the students-api Lambda function."
+  value       = module.students_api.alias_name
+}
+
+output "students_api_alias_arn" {
+  description = "ARN of the stable students-api Lambda alias."
+  value       = module.students_api.alias_arn
+}
