@@ -82,3 +82,33 @@ output "students_api_alias_arn" {
   description = "ARN of the stable students-api Lambda alias."
   value       = module.students_api.alias_arn
 }
+
+output "http_api_id" {
+  description = "ID of the API Gateway HTTP API."
+  value       = module.http_api.api_id
+}
+
+output "http_api_endpoint" {
+  description = "Base endpoint of the API Gateway HTTP API."
+  value       = module.http_api.api_endpoint
+}
+
+output "http_api_execution_arn" {
+  description = "Execution ARN of the API Gateway HTTP API."
+  value       = module.http_api.execution_arn
+}
+
+output "http_api_jwt_authorizer_id" {
+  description = "ID of the HTTP API JWT authorizer."
+  value       = module.http_api.jwt_authorizer_id
+}
+
+output "http_api_stage_name" {
+  description = "Name of the HTTP API stage."
+  value       = module.http_api.stage_name
+}
+
+output "http_api_access_log_group_name" {
+  description = "CloudWatch Log Group used for HTTP API access logs."
+  value       = module.http_api.access_log_group_name
+}

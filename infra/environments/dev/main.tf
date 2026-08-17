@@ -67,3 +67,42 @@ module "students_api" {
 
   additional_iam_policy_json = data.aws_iam_policy_document.students_api.json
 }
+
+module "http_api" {
+  source = "../../modules/http_api"
+
+  api_name = "${local.project_name}-${local.environment}-http-api"
+
+  jwt_issuer = module.identity.issuer
+
+  jwt_audience = [
+    module.identity.user_pool_client_id,
+  ]
+
+  integrations = {
+    students = {
+      invoke_arn    = module.students_api.alias_invoke_arn
+      function_name = module.students_api.function_name
+      alias_name    = module.students_api.alias_name
+    }
+  }
+
+  routes = {
+    health = {
+      route_key          = "GET /health"
+      integration_key    = "students"
+      authorization_type = "NONE"
+    }
+
+    get_student = {
+      route_key          = "GET /students/{studentId}"
+      integration_key    = "students"
+      authorization_type = "JWT"
+    }
+  }
+
+  component           = "http-api"
+  data_classification = "confidential"
+
+  tags = local.common_tags
+}
