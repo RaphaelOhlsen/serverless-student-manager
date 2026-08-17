@@ -42,13 +42,15 @@ Copie `bootstrap.tfvars.example` para um arquivo `.tfvars` local não versionado
 
 - `aws_region` pela região aprovada;
 - `state_bucket_name` por um nome S3 globalmente único;
-- `github_repository` pelo valor exato `owner/repository`.
+- `github_repository` pelo valor exato `owner/repository`;
+- `github_owner_id` pelo ID numérico imutável do owner no GitHub;
+- `github_repository_id` pelo ID numérico imutável do repositório no GitHub.
 
 As relações de confiança são deliberadamente fixas:
 
 ```text
-dev  = repo:<owner>/<repository>:ref:refs/heads/main
-prod = repo:<owner>/<repository>:environment:prod
+dev  = repo:<owner>@<owner_id>/<repository>@<repository_id>:ref:refs/heads/main
+prod = repo:<owner>@<owner_id>/<repository>@<repository_id>:environment:prod
 aud  = sts.amazonaws.com
 ```
 

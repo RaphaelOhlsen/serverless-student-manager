@@ -1,9 +1,11 @@
 mock_provider "aws" {}
 
 variables {
-  aws_region        = "us-east-1"
-  state_bucket_name = "serverless-student-manager-test-state"
-  github_repository = "example/serverless-student-manager"
+  aws_region           = "us-east-1"
+  state_bucket_name    = "serverless-student-manager-test-state"
+  github_repository    = "example/serverless-student-manager"
+  github_owner_id      = "12345678"
+  github_repository_id = "87654321"
 }
 
 run "reject_ipv4_bucket_name" {
@@ -90,13 +92,23 @@ run "secure_bootstrap_configuration" {
   }
 
   assert {
-    condition     = strcontains(file("${path.module}/locals.tf"), "repo:$${var.github_repository}:ref:refs/heads/main") && strcontains(file("${path.module}/locals.tf"), "sts.amazonaws.com") && !strcontains(file("${path.module}/main.tf"), "StringLike")
-    error_message = "The dev trust must use exact aud and main-branch sub claims."
+    condition = (
+      local.github_oidc_audience == "sts.amazonaws.com" &&
+      local.github_dev_subject == "repo:example@12345678/serverless-student-manager@87654321:ref:refs/heads/main" &&
+      strcontains(file("${path.module}/main.tf"), "values   = [local.github_dev_subject]") &&
+      !strcontains(file("${path.module}/main.tf"), "StringLike")
+    )
+    error_message = "The dev trust must use the immutable repository identity, exact audience and main-branch subject."
   }
 
   assert {
-    condition     = strcontains(file("${path.module}/locals.tf"), "repo:$${var.github_repository}:environment:prod") && strcontains(file("${path.module}/locals.tf"), "sts.amazonaws.com") && !strcontains(file("${path.module}/main.tf"), "StringLike")
-    error_message = "The prod trust must use exact aud and prod-environment sub claims."
+    condition = (
+      local.github_oidc_audience == "sts.amazonaws.com" &&
+      local.github_prod_subject == "repo:example@12345678/serverless-student-manager@87654321:environment:prod" &&
+      strcontains(file("${path.module}/main.tf"), "values   = [local.github_prod_subject]") &&
+      !strcontains(file("${path.module}/main.tf"), "StringLike")
+    )
+    error_message = "The prod trust must use the immutable repository identity, exact audience and prod-environment subject."
   }
 
   assert {
