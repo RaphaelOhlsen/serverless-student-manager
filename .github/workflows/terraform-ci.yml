@@ -1,0 +1,100 @@
+name: Terraform CI
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "infra/**"
+      - ".github/workflows/terraform-ci.yml"
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terraform-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  terraform:
+    name: Terraform Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7.0.1
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v4.0.1
+        with:
+          terraform_version: "1.15.8"
+          terraform_wrapper: false
+
+      - name: Terraform format
+        run: terraform fmt -check -recursive infra
+
+      - name: Terraform init and validate
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          roots=(
+            "infra/bootstrap"
+            "infra/environments/dev"
+            "infra/modules/identity"
+            "infra/modules/lambda_service"
+            "infra/modules/student_store"
+            "infra/modules/user_store"
+          )
+
+          for dir in "${roots[@]}"; do
+            echo "=== ${dir}: init ==="
+            terraform -chdir="${dir}" init \
+              -backend=false \
+              -input=false \
+              -no-color
+
+            echo "=== ${dir}: validate ==="
+            terraform -chdir="${dir}" validate -no-color
+          done
+
+      - name: Terraform tests
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test_roots=(
+            "infra/bootstrap"
+            "infra/modules/identity"
+            "infra/modules/lambda_service"
+            "infra/modules/student_store"
+            "infra/modules/user_store"
+          )
+
+          for dir in "${test_roots[@]}"; do
+            echo "=== ${dir}: test ==="
+            terraform -chdir="${dir}" test -no-color
+          done
+
+      - name: Set up TFLint
+        uses: terraform-linters/setup-tflint@v6.3.0
+        with:
+          tflint_version: v0.64.0
+          cache: true
+
+      - name: Initialize TFLint plugins
+        run: |
+          tflint \
+            --init \
+            --config "$GITHUB_WORKSPACE/infra/bootstrap/.tflint.hcl"
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: TFLint
+        working-directory: infra
+        run: |
+          tflint \
+            --recursive \
+            --config "$GITHUB_WORKSPACE/infra/bootstrap/.tflint.hcl"
