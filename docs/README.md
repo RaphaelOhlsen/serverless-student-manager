@@ -1,8 +1,8 @@
 # Serverless Student Manager — Documentação canônica
 
-**Versão:** 2.3 — Engineering Ready  
-**Data:** 2026-08-10  
-**Status:** Arquitetura inicial concluída — ADR-001 a ADR-020 aprovadas
+**Versão:** 2.4 — Engineering Ready
+**Data:** 2026-08-18
+**Status:** Engenharia em andamento — ADR-001 a ADR-021 aprovadas
 
 ## Objetivo
 
@@ -44,18 +44,17 @@ Estão concluídos e aprovados:
 - retenção;
 - rollback em camadas;
 - organização dos módulos Terraform;
-- ADR-001 a ADR-020.
+- ADR-001 a ADR-021.
 
-A implementação do frontend, backend e infraestrutura da aplicação ainda não começou.
+A implementação está em andamento, com infraestrutura `dev`, autenticação Cognito, Students API inicial, HTTP API, idempotência e armazenamento de auditoria sendo materializados conforme as decisões arquiteturais aprovadas.
 
 ## Próximo marco
 
-1. restaurar esta versão no repositório;
-2. executar auditoria somente leitura com o Codex;
-3. obter resultado `APROVADO PARA ENGENHARIA`;
-4. criar o esqueleto do monorepo;
-5. configurar ferramentas de qualidade;
-6. iniciar `infra/bootstrap`.
+1. concluir os controles de acesso operacional via OIDC;
+2. implementar o bootstrap seguro do primeiro Administrador;
+3. evoluir o backend para os demais fluxos de alunos e usuários;
+4. implementar o frontend React;
+5. concluir observabilidade, testes end-to-end, hardening e preparação de `prod`.
 
 ## Estrutura documental
 
@@ -74,7 +73,7 @@ docs/
 │   ├── pending-decisions.md
 │   └── adr/
 │       ├── adr-001-...
-│       └── adr-020-...
+│       └── adr-021-...
 ├── architecture/
 ├── operations/
 ├── references.md

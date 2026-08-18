@@ -104,6 +104,19 @@ gsi-correlation-time
 gsi-period-time
 ```
 
+Chaves físicas dos índices, conforme ADR-021:
+
+```text
+GSI1PK = ACTOR#<actorId>
+GSI1SK = TS#<occurredAt>#EVENT#<eventId>
+
+GSI2PK = CORRELATION#<correlationId>
+GSI2SK = TS#<occurredAt>#EVENT#<eventId>
+
+GSI3PK = PERIOD#<YYYY-MM>
+GSI3SK = TS#<occurredAt>#EVENT#<eventId>
+```
+
 Regras:
 
 - append-only;

@@ -122,3 +122,28 @@ output "idempotency_table_arn" {
   description = "ARN of the idempotency DynamoDB table."
   value       = module.idempotency_store.table_arn
 }
+
+output "audit_table_name" {
+  description = "Name of the audit events DynamoDB table."
+  value       = module.audit_store.table_name
+}
+
+output "audit_table_arn" {
+  description = "ARN of the audit events DynamoDB table."
+  value       = module.audit_store.table_arn
+}
+
+output "audit_gsi_actor_time" {
+  description = "Name of the audit actor/time GSI."
+  value       = module.audit_store.gsi_actor_time
+}
+
+output "audit_gsi_correlation_time" {
+  description = "Name of the audit correlation/time GSI."
+  value       = module.audit_store.gsi_correlation_time
+}
+
+output "audit_gsi_period_time" {
+  description = "Name of the audit period/time GSI."
+  value       = module.audit_store.gsi_period_time
+}
