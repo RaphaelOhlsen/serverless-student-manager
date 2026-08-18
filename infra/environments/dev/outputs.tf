@@ -112,3 +112,13 @@ output "http_api_access_log_group_name" {
   description = "CloudWatch Log Group used for HTTP API access logs."
   value       = module.http_api.access_log_group_name
 }
+
+output "idempotency_table_name" {
+  description = "Name of the idempotency DynamoDB table."
+  value       = module.idempotency_store.table_name
+}
+
+output "idempotency_table_arn" {
+  description = "ARN of the idempotency DynamoDB table."
+  value       = module.idempotency_store.table_arn
+}
