@@ -1,6 +1,6 @@
 # Visão geral da arquitetura
 
-**Versão:** 2.4
+**Versão:** 2.5
 **Status:** Approved
 
 ## Componentes
@@ -47,7 +47,7 @@
 - Frontend não acessa DynamoDB.
 - Auditoria e logs operacionais são mecanismos diferentes.
 - Terraform provisiona recursos permanentes.
-- GitHub Actions executa builds e deploys.
+- GitHub Actions executa builds e deploys; operações privilegiadas usam workflows manuais com roles IAM operacionais separadas.
 
 
 ## Refinamentos operacionais aprovados
@@ -56,3 +56,5 @@
 - ADR-018: operações não HTTP usam `operationId`.
 - ADR-019: recuperação break-glass do único Administrador substitui a identidade Cognito preservando `userId`.
 - ADR-020: rollback de aplicação, infraestrutura e dados é tratado por camadas.
+- ADR-021: auditoria usa modelagem física com GSIs específicos e bucket mensal para consultas por período.
+- ADR-022: acesso operacional usa GitHub Actions OIDC com roles separadas por capacidade e ambiente, independentes das roles de deploy.

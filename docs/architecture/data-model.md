@@ -1,6 +1,6 @@
 # Modelo de dados
 
-**Versão:** 2.4  
+**Versão:** 2.5
 **Status:** Approved
 
 ## 1. Estratégia

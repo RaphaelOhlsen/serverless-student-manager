@@ -1,2 +1,6 @@
 aws_region     = "us-east-1"
 aws_account_id = "REPLACE_WITH_AWS_ACCOUNT_ID"
+
+github_repository    = "replace-owner/replace-repository"
+github_owner_id      = "replace-with-github-owner-id"
+github_repository_id = "replace-with-github-repository-id"

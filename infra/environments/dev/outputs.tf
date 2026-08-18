@@ -147,3 +147,23 @@ output "audit_gsi_period_time" {
   description = "Name of the audit period/time GSI."
   value       = module.audit_store.gsi_period_time
 }
+
+output "bootstrap_admin_role_arn" {
+  description = "ARN of the GitHub Actions role used for first Administrator bootstrap."
+  value       = module.bootstrap_admin_access.role_arn
+}
+
+output "bootstrap_admin_policy_arn" {
+  description = "ARN of the managed IAM policy used for first Administrator bootstrap."
+  value       = module.bootstrap_admin_access.policy_arn
+}
+
+output "admin_recovery_role_arn" {
+  description = "ARN of the GitHub Actions role used for sole Administrator MFA recovery."
+  value       = module.admin_recovery_access.role_arn
+}
+
+output "admin_recovery_policy_arn" {
+  description = "ARN of the managed IAM policy used for sole Administrator MFA recovery."
+  value       = module.admin_recovery_access.policy_arn
+}

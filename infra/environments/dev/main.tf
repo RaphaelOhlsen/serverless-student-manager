@@ -128,3 +128,151 @@ module "audit_store" {
 
   tags = local.common_tags
 }
+
+data "aws_iam_policy_document" "bootstrap_admin" {
+  statement {
+    sid    = "ManageBootstrapCognitoIdentity"
+    effect = "Allow"
+
+    actions = [
+      "cognito-idp:AdminCreateUser",
+      "cognito-idp:AdminGetUser",
+      "cognito-idp:AdminDeleteUser",
+      "cognito-idp:AdminDisableUser",
+    ]
+
+    resources = [
+      module.identity.user_pool_arn,
+    ]
+  }
+
+  statement {
+    sid    = "ReadAndTransactUserProvisioning"
+    effect = "Allow"
+
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:TransactWriteItems",
+    ]
+
+    resources = [
+      module.user_store.table_arn,
+      module.audit_store.table_arn,
+    ]
+  }
+
+  statement {
+    sid    = "AppendAuditEvents"
+    effect = "Allow"
+
+    actions = [
+      "dynamodb:PutItem",
+    ]
+
+    resources = [
+      module.audit_store.table_arn,
+    ]
+  }
+
+  statement {
+    sid    = "ManageBootstrapIdempotency"
+    effect = "Allow"
+
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:PutItem",
+      "dynamodb:UpdateItem",
+      "dynamodb:DeleteItem",
+    ]
+
+    resources = [
+      module.idempotency_store.table_arn,
+    ]
+  }
+}
+
+module "bootstrap_admin_access" {
+  source = "../../modules/operational_access"
+
+  role_name        = "student-manager-github-dev-bootstrap-admin"
+  role_description = "Temporary GitHub Actions operational role for first Administrator bootstrap."
+
+  oidc_provider_arn = local.github_oidc_provider_arn
+  oidc_subject      = local.github_bootstrap_admin_subject
+
+  policy_name        = "student-manager-dev-bootstrap-admin"
+  policy_description = "Least-privilege permissions for first Administrator bootstrap."
+  policy_json        = data.aws_iam_policy_document.bootstrap_admin.json
+
+  data_classification = "restricted"
+
+  tags = local.operational_tags
+}
+
+data "aws_iam_policy_document" "admin_recovery" {
+  statement {
+    sid    = "ManageRecoveryCognitoIdentity"
+    effect = "Allow"
+
+    actions = [
+      "cognito-idp:AdminGetUser",
+      "cognito-idp:AdminUserGlobalSignOut",
+      "cognito-idp:AdminDisableUser",
+      "cognito-idp:AdminDeleteUser",
+      "cognito-idp:AdminCreateUser",
+    ]
+
+    resources = [
+      module.identity.user_pool_arn,
+    ]
+  }
+
+  statement {
+    sid    = "ReadAndTransactRecoveryState"
+    effect = "Allow"
+
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:TransactWriteItems",
+    ]
+
+    resources = [
+      module.user_store.table_arn,
+      module.audit_store.table_arn,
+    ]
+  }
+
+  statement {
+    sid    = "ManageRecoveryIdempotency"
+    effect = "Allow"
+
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:PutItem",
+      "dynamodb:UpdateItem",
+      "dynamodb:DeleteItem",
+    ]
+
+    resources = [
+      module.idempotency_store.table_arn,
+    ]
+  }
+}
+
+module "admin_recovery_access" {
+  source = "../../modules/operational_access"
+
+  role_name        = "student-manager-github-dev-admin-recovery"
+  role_description = "Temporary GitHub Actions operational role for sole Administrator MFA recovery."
+
+  oidc_provider_arn = local.github_oidc_provider_arn
+  oidc_subject      = local.github_admin_recovery_subject
+
+  policy_name        = "student-manager-dev-admin-recovery"
+  policy_description = "Least-privilege permissions for sole Administrator MFA recovery."
+  policy_json        = data.aws_iam_policy_document.admin_recovery.json
+
+  data_classification = "restricted"
+
+  tags = local.operational_tags
+}
