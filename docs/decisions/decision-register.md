@@ -1,8 +1,8 @@
 # Decision Register
 
 **Projeto:** Serverless Student Manager  
-**Versão:** 2.3  
-**Data:** 2026-08-10  
+**Versão:** 2.4
+**Data:** 2026-08-18
 **Status:** Canônico
 
 ## 1. Decisões de produto, restrições e segurança
@@ -54,6 +54,7 @@
 | ADR-018 | Idempotência para operações não HTTP com `operationId` | Approved |
 | ADR-019 | Recuperação excepcional do único Administrador sem TOTP | Approved |
 | ADR-020 | Rollback em camadas e recuperação de deploy | Approved |
+| ADR-021 | Modelagem física dos índices de auditoria com bucket mensal | Approved |
 
 ## 3. Modelos de dados aprovados
 
@@ -81,9 +82,9 @@
 
 ## 5. Situação arquitetural
 
-Não existem ADRs pendentes entre ADR-001 e ADR-020.
+Não existem ADRs pendentes entre ADR-001 e ADR-021.
 
-Novas decisões relevantes surgidas durante a engenharia devem ser registradas em ADR-021 ou posterior.
+Novas decisões relevantes surgidas durante a engenharia devem ser registradas em ADR-022 ou posterior.
 
 ## 6. Regra de manutenção
 

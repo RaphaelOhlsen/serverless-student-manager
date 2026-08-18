@@ -1,8 +1,8 @@
 # Serverless Student Manager
 
 **Documento:** Visão geral do projeto  
-**Versão:** 2.3  
-**Data:** 2026-08-10  
+**Versão:** 2.4
+**Data:** 2026-08-18
 **Status:** Aprovado
 
 ## 1. Visão geral

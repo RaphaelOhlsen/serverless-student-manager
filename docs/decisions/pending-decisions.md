@@ -1,24 +1,21 @@
 # Pendências após a arquitetura
 
-**Versão:** 2.3  
-**Data:** 2026-08-10  
-**Status:** Arquitetura inicial concluída — Engineering Ready
+**Versão:** 2.4
+**Data:** 2026-08-18
+**Status:** Engenharia em andamento
 
-Não existem ADRs arquiteturais pendentes entre ADR-001 e ADR-020.
+Não existem ADRs arquiteturais pendentes entre ADR-001 e ADR-021.
 
 ## Próximas atividades de engenharia
 
-1. Validar esta documentação com o Codex.
-2. Criar o esqueleto do monorepo.
-3. Configurar ferramentas de qualidade.
-4. Implementar `infra/bootstrap`.
-5. Criar remote state e OIDC.
-6. Implementar os módulos Terraform.
-7. Provisionar `dev`.
-8. Implementar o bootstrap do primeiro Administrador.
-9. Desenvolver backend e frontend.
-10. Implementar pipelines e testes integrados.
-11. Criar `prod` após validação do MVP.
+1. concluir o acesso operacional controlado via GitHub Actions OIDC;
+2. implementar o bootstrap seguro do primeiro Administrador;
+3. evoluir os endpoints restantes da Students API;
+4. implementar o domínio de usuários;
+5. implementar os fluxos de auditoria da aplicação;
+6. desenvolver o frontend React;
+7. ampliar observabilidade e testes integrados/end-to-end;
+8. realizar hardening e preparar o ambiente `prod`.
 
 ## Itens que podem gerar novas ADRs
 

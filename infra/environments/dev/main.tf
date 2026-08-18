@@ -117,3 +117,14 @@ module "idempotency_store" {
 
   tags = local.common_tags
 }
+
+module "audit_store" {
+  source = "../../modules/audit_store"
+
+  table_name = "serverless-student-manager-dev-audit-events"
+
+  point_in_time_recovery_enabled = false
+  deletion_protection_enabled    = false
+
+  tags = local.common_tags
+}
