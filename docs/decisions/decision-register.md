@@ -1,7 +1,7 @@
 # Decision Register
 
 **Projeto:** Serverless Student Manager  
-**Versão:** 2.4
+**Versão:** 2.5
 **Data:** 2026-08-18
 **Status:** Canônico
 
@@ -55,6 +55,7 @@
 | ADR-019 | Recuperação excepcional do único Administrador sem TOTP | Approved |
 | ADR-020 | Rollback em camadas e recuperação de deploy | Approved |
 | ADR-021 | Modelagem física dos índices de auditoria com bucket mensal | Approved |
+| ADR-022 | Acesso operacional controlado via GitHub Actions OIDC | Approved |
 
 ## 3. Modelos de dados aprovados
 
@@ -82,9 +83,9 @@
 
 ## 5. Situação arquitetural
 
-Não existem ADRs pendentes entre ADR-001 e ADR-021.
+Não existem ADRs pendentes entre ADR-001 e ADR-022.
 
-Novas decisões relevantes surgidas durante a engenharia devem ser registradas em ADR-022 ou posterior.
+Novas decisões relevantes surgidas durante a engenharia devem ser registradas em ADR-023 ou posterior.
 
 ## 6. Regra de manutenção
 

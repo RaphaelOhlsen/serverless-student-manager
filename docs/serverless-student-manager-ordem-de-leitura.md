@@ -1,6 +1,6 @@
 # Serverless Student Manager — Ordem canônica de leitura
 
-**Versão:** 2.4 — Engineering Ready
+**Versão:** 2.5 — Engineering Ready
 
 Antes de qualquer implementação, o Codex deve ler `../AGENTS.md`.
 
@@ -40,28 +40,29 @@ Antes de qualquer implementação, o Codex deve ler `../AGENTS.md`.
 26. `decisions/adr/adr-019-sole-admin-mfa-recovery.md`
 27. `decisions/adr/adr-020-rollback-strategy.md`
 28. `decisions/adr/adr-021-audit-index-modeling.md`
+29. `decisions/adr/adr-022-operational-access-oidc.md`
 
 ## 4. Arquitetura consolidada
 
-29. `architecture/architecture-overview.md`
-30. `architecture/data-model.md`
-31. `architecture/security.md`
-32. `architecture/deployment-and-cicd.md`
-33. `architecture/observability.md`
-34. `architecture/diagrams.md`
+30. `architecture/architecture-overview.md`
+31. `architecture/data-model.md`
+32. `architecture/security.md`
+33. `architecture/deployment-and-cicd.md`
+34. `architecture/observability.md`
+35. `architecture/diagrams.md`
 
 ## 5. Operação
 
-35. `operations/cognito-dynamodb-compensation.md`
-36. `operations/non-http-idempotency.md`
-37. `operations/sole-admin-mfa-recovery.md`
-38. `operations/rollback-strategy.md`
+36. `operations/cognito-dynamodb-compensation.md`
+37. `operations/non-http-idempotency.md`
+38. `operations/sole-admin-mfa-recovery.md`
+39. `operations/rollback-strategy.md`
 
 ## 6. Apoio e auditoria
 
-39. `references.md`
-40. `AUDIT-REPORT.md`
-41. `MANIFEST.md`
+40. `references.md`
+41. `AUDIT-REPORT.md`
+42. `MANIFEST.md`
 
 ## Leitura rápida para orientação
 

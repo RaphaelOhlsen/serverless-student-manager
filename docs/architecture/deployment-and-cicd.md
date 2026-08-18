@@ -1,6 +1,6 @@
 # Infraestrutura, ambientes e CI/CD
 
-**Versão:** 2.4
+**Versão:** 2.5
 **Status:** Approved
 
 ## 1. Ambientes
@@ -72,7 +72,25 @@ Produção
   → workflow manual
   → GitHub Environment protegido
   → função IAM exclusiva de prod
+
+Operações privilegiadas
+  → workflow manual
+  → GitHub Environment específico
+  → OIDC
+  → role IAM operacional separada da role de deploy
 ```
+
+GitHub Environments operacionais iniciais:
+
+```text
+dev-bootstrap-admin
+dev-admin-recovery
+prod-admin-recovery
+```
+
+Cada capacidade operacional usa trust policy e policy IAM próprias, com `sub` OIDC exato e sem wildcards.
+
+O provider OIDC existente é reutilizado pelas roles operacionais; nenhum segundo provider OIDC é criado.
 
 Actions externas devem ser fixadas por SHA completo.
 

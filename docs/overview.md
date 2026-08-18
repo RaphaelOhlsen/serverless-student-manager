@@ -1,7 +1,7 @@
 # Serverless Student Manager
 
 **Documento:** Visão geral do projeto  
-**Versão:** 2.4
+**Versão:** 2.5
 **Data:** 2026-08-18
 **Status:** Aprovado
 
@@ -33,6 +33,7 @@ O sistema deve manter pelo menos um Administrador ativo.
 - API documentada com OpenAPI;
 - infraestrutura com Terraform;
 - CI/CD com GitHub Actions e OIDC;
+- acesso operacional controlado com roles IAM separadas por capacidade e ambiente;
 - observabilidade com CloudWatch;
 - testes em camadas;
 - rollback em camadas;
@@ -85,7 +86,8 @@ S3 privado — React SPA
         └──────────── idempotency ────────────┘
 
 CloudWatch recebe logs, métricas, dashboards e alarmes.
-GitHub Actions usa OIDC.
+GitHub Actions usa OIDC para deploy e operações manuais privilegiadas.
+Roles operacionais são separadas das roles de deploy e usam GitHub Environments específicos.
 Terraform gerencia a infraestrutura.
 ```
 

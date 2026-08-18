@@ -1,6 +1,6 @@
 # Arquitetura de segurança
 
-**Versão:** 2.4
+**Versão:** 2.5
 **Status:** Approved
 
 ## 1. Autenticação
@@ -65,12 +65,22 @@ A aplicação usa `role` e `status` atuais no DynamoDB.
 - `users-api`: usuários + Cognito + auditoria;
 - `audit-api`: leitura da auditoria;
 - uma função IAM de deploy por ambiente;
+- roles operacionais separadas das roles de deploy;
+- roles operacionais separadas por capacidade e por ambiente;
+- trust policies OIDC com `sub` exato, sem wildcards;
 - nenhuma credencial AWS permanente no GitHub;
 - frontend sem acesso direto ao DynamoDB.
 
 ## 7. Bootstrap e recuperação
 
-O primeiro Administrador é criado por workflow manual com OIDC e função temporária.
+O primeiro Administrador é criado por workflow manual com OIDC e função temporária associada ao GitHub Environment `dev-bootstrap-admin`.
+
+A recuperação excepcional do único Administrador usa roles operacionais independentes e GitHub Environments próprios:
+
+- `dev-admin-recovery`;
+- `prod-admin-recovery`.
+
+Bootstrap e recuperação possuem trust policies e policies IAM próprias, com menor privilégio e sem reutilização das roles de deploy.
 
 Reset de MFA é administrativo e auditado.  
 O único Administrador terá procedimento excepcional controlado de recuperação.
