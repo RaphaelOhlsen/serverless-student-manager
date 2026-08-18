@@ -106,3 +106,14 @@ module "http_api" {
 
   tags = local.common_tags
 }
+
+module "idempotency_store" {
+  source = "../../modules/idempotency_store"
+
+  table_name = "serverless-student-manager-dev-idempotency"
+
+  point_in_time_recovery_enabled = false
+  deletion_protection_enabled    = false
+
+  tags = local.common_tags
+}
