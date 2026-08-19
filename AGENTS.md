@@ -83,7 +83,7 @@ Não executar sem autorização humana:
 - CI/CD: GitHub Actions com OIDC.
 - Observabilidade: CloudWatch.
 - Ambientes: `dev` e `prod`, inicialmente na mesma conta AWS.
-- ADR-001 a ADR-022: `Approved`.
+- ADR-001 a ADR-023: `Approved`.
 
 ## 6. Segurança
 

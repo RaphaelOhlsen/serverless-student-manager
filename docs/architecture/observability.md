@@ -1,6 +1,6 @@
 # Observabilidade
 
-**Versão:** 2.5
+**Versão:** 2.6
 **Status:** Approved
 
 ## 1. Base

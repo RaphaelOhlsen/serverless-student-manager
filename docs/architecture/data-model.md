@@ -1,6 +1,6 @@
 # Modelo de dados
 
-**Versão:** 2.5
+**Versão:** 2.6
 **Status:** Approved
 
 ## 1. Estratégia
@@ -59,24 +59,49 @@ gsi-all-name
 
 ## 3. `users`
 
-Tabela com PK simples `PK`.
+Tabela com chave composta `PK` + `SK`, conforme ADR-023.
 
-Itens:
-
-```text
-USER#<userId>
-UNIQUE#EMAIL#<normalizedEmail>
-COGNITO#<cognitoSub>
-CONTROL#ACTIVE_ADMIN_COUNT
-```
-
-GSI:
+### Item principal do usuário
 
 ```text
-gsi-all-users-name
+PK = USER#<userId>
+SK = PROFILE
 ```
 
-Projeção de autorização:
+Atributos principais:
+
+```text
+userId
+cognitoSub
+fullName
+normalizedName
+email
+role
+status
+authVersion
+createdAt
+createdBy
+updatedAt
+updatedBy
+```
+
+### Unicidade de e-mail
+
+```text
+PK = UNIQUE#EMAIL#<normalizedEmail>
+SK = UNIQUE
+```
+
+O item referencia o `userId` e é criado com condição de não existência.
+
+### Projeção de autorização Cognito
+
+```text
+PK = COGNITO#<cognitoSub>
+SK = AUTHORIZATION
+```
+
+Atributos:
 
 ```text
 userId
@@ -85,7 +110,58 @@ status
 authVersion
 ```
 
-O contador de Administradores ativos é protegido transacionalmente.
+Essa projeção é utilizada para autorização por Cognito `sub`.
+
+### Controle de Administradores ativos
+
+```text
+PK = CONTROL#ACTIVE_ADMIN_COUNT
+SK = CONTROL
+activeAdminCount = <inteiro >= 0>
+```
+
+`activeAdminCount` armazena a quantidade de usuários com `role = ADMIN` e `status = ACTIVE`.
+
+O contador é protegido transacionalmente.
+
+Usuários com status `INVITED` não participam do contador.
+
+### GSI
+
+```text
+gsi-all-users-name
+
+GSI1PK = USERS
+GSI1SK = NAME#<normalizedName>#USER#<userId>
+```
+
+Somente itens `USER#<userId> / PROFILE` participam do índice.
+
+O índice suporta:
+
+- listagem paginada por nome com `Query`;
+- pesquisa por prefixo de nome normalizado;
+- ordenação determinística para usuários com nomes iguais.
+
+Busca exata por e-mail utiliza o item `UNIQUE#EMAIL#<normalizedEmail> / UNIQUE`, sem `Scan`.
+
+### Normalização
+
+Nome:
+
+```text
+normalizedName
+```
+
+é produzido com Unicode NFKC, trim, redução de whitespace interno e Unicode case folding.
+
+E-mail:
+
+```text
+normalizedEmail = trim(email).lower()
+```
+
+O e-mail persistido no perfil utiliza a forma normalizada.
 
 ## 4. `audit-events`
 

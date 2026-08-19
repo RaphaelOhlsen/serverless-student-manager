@@ -1,6 +1,6 @@
 # Serverless Student Manager — Ordem canônica de leitura
 
-**Versão:** 2.5 — Engineering Ready
+**Versão:** 2.6 — Engineering Ready
 
 Antes de qualquer implementação, o Codex deve ler `../AGENTS.md`.
 

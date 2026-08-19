@@ -1,8 +1,8 @@
 # Serverless Student Manager — Documentação canônica
 
-**Versão:** 2.5 — Engineering Ready
-**Data:** 2026-08-18
-**Status:** Engenharia em andamento — ADR-001 a ADR-022 aprovadas
+**Versão:** 2.6 — Engineering Ready
+**Data:** 2026-08-19
+**Status:** Engenharia em andamento — ADR-001 a ADR-023 aprovadas
 
 ## Objetivo
 
@@ -44,7 +44,7 @@ Estão concluídos e aprovados:
 - retenção;
 - rollback em camadas;
 - organização dos módulos Terraform;
-- ADR-001 a ADR-022.
+- ADR-001 a ADR-023.
 
 A implementação está em andamento, com infraestrutura `dev`, autenticação Cognito, Students API inicial, HTTP API, idempotência e armazenamento de auditoria sendo materializados conforme as decisões arquiteturais aprovadas.
 

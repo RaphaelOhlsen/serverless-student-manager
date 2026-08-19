@@ -1,6 +1,6 @@
 # Visão geral da arquitetura
 
-**Versão:** 2.5
+**Versão:** 2.6
 **Status:** Approved
 
 ## Componentes
