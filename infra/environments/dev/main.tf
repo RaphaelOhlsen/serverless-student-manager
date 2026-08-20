@@ -209,6 +209,68 @@ module "bootstrap_admin_access" {
   tags = local.operational_tags
 }
 
+data "aws_iam_policy_document" "resume_first_admin_invitation" {
+  statement {
+    sid    = "ReadAndResendFirstAdminInvitation"
+    effect = "Allow"
+
+    actions = [
+      "cognito-idp:AdminCreateUser",
+      "cognito-idp:AdminGetUser",
+    ]
+
+    resources = [
+      module.identity.user_pool_arn,
+    ]
+  }
+
+  statement {
+    sid    = "ReadFirstAdminState"
+    effect = "Allow"
+
+    actions = [
+      "dynamodb:GetItem",
+    ]
+
+    resources = [
+      module.user_store.table_arn,
+    ]
+  }
+
+  statement {
+    sid    = "ManageInvitationResumeIdempotency"
+    effect = "Allow"
+
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:PutItem",
+      "dynamodb:UpdateItem",
+    ]
+
+    resources = [
+      module.idempotency_store.table_arn,
+    ]
+  }
+}
+
+module "resume_first_admin_invitation_operational_access" {
+  source = "../../modules/operational_access"
+
+  role_name        = "student-manager-github-dev-resume-first-admin-invitation"
+  role_description = "Temporary GitHub Actions operational role for first Administrator invitation resume."
+
+  oidc_provider_arn = local.github_oidc_provider_arn
+  oidc_subject      = local.github_resume_first_admin_invitation_subject
+
+  policy_name        = "student-manager-dev-resume-first-admin-invitation"
+  policy_description = "Least-privilege permissions for first Administrator invitation resume."
+  policy_json        = data.aws_iam_policy_document.resume_first_admin_invitation.json
+
+  data_classification = "restricted"
+
+  tags = local.operational_tags
+}
+
 data "aws_iam_policy_document" "admin_recovery" {
   statement {
     sid    = "ManageRecoveryCognitoIdentity"
