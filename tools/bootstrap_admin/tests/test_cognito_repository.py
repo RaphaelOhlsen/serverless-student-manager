@@ -2,7 +2,11 @@ from typing import Any
 
 import pytest
 
-from tools.bootstrap_admin.cognito_repository import CognitoRepository
+from tools.bootstrap_admin.cognito_repository import (
+    CognitoCreateResultError,
+    CognitoIdentityValidationError,
+    CognitoRepository,
+)
 
 
 class FakeCognitoClient:
@@ -67,6 +71,38 @@ def test_create_suppressed_user_uses_controlled_cognito_flow() -> None:
     assert cognito_sub == "cognito-sub-123"
 
 
+class FakeCreateResponseCognitoClient(FakeCognitoClient):
+    def __init__(self, response: dict[str, Any]) -> None:
+        super().__init__()
+        self.response = response
+
+    def admin_create_user(self, **kwargs: object) -> dict[str, Any]:
+        self.last_create = dict(kwargs)
+        return self.response
+
+
+@pytest.mark.parametrize(
+    ("response", "error_match"),
+    [
+        ({}, "response is missing User"),
+        ({"User": {}}, "response is missing Attributes"),
+        ({"User": {"Attributes": []}}, "response is missing sub"),
+    ],
+)
+def test_create_suppressed_user_rejects_result_without_usable_sub(
+    response: dict[str, Any],
+    error_match: str,
+) -> None:
+    repository = CognitoRepository(FakeCreateResponseCognitoClient(response))
+
+    with pytest.raises(CognitoCreateResultError, match=error_match):
+        repository.create_suppressed_user(
+            user_pool_id="us-east-1_example",
+            user_id="user-123",
+            email="admin@example.com",
+        )
+
+
 class FakeGetUserCognitoClient(FakeCognitoClient):
     def __init__(self, response: dict[str, Any] | None = None) -> None:
         super().__init__()
@@ -123,7 +159,7 @@ def test_get_existing_user_rejects_incompatible_email() -> None:
     repository = CognitoRepository(client)
 
     with pytest.raises(
-        RuntimeError,
+        CognitoIdentityValidationError,
         match="existing Cognito user email does not match expected email",
     ):
         repository.get_existing_user_sub(
@@ -136,7 +172,10 @@ def test_get_existing_user_rejects_incompatible_email() -> None:
 def test_get_existing_user_fails_without_user_attributes() -> None:
     repository = CognitoRepository(FakeGetUserCognitoClient({"Username": "user-123"}))
 
-    with pytest.raises(RuntimeError, match="AdminGetUser response is missing UserAttributes"):
+    with pytest.raises(
+        CognitoIdentityValidationError,
+        match="AdminGetUser response is missing UserAttributes",
+    ):
         repository.get_existing_user_sub(
             user_pool_id="us-east-1_example",
             user_id="user-123",
@@ -147,7 +186,10 @@ def test_get_existing_user_fails_without_user_attributes() -> None:
 def test_get_existing_user_fails_with_empty_response() -> None:
     repository = CognitoRepository(FakeGetUserCognitoClient({}))
 
-    with pytest.raises(RuntimeError, match="AdminGetUser response is missing UserAttributes"):
+    with pytest.raises(
+        CognitoIdentityValidationError,
+        match="AdminGetUser response is missing UserAttributes",
+    ):
         repository.get_existing_user_sub(
             user_pool_id="us-east-1_example",
             user_id="user-123",
@@ -161,7 +203,7 @@ def test_get_existing_user_fails_without_sub() -> None:
     )
     repository = CognitoRepository(client)
 
-    with pytest.raises(RuntimeError, match="AdminGetUser response is missing sub"):
+    with pytest.raises(CognitoIdentityValidationError, match="missing sub"):
         repository.get_existing_user_sub(
             user_pool_id="us-east-1_example",
             user_id="user-123",
@@ -175,7 +217,7 @@ def test_get_existing_user_fails_without_email() -> None:
     )
     repository = CognitoRepository(client)
 
-    with pytest.raises(RuntimeError, match="AdminGetUser response is missing email"):
+    with pytest.raises(CognitoIdentityValidationError, match="missing email"):
         repository.get_existing_user_sub(
             user_pool_id="us-east-1_example",
             user_id="user-123",

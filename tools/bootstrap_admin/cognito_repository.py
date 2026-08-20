@@ -13,6 +13,14 @@ class CognitoClient(Protocol):
     def admin_disable_user(self, **kwargs: object) -> dict[str, Any]: ...
 
 
+class CognitoIdentityValidationError(RuntimeError):
+    pass
+
+
+class CognitoCreateResultError(RuntimeError):
+    pass
+
+
 class CognitoRepository:
     def __init__(self, client: CognitoClient) -> None:
         self._client = client
@@ -40,12 +48,16 @@ class CognitoRepository:
         user = response.get("User")
 
         if not isinstance(user, dict):
-            raise RuntimeError("Cognito AdminCreateUser response is missing User")
+            raise CognitoCreateResultError(
+                "Cognito AdminCreateUser response is missing User"
+            )
 
         attributes = user.get("Attributes")
 
         if not isinstance(attributes, list):
-            raise RuntimeError("Cognito AdminCreateUser response is missing Attributes")
+            raise CognitoCreateResultError(
+                "Cognito AdminCreateUser response is missing Attributes"
+            )
 
         for attribute in attributes:
             if not isinstance(attribute, dict):
@@ -59,7 +71,7 @@ class CognitoRepository:
             if isinstance(value, str):
                 return value
 
-        raise RuntimeError("Cognito AdminCreateUser response is missing sub")
+        raise CognitoCreateResultError("Cognito AdminCreateUser response is missing sub")
 
     def get_existing_user_sub(
         self,
@@ -76,7 +88,9 @@ class CognitoRepository:
         attributes = response.get("UserAttributes")
 
         if not isinstance(attributes, list):
-            raise RuntimeError("Cognito AdminGetUser response is missing UserAttributes")
+            raise CognitoIdentityValidationError(
+                "Cognito AdminGetUser response is missing UserAttributes"
+            )
 
         cognito_sub: str | None = None
         cognito_email: str | None = None
@@ -97,13 +111,19 @@ class CognitoRepository:
                 cognito_email = value
 
         if cognito_sub is None:
-            raise RuntimeError("Cognito AdminGetUser response is missing sub")
+            raise CognitoIdentityValidationError(
+                "Cognito AdminGetUser response is missing sub"
+            )
 
         if cognito_email is None:
-            raise RuntimeError("Cognito AdminGetUser response is missing email")
+            raise CognitoIdentityValidationError(
+                "Cognito AdminGetUser response is missing email"
+            )
 
         if normalize_email(cognito_email) != normalize_email(expected_email):
-            raise RuntimeError("existing Cognito user email does not match expected email")
+            raise CognitoIdentityValidationError(
+                "existing Cognito user email does not match expected email"
+            )
 
         return cognito_sub
 

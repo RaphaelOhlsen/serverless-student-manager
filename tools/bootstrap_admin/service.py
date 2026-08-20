@@ -1,8 +1,17 @@
+from dataclasses import replace
 from datetime import timedelta
 from typing import Protocol
 
 from tools.bootstrap_admin.audit import build_user_created_audit_event
+from tools.bootstrap_admin.aws_errors import (
+    get_aws_error_code,
+    is_ambiguous_aws_transport_error,
+)
 from tools.bootstrap_admin.clock import Clock, format_utc_rfc3339_millis, to_epoch_seconds
+from tools.bootstrap_admin.cognito_repository import (
+    CognitoCreateResultError,
+    CognitoIdentityValidationError,
+)
 from tools.bootstrap_admin.context import BootstrapContext, parse_bootstrap_context
 from tools.bootstrap_admin.idempotency import (
     build_started_record,
@@ -41,6 +50,14 @@ class IdempotencyRepository(Protocol):
 
 
 class CognitoRepository(Protocol):
+    def get_existing_user_sub(
+        self,
+        *,
+        user_pool_id: str,
+        user_id: str,
+        expected_email: str,
+    ) -> str: ...
+
     def create_suppressed_user(
         self,
         *,
@@ -65,6 +82,42 @@ class ProvisioningRepository(Protocol):
         audit_event: dict[str, object],
         client_request_token: str,
     ) -> None: ...
+
+    def get_user_profile(
+        self,
+        *,
+        users_table_name: str,
+        user_id: str,
+    ) -> dict[str, object] | None: ...
+
+    def get_unique_email(
+        self,
+        *,
+        users_table_name: str,
+        normalized_email: str,
+    ) -> dict[str, object] | None: ...
+
+    def get_cognito_projection(
+        self,
+        *,
+        users_table_name: str,
+        cognito_sub: str,
+    ) -> dict[str, object] | None: ...
+
+    def get_bootstrap_marker(
+        self,
+        *,
+        users_table_name: str,
+    ) -> dict[str, object] | None: ...
+
+    def get_audit_event(
+        self,
+        *,
+        audit_table_name: str,
+        user_id: str,
+        occurred_at: str,
+        event_id: str,
+    ) -> dict[str, object] | None: ...
 
 
 class FirstAdminBootstrapService:
@@ -116,7 +169,11 @@ class FirstAdminBootstrapService:
                 full_name=full_name,
                 normalized_email=normalized_email,
             )
-            return self._replay(context)
+            return self._replay(
+                context,
+                full_name=full_name,
+                normalized_email=normalized_email,
+            )
 
         user_id = validate_uuid4(self._id_generator.new_uuid4())
         event_id = validate_uuid4(self._id_generator.new_uuid4())
@@ -226,7 +283,13 @@ class FirstAdminBootstrapService:
             replayed=False,
         )
 
-    def _replay(self, context: BootstrapContext) -> BootstrapResult:
+    def _replay(
+        self,
+        context: BootstrapContext,
+        *,
+        full_name: str,
+        normalized_email: str,
+    ) -> BootstrapResult:
         if context.state == "COMPLETED":
             return self._replay_result(context, state="COMPLETED")
         if context.state == "COMPENSATED":
@@ -241,24 +304,369 @@ class FirstAdminBootstrapService:
             )
             return self._replay_result(context, state="COMPLETED")
         if context.state == "PERSISTENCE_COMPLETED":
-            self._cognito_repository.resend_invitation(
+            return self._complete_after_persistence(context)
+        if context.state == "STARTED":
+            return self._replay_started(
+                context,
+                full_name=full_name,
+                normalized_email=normalized_email,
+            )
+        return self._replay_cognito_created(
+            context,
+            full_name=full_name,
+            normalized_email=normalized_email,
+        )
+
+    def _replay_cognito_created(
+        self,
+        context: BootstrapContext,
+        *,
+        full_name: str,
+        normalized_email: str,
+    ) -> BootstrapResult:
+        cognito_sub = context.cognito_sub
+        if cognito_sub is None:
+            raise AssertionError("COGNITO_CREATED context requires cognito_sub")
+
+        try:
+            existing_sub = self._get_existing_user_sub(
+                context,
+                normalized_email=normalized_email,
+            )
+        except CognitoIdentityValidationError:
+            return self._mark_reconciliation_required(
+                context,
+                current_state="COGNITO_CREATED",
+            )
+        except Exception as read_error:
+            if get_aws_error_code(read_error) == "UserNotFoundException":
+                return self._mark_reconciliation_required(
+                    context,
+                    current_state="COGNITO_CREATED",
+                )
+            raise
+
+        if existing_sub != cognito_sub:
+            return self._mark_reconciliation_required(
+                context,
+                current_state="COGNITO_CREATED",
+            )
+
+        return self._continue_cognito_created(
+            context,
+            full_name=full_name,
+            normalized_email=normalized_email,
+            cognito_sub=cognito_sub,
+        )
+
+    def _continue_cognito_created(
+        self,
+        context: BootstrapContext,
+        *,
+        full_name: str,
+        normalized_email: str,
+        cognito_sub: str,
+    ) -> BootstrapResult:
+        expected_items = self._build_replay_items(
+            context,
+            full_name=full_name,
+            normalized_email=normalized_email,
+            cognito_sub=cognito_sub,
+        )
+        actual_items = self._read_provisioning_items(
+            context,
+            normalized_email=normalized_email,
+            cognito_sub=cognito_sub,
+        )
+
+        if all(item is None for item in actual_items):
+            self._persist_replay_items(context, expected_items)
+        elif actual_items != expected_items:
+            return self._mark_reconciliation_required(
+                context,
+                current_state="COGNITO_CREATED",
+            )
+
+        self._transition(
+            record_id=context.record_id,
+            current_state="COGNITO_CREATED",
+            next_state="PERSISTENCE_COMPLETED",
+        )
+        return self._complete_after_persistence(context)
+
+    def _build_replay_items(
+        self,
+        context: BootstrapContext,
+        *,
+        full_name: str,
+        normalized_email: str,
+        cognito_sub: str,
+    ) -> tuple[
+        dict[str, object],
+        dict[str, object],
+        dict[str, object],
+        dict[str, object],
+        dict[str, object],
+    ]:
+        return (
+            build_user_profile(
+                user_id=context.user_id,
+                cognito_sub=cognito_sub,
+                full_name=full_name,
+                email=normalized_email,
+                created_at=context.created_at,
+                created_by=context.actor_id,
+            ),
+            build_unique_email(
+                user_id=context.user_id,
+                email=normalized_email,
+            ),
+            build_cognito_projection(
+                user_id=context.user_id,
+                cognito_sub=cognito_sub,
+            ),
+            build_first_admin_bootstrap_marker(
+                user_id=context.user_id,
+                operation_id=context.operation_id,
+                created_at=context.created_at,
+                created_by=context.actor_id,
+            ),
+            build_user_created_audit_event(
+                user_id=context.user_id,
+                actor_id=context.actor_id,
+                event_id=context.event_id,
+                correlation_id=context.correlation_id,
+                occurred_at=context.occurred_at,
+                expires_at=context.audit_expires_at,
+            ),
+        )
+
+    def _read_provisioning_items(
+        self,
+        context: BootstrapContext,
+        *,
+        normalized_email: str,
+        cognito_sub: str,
+    ) -> tuple[
+        dict[str, object] | None,
+        dict[str, object] | None,
+        dict[str, object] | None,
+        dict[str, object] | None,
+        dict[str, object] | None,
+    ]:
+        return (
+            self._provisioning_repository.get_user_profile(
+                users_table_name=self._config.users_table_name,
+                user_id=context.user_id,
+            ),
+            self._provisioning_repository.get_unique_email(
+                users_table_name=self._config.users_table_name,
+                normalized_email=normalized_email,
+            ),
+            self._provisioning_repository.get_cognito_projection(
+                users_table_name=self._config.users_table_name,
+                cognito_sub=cognito_sub,
+            ),
+            self._provisioning_repository.get_bootstrap_marker(
+                users_table_name=self._config.users_table_name,
+            ),
+            self._provisioning_repository.get_audit_event(
+                audit_table_name=self._config.audit_table_name,
+                user_id=context.user_id,
+                occurred_at=context.occurred_at,
+                event_id=context.event_id,
+            ),
+        )
+
+    def _persist_replay_items(
+        self,
+        context: BootstrapContext,
+        items: tuple[
+            dict[str, object],
+            dict[str, object],
+            dict[str, object],
+            dict[str, object],
+            dict[str, object],
+        ],
+    ) -> None:
+        (
+            user_profile,
+            unique_email,
+            cognito_projection,
+            bootstrap_marker,
+            audit_event,
+        ) = items
+        self._provisioning_repository.persist_first_admin_with_audit(
+            users_table_name=self._config.users_table_name,
+            audit_table_name=self._config.audit_table_name,
+            user_profile=user_profile,
+            unique_email=unique_email,
+            cognito_projection=cognito_projection,
+            bootstrap_marker=bootstrap_marker,
+            audit_event=audit_event,
+            client_request_token=context.operation_id,
+        )
+
+    def _complete_after_persistence(
+        self,
+        context: BootstrapContext,
+    ) -> BootstrapResult:
+        self._cognito_repository.resend_invitation(
+            user_pool_id=self._config.user_pool_id,
+            user_id=context.user_id,
+        )
+        self._transition(
+            record_id=context.record_id,
+            current_state="PERSISTENCE_COMPLETED",
+            next_state="INVITATION_SENT",
+        )
+        self._transition(
+            record_id=context.record_id,
+            current_state="INVITATION_SENT",
+            next_state="COMPLETED",
+        )
+        return self._replay_result(context, state="COMPLETED")
+
+    def _replay_started(
+        self,
+        context: BootstrapContext,
+        *,
+        full_name: str,
+        normalized_email: str,
+    ) -> BootstrapResult:
+        try:
+            cognito_sub = self._get_existing_user_sub(
+                context,
+                normalized_email=normalized_email,
+            )
+        except CognitoIdentityValidationError:
+            return self._mark_reconciliation_required(
+                context,
+                current_state="STARTED",
+            )
+        except Exception as read_error:
+            if get_aws_error_code(read_error) != "UserNotFoundException":
+                raise
+        else:
+            return self._adopt_cognito_user(
+                context,
+                full_name=full_name,
+                normalized_email=normalized_email,
+                cognito_sub=cognito_sub,
+            )
+
+        try:
+            cognito_sub = self._cognito_repository.create_suppressed_user(
                 user_pool_id=self._config.user_pool_id,
                 user_id=context.user_id,
+                email=normalized_email,
             )
-            self._transition(
-                record_id=context.record_id,
-                current_state="PERSISTENCE_COMPLETED",
-                next_state="INVITATION_SENT",
+        except Exception as create_error:
+            create_error_code = get_aws_error_code(create_error)
+            if (
+                create_error_code not in {
+                "UsernameExistsException",
+                "AliasExistsException",
+                "InternalErrorException",
+                }
+                and not isinstance(create_error, CognitoCreateResultError)
+                and not is_ambiguous_aws_transport_error(create_error)
+            ):
+                raise
+            return self._reconcile_after_create_error(
+                context,
+                full_name=full_name,
+                normalized_email=normalized_email,
+                create_error=create_error,
             )
-            self._transition(
-                record_id=context.record_id,
-                current_state="INVITATION_SENT",
-                next_state="COMPLETED",
+
+        return self._adopt_cognito_user(
+            context,
+            full_name=full_name,
+            normalized_email=normalized_email,
+            cognito_sub=cognito_sub,
+        )
+
+    def _reconcile_after_create_error(
+        self,
+        context: BootstrapContext,
+        *,
+        full_name: str,
+        normalized_email: str,
+        create_error: Exception,
+    ) -> BootstrapResult:
+        try:
+            cognito_sub = self._get_existing_user_sub(
+                context,
+                normalized_email=normalized_email,
             )
-            return self._replay_result(context, state="COMPLETED")
-        if context.state == "STARTED":
-            raise NotImplementedError("STARTED replay is not implemented")
-        raise NotImplementedError("COGNITO_CREATED replay is not implemented")
+        except CognitoIdentityValidationError:
+            return self._mark_reconciliation_required(
+                context,
+                current_state="STARTED",
+            )
+        except Exception as read_error:
+            if get_aws_error_code(read_error) != "UserNotFoundException":
+                raise
+            if get_aws_error_code(create_error) == "AliasExistsException":
+                return self._mark_reconciliation_required(
+                    context,
+                    current_state="STARTED",
+                )
+            raise create_error from None
+
+        return self._adopt_cognito_user(
+            context,
+            full_name=full_name,
+            normalized_email=normalized_email,
+            cognito_sub=cognito_sub,
+        )
+
+    def _get_existing_user_sub(
+        self,
+        context: BootstrapContext,
+        *,
+        normalized_email: str,
+    ) -> str:
+        return self._cognito_repository.get_existing_user_sub(
+            user_pool_id=self._config.user_pool_id,
+            user_id=context.user_id,
+            expected_email=normalized_email,
+        )
+
+    def _adopt_cognito_user(
+        self,
+        context: BootstrapContext,
+        *,
+        full_name: str,
+        normalized_email: str,
+        cognito_sub: str,
+    ) -> BootstrapResult:
+        self._transition(
+            record_id=context.record_id,
+            current_state="STARTED",
+            next_state="COGNITO_CREATED",
+            cognito_sub=cognito_sub,
+        )
+        return self._continue_cognito_created(
+            replace(context, state="COGNITO_CREATED", cognito_sub=cognito_sub),
+            full_name=full_name,
+            normalized_email=normalized_email,
+            cognito_sub=cognito_sub,
+        )
+
+    def _mark_reconciliation_required(
+        self,
+        context: BootstrapContext,
+        *,
+        current_state: str,
+    ) -> BootstrapResult:
+        self._transition(
+            record_id=context.record_id,
+            current_state=current_state,
+            next_state="RECONCILIATION_REQUIRED",
+        )
+        return self._replay_result(context, state="RECONCILIATION_REQUIRED")
 
     @staticmethod
     def _replay_result(

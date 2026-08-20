@@ -2,14 +2,26 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
+from botocore.exceptions import ConnectionClosedError
 
+from tools.bootstrap_admin.audit import build_user_created_audit_event
+from tools.bootstrap_admin.cognito_repository import (
+    CognitoCreateResultError,
+    CognitoIdentityValidationError,
+)
 from tools.bootstrap_admin.context import InvalidBootstrapRecordError
 from tools.bootstrap_admin.idempotency import (
     IdempotencyConflictError,
     build_started_record,
 )
+from tools.bootstrap_admin.models import (
+    build_cognito_projection,
+    build_first_admin_bootstrap_marker,
+    build_unique_email,
+    build_user_profile,
+)
 from tools.bootstrap_admin.service import FirstAdminBootstrapService
-from tools.bootstrap_admin.service_models import FirstAdminBootstrapConfig
+from tools.bootstrap_admin.service_models import BootstrapResult, FirstAdminBootstrapConfig
 
 _OPERATION_ID = "123e4567-e89b-42d3-a456-426614174000"
 _USER_ID = "223e4567-e89b-42d3-a456-426614174001"
@@ -87,10 +99,42 @@ class FakeIdempotencyRepository:
 
 
 class FakeCognitoRepository:
-    def __init__(self, events: list[str]) -> None:
+    def __init__(
+        self,
+        events: list[str],
+        *,
+        get_outcomes: list[object] | None = None,
+        create_outcomes: list[object] | None = None,
+    ) -> None:
         self._events = events
+        self._get_outcomes = get_outcomes or []
+        self._create_outcomes = create_outcomes or ["cognito-sub-123"]
+        self.get_calls: list[dict[str, str]] = []
         self.create_calls: list[dict[str, str]] = []
         self.resend_calls: list[dict[str, str]] = []
+
+    def get_existing_user_sub(
+        self,
+        *,
+        user_pool_id: str,
+        user_id: str,
+        expected_email: str,
+    ) -> str:
+        self._events.append("cognito:get_existing")
+        self.get_calls.append(
+            {
+                "user_pool_id": user_pool_id,
+                "user_id": user_id,
+                "expected_email": expected_email,
+            }
+        )
+        if not self._get_outcomes:
+            raise AssertionError("unexpected get_existing_user_sub call")
+        outcome = self._get_outcomes.pop(0)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        assert isinstance(outcome, str)
+        return outcome
 
     def create_suppressed_user(
         self,
@@ -107,7 +151,13 @@ class FakeCognitoRepository:
                 "email": email,
             }
         )
-        return "cognito-sub-123"
+        if not self._create_outcomes:
+            raise AssertionError("unexpected create_suppressed_user call")
+        outcome = self._create_outcomes.pop(0)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        assert isinstance(outcome, str)
+        return outcome
 
     def resend_invitation(self, *, user_pool_id: str, user_id: str) -> None:
         self._events.append("cognito:resend")
@@ -123,10 +173,94 @@ class FakeProvisioningRepository:
     def __init__(self, events: list[str]) -> None:
         self._events = events
         self.calls: list[dict[str, Any]] = []
+        self.read_calls: list[dict[str, object]] = []
+        self.user_profile_result: dict[str, object] | None = None
+        self.unique_email_result: dict[str, object] | None = None
+        self.cognito_projection_result: dict[str, object] | None = None
+        self.bootstrap_marker_result: dict[str, object] | None = None
+        self.audit_event_result: dict[str, object] | None = None
+        self.read_error_at: str | None = None
+        self.read_error: Exception | None = None
+        self.persist_error: Exception | None = None
 
     def persist_first_admin_with_audit(self, **kwargs: Any) -> None:
         self._events.append("provisioning:persist")
         self.calls.append(dict(kwargs))
+        if self.persist_error is not None:
+            raise self.persist_error
+
+    def get_user_profile(
+        self,
+        *,
+        users_table_name: str,
+        user_id: str,
+    ) -> dict[str, object] | None:
+        self._record_read(
+            "user_profile",
+            users_table_name=users_table_name,
+            user_id=user_id,
+        )
+        return self.user_profile_result
+
+    def get_unique_email(
+        self,
+        *,
+        users_table_name: str,
+        normalized_email: str,
+    ) -> dict[str, object] | None:
+        self._record_read(
+            "unique_email",
+            users_table_name=users_table_name,
+            normalized_email=normalized_email,
+        )
+        return self.unique_email_result
+
+    def get_cognito_projection(
+        self,
+        *,
+        users_table_name: str,
+        cognito_sub: str,
+    ) -> dict[str, object] | None:
+        self._record_read(
+            "cognito_projection",
+            users_table_name=users_table_name,
+            cognito_sub=cognito_sub,
+        )
+        return self.cognito_projection_result
+
+    def get_bootstrap_marker(
+        self,
+        *,
+        users_table_name: str,
+    ) -> dict[str, object] | None:
+        self._record_read(
+            "bootstrap_marker",
+            users_table_name=users_table_name,
+        )
+        return self.bootstrap_marker_result
+
+    def get_audit_event(
+        self,
+        *,
+        audit_table_name: str,
+        user_id: str,
+        occurred_at: str,
+        event_id: str,
+    ) -> dict[str, object] | None:
+        self._record_read(
+            "audit_event",
+            audit_table_name=audit_table_name,
+            user_id=user_id,
+            occurred_at=occurred_at,
+            event_id=event_id,
+        )
+        return self.audit_event_result
+
+    def _record_read(self, name: str, **kwargs: object) -> None:
+        self._events.append(f"provisioning:get:{name}")
+        self.read_calls.append({"name": name, **kwargs})
+        if self.read_error_at == name and self.read_error is not None:
+            raise self.read_error
 
 
 def _config() -> FirstAdminBootstrapConfig:
@@ -166,9 +300,68 @@ def _existing_record(state: str) -> dict[str, object]:
     return record
 
 
+def _expected_replay_items() -> tuple[
+    dict[str, object],
+    dict[str, object],
+    dict[str, object],
+    dict[str, object],
+    dict[str, object],
+]:
+    return (
+        build_user_profile(
+            user_id=_USER_ID,
+            cognito_sub="cognito-sub-123",
+            full_name="Maria da Silva",
+            email="admin@example.com",
+            created_at="2026-08-20T13:45:12.347Z",
+            created_by="github:original",
+        ),
+        build_unique_email(user_id=_USER_ID, email="admin@example.com"),
+        build_cognito_projection(
+            user_id=_USER_ID,
+            cognito_sub="cognito-sub-123",
+        ),
+        build_first_admin_bootstrap_marker(
+            user_id=_USER_ID,
+            operation_id=_OPERATION_ID,
+            created_at="2026-08-20T13:45:12.347Z",
+            created_by="github:original",
+        ),
+        build_user_created_audit_event(
+            user_id=_USER_ID,
+            actor_id="github:original",
+            event_id=_EVENT_ID,
+            correlation_id=_CORRELATION_ID,
+            occurred_at="2026-08-20T13:45:12.347Z",
+            expires_at=1_795_009_512,
+        ),
+    )
+
+
+def _set_provisioning_results(
+    provisioning: FakeProvisioningRepository,
+    items: tuple[
+        dict[str, object] | None,
+        dict[str, object] | None,
+        dict[str, object] | None,
+        dict[str, object] | None,
+        dict[str, object] | None,
+    ],
+) -> None:
+    (
+        provisioning.user_profile_result,
+        provisioning.unique_email_result,
+        provisioning.cognito_projection_result,
+        provisioning.bootstrap_marker_result,
+        provisioning.audit_event_result,
+    ) = items
+
+
 def _build_service(
     *,
     existing: dict[str, object] | None = None,
+    cognito_get_outcomes: list[object] | None = None,
+    cognito_create_outcomes: list[object] | None = None,
 ) -> tuple[
     FirstAdminBootstrapService,
     list[str],
@@ -189,7 +382,11 @@ def _build_service(
         events,
     )
     idempotency = FakeIdempotencyRepository(events, existing=existing)
-    cognito = FakeCognitoRepository(events)
+    cognito = FakeCognitoRepository(
+        events,
+        get_outcomes=cognito_get_outcomes,
+        create_outcomes=cognito_create_outcomes,
+    )
     provisioning = FakeProvisioningRepository(events)
     service = FirstAdminBootstrapService(
         config=_config(),
@@ -210,6 +407,454 @@ def _build_service(
     )
 
 
+class AwsStyleError(Exception):
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.response = {"Error": {"Code": code}}
+
+
+def _assert_started_replay_has_no_downstream_effects(
+    *,
+    ids: FakeIdGenerator,
+    cognito: FakeCognitoRepository,
+    provisioning: FakeProvisioningRepository,
+) -> None:
+    assert ids.calls == 0
+    assert cognito.resend_calls == []
+    assert provisioning.calls == []
+
+
+def _assert_started_replay_completed(
+    *,
+    result: BootstrapResult,
+    clock: FakeClock,
+    ids: FakeIdGenerator,
+    idempotency: FakeIdempotencyRepository,
+    cognito: FakeCognitoRepository,
+    provisioning: FakeProvisioningRepository,
+) -> None:
+    assert result.state == "COMPLETED"
+    assert result.replayed is True
+    assert clock.calls == 4
+    assert ids.calls == 0
+    assert len(provisioning.calls) == 1
+    assert len(cognito.resend_calls) == 1
+    assert [transition["next_state"] for transition in idempotency.transitions] == [
+        "COGNITO_CREATED",
+        "PERSISTENCE_COMPLETED",
+        "INVITATION_SENT",
+        "COMPLETED",
+    ]
+
+
+def test_started_replay_adopts_existing_compatible_cognito_user() -> None:
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record("STARTED"),
+        cognito_get_outcomes=["reconciled-sub"],
+    )
+
+    result = service.bootstrap_first_admin(
+        full_name="Maria da Silva",
+        email="admin@example.com",
+        operation_id=_OPERATION_ID,
+        actor_id="github:other-executor",
+    )
+
+    assert cognito.get_calls == [
+        {
+            "user_pool_id": "pool-123",
+            "user_id": _USER_ID,
+            "expected_email": "admin@example.com",
+        }
+    ]
+    assert cognito.create_calls == []
+    assert idempotency.transitions[0]["next_state"] == "COGNITO_CREATED"
+    assert idempotency.transitions[0]["cognito_sub"] == "reconciled-sub"
+    _assert_started_replay_completed(
+        result=result,
+        clock=clock,
+        ids=ids,
+        idempotency=idempotency,
+        cognito=cognito,
+        provisioning=provisioning,
+    )
+
+
+def test_started_replay_creates_user_after_confirmed_absence() -> None:
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record("STARTED"),
+        cognito_get_outcomes=[AwsStyleError("UserNotFoundException")],
+        cognito_create_outcomes=["created-sub"],
+    )
+
+    result = service.bootstrap_first_admin(
+        full_name="Maria da Silva",
+        email=" Admin@Example.COM ",
+        operation_id=_OPERATION_ID,
+        actor_id="github:other-executor",
+    )
+
+    assert len(cognito.create_calls) == 1
+    assert cognito.create_calls[0]["email"] == "admin@example.com"
+    assert idempotency.transitions[0]["cognito_sub"] == "created-sub"
+    _assert_started_replay_completed(
+        result=result,
+        clock=clock,
+        ids=ids,
+        idempotency=idempotency,
+        cognito=cognito,
+        provisioning=provisioning,
+    )
+
+
+@pytest.mark.parametrize(
+    "create_error_code",
+    ["UsernameExistsException", "AliasExistsException", "InternalErrorException"],
+)
+def test_started_replay_reconciles_compatible_user_after_create_error(
+    create_error_code: str,
+) -> None:
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record("STARTED"),
+        cognito_get_outcomes=[
+            AwsStyleError("UserNotFoundException"),
+            "reconciled-sub",
+        ],
+        cognito_create_outcomes=[AwsStyleError(create_error_code)],
+    )
+
+    result = service.bootstrap_first_admin(
+        full_name="Maria da Silva",
+        email="admin@example.com",
+        operation_id=_OPERATION_ID,
+        actor_id="github:other-executor",
+    )
+
+    assert len(cognito.create_calls) == 1
+    assert len(cognito.get_calls) == 2
+    assert idempotency.transitions[0]["cognito_sub"] == "reconciled-sub"
+    _assert_started_replay_completed(
+        result=result,
+        clock=clock,
+        ids=ids,
+        idempotency=idempotency,
+        cognito=cognito,
+        provisioning=provisioning,
+    )
+
+
+def test_started_replay_propagates_username_exists_when_user_remains_absent() -> None:
+    original_error = AwsStyleError("UsernameExistsException")
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record("STARTED"),
+        cognito_get_outcomes=[
+            AwsStyleError("UserNotFoundException"),
+            AwsStyleError("UserNotFoundException"),
+        ],
+        cognito_create_outcomes=[original_error],
+    )
+
+    with pytest.raises(AwsStyleError) as raised:
+        service.bootstrap_first_admin(
+            full_name="Maria da Silva",
+            email="admin@example.com",
+            operation_id=_OPERATION_ID,
+            actor_id="github:other-executor",
+        )
+
+    assert raised.value is original_error
+    assert len(cognito.create_calls) == 1
+    assert clock.calls == 0
+    assert idempotency.transitions == []
+    _assert_started_replay_has_no_downstream_effects(
+        ids=ids, cognito=cognito, provisioning=provisioning
+    )
+
+
+def test_started_replay_marks_reconciliation_when_alias_belongs_elsewhere() -> None:
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record("STARTED"),
+        cognito_get_outcomes=[
+            AwsStyleError("UserNotFoundException"),
+            AwsStyleError("UserNotFoundException"),
+        ],
+        cognito_create_outcomes=[AwsStyleError("AliasExistsException")],
+    )
+
+    result = service.bootstrap_first_admin(
+        full_name="Maria da Silva",
+        email="admin@example.com",
+        operation_id=_OPERATION_ID,
+        actor_id="github:other-executor",
+    )
+
+    assert result.state == "RECONCILIATION_REQUIRED"
+    assert result.replayed is True
+    assert len(cognito.create_calls) == 1
+    assert clock.calls == 1
+    assert idempotency.transitions[0]["next_state"] == "RECONCILIATION_REQUIRED"
+    _assert_started_replay_has_no_downstream_effects(
+        ids=ids, cognito=cognito, provisioning=provisioning
+    )
+
+
+@pytest.mark.parametrize(
+    "create_error_code",
+    ["UsernameExistsException", "AliasExistsException"],
+)
+def test_started_replay_marks_reconciliation_for_incompatible_user_after_race(
+    create_error_code: str,
+) -> None:
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record("STARTED"),
+        cognito_get_outcomes=[
+            AwsStyleError("UserNotFoundException"),
+            CognitoIdentityValidationError("existing Cognito user is incompatible"),
+        ],
+        cognito_create_outcomes=[AwsStyleError(create_error_code)],
+    )
+
+    result = service.bootstrap_first_admin(
+        full_name="Maria da Silva",
+        email="admin@example.com",
+        operation_id=_OPERATION_ID,
+        actor_id="github:other-executor",
+    )
+
+    assert result.state == "RECONCILIATION_REQUIRED"
+    assert len(cognito.create_calls) == 1
+    assert len(cognito.get_calls) == 2
+    assert clock.calls == 1
+    assert idempotency.transitions[0]["next_state"] == "RECONCILIATION_REQUIRED"
+    _assert_started_replay_has_no_downstream_effects(
+        ids=ids, cognito=cognito, provisioning=provisioning
+    )
+
+
+def test_started_replay_marks_reconciliation_for_incompatible_existing_user() -> None:
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record("STARTED"),
+        cognito_get_outcomes=[
+            CognitoIdentityValidationError("existing Cognito user is incompatible")
+        ],
+    )
+
+    result = service.bootstrap_first_admin(
+        full_name="Maria da Silva",
+        email="admin@example.com",
+        operation_id=_OPERATION_ID,
+        actor_id="github:other-executor",
+    )
+
+    assert result.state == "RECONCILIATION_REQUIRED"
+    assert cognito.create_calls == []
+    assert clock.calls == 1
+    assert idempotency.transitions[0]["next_state"] == "RECONCILIATION_REQUIRED"
+    _assert_started_replay_has_no_downstream_effects(
+        ids=ids, cognito=cognito, provisioning=provisioning
+    )
+
+
+def test_started_replay_propagates_inconclusive_initial_read() -> None:
+    read_error = AwsStyleError("InternalErrorException")
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record("STARTED"),
+        cognito_get_outcomes=[read_error],
+    )
+
+    with pytest.raises(AwsStyleError) as raised:
+        service.bootstrap_first_admin(
+            full_name="Maria da Silva",
+            email="admin@example.com",
+            operation_id=_OPERATION_ID,
+            actor_id="github:other-executor",
+        )
+
+    assert raised.value is read_error
+    assert cognito.create_calls == []
+    assert clock.calls == 0
+    assert idempotency.transitions == []
+    _assert_started_replay_has_no_downstream_effects(
+        ids=ids, cognito=cognito, provisioning=provisioning
+    )
+
+
+def test_started_replay_propagates_unexpected_runtime_error_from_initial_read() -> None:
+    read_error = RuntimeError("unexpected repository failure")
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record("STARTED"),
+        cognito_get_outcomes=[read_error],
+    )
+
+    with pytest.raises(RuntimeError) as raised:
+        service.bootstrap_first_admin(
+            full_name="Maria da Silva",
+            email="admin@example.com",
+            operation_id=_OPERATION_ID,
+            actor_id="github:other-executor",
+        )
+
+    assert raised.value is read_error
+    assert cognito.create_calls == []
+    assert clock.calls == 0
+    assert idempotency.transitions == []
+    _assert_started_replay_has_no_downstream_effects(
+        ids=ids, cognito=cognito, provisioning=provisioning
+    )
+
+
+@pytest.mark.parametrize(
+    "create_error",
+    [
+        AwsStyleError("InternalErrorException"),
+        ConnectionClosedError(endpoint_url="https://cognito.example"),
+        CognitoCreateResultError("Cognito AdminCreateUser response is missing sub"),
+    ],
+)
+def test_started_replay_reconciles_compatible_user_after_ambiguous_create(
+    create_error: BaseException,
+) -> None:
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record("STARTED"),
+        cognito_get_outcomes=[
+            AwsStyleError("UserNotFoundException"),
+            "reconciled-sub",
+        ],
+        cognito_create_outcomes=[create_error],
+    )
+
+    result = service.bootstrap_first_admin(
+        full_name="Maria da Silva",
+        email="admin@example.com",
+        operation_id=_OPERATION_ID,
+        actor_id="github:other-executor",
+    )
+
+    assert len(cognito.create_calls) == 1
+    assert idempotency.transitions[0]["cognito_sub"] == "reconciled-sub"
+    _assert_started_replay_completed(
+        result=result,
+        clock=clock,
+        ids=ids,
+        idempotency=idempotency,
+        cognito=cognito,
+        provisioning=provisioning,
+    )
+
+
+def test_started_replay_propagates_explicit_throttling_without_reconciliation() -> None:
+    throttling_error = AwsStyleError("TooManyRequestsException")
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record("STARTED"),
+        cognito_get_outcomes=[AwsStyleError("UserNotFoundException")],
+        cognito_create_outcomes=[throttling_error],
+    )
+
+    with pytest.raises(AwsStyleError) as raised:
+        service.bootstrap_first_admin(
+            full_name="Maria da Silva",
+            email="admin@example.com",
+            operation_id=_OPERATION_ID,
+            actor_id="github:other-executor",
+        )
+
+    assert raised.value is throttling_error
+    assert len(cognito.get_calls) == 1
+    assert len(cognito.create_calls) == 1
+    assert clock.calls == 0
+    assert idempotency.transitions == []
+    _assert_started_replay_has_no_downstream_effects(
+        ids=ids, cognito=cognito, provisioning=provisioning
+    )
+
+
+@pytest.mark.parametrize(
+    "create_error",
+    [RuntimeError("unexpected repository failure"), ValueError("invalid value")],
+)
+def test_started_replay_propagates_unclassified_create_error_without_reconciliation(
+    create_error: BaseException,
+) -> None:
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record("STARTED"),
+        cognito_get_outcomes=[AwsStyleError("UserNotFoundException")],
+        cognito_create_outcomes=[create_error],
+    )
+
+    with pytest.raises(type(create_error)) as raised:
+        service.bootstrap_first_admin(
+            full_name="Maria da Silva",
+            email="admin@example.com",
+            operation_id=_OPERATION_ID,
+            actor_id="github:other-executor",
+        )
+
+    assert raised.value is create_error
+    assert len(cognito.get_calls) == 1
+    assert len(cognito.create_calls) == 1
+    assert clock.calls == 0
+    assert idempotency.transitions == []
+    _assert_started_replay_has_no_downstream_effects(
+        ids=ids, cognito=cognito, provisioning=provisioning
+    )
+
+
+def test_started_replay_propagates_ambiguous_create_when_user_remains_absent() -> None:
+    original_error = AwsStyleError("InternalErrorException")
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record("STARTED"),
+        cognito_get_outcomes=[
+            AwsStyleError("UserNotFoundException"),
+            AwsStyleError("UserNotFoundException"),
+        ],
+        cognito_create_outcomes=[original_error],
+    )
+
+    with pytest.raises(AwsStyleError) as raised:
+        service.bootstrap_first_admin(
+            full_name="Maria da Silva",
+            email="admin@example.com",
+            operation_id=_OPERATION_ID,
+            actor_id="github:other-executor",
+        )
+
+    assert raised.value is original_error
+    assert len(cognito.create_calls) == 1
+    assert clock.calls == 0
+    assert idempotency.transitions == []
+    _assert_started_replay_has_no_downstream_effects(
+        ids=ids, cognito=cognito, provisioning=provisioning
+    )
+
+
+def test_started_replay_propagates_inconclusive_reconciliation_read() -> None:
+    read_error = TimeoutError("AdminGetUser timed out")
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record("STARTED"),
+        cognito_get_outcomes=[
+            AwsStyleError("UserNotFoundException"),
+            read_error,
+        ],
+        cognito_create_outcomes=[
+            ConnectionClosedError(endpoint_url="https://cognito.example")
+        ],
+    )
+
+    with pytest.raises(TimeoutError) as raised:
+        service.bootstrap_first_admin(
+            full_name="Maria da Silva",
+            email="admin@example.com",
+            operation_id=_OPERATION_ID,
+            actor_id="github:other-executor",
+        )
+
+    assert raised.value is read_error
+    assert len(cognito.create_calls) == 1
+    assert clock.calls == 0
+    assert idempotency.transitions == []
+    _assert_started_replay_has_no_downstream_effects(
+        ids=ids, cognito=cognito, provisioning=provisioning
+    )
 def test_bootstrap_first_admin_executes_deterministic_happy_path() -> None:
     (
         service,
@@ -496,30 +1141,283 @@ def test_persistence_completed_replay_resends_and_completes_operation() -> None:
     ]
 
 
-@pytest.mark.parametrize("state", ["STARTED", "COGNITO_CREATED"])
-def test_unimplemented_intermediate_state_replay_fails_without_effects(
-    state: str,
-) -> None:
-    service, events, clock, ids, idempotency, cognito, provisioning = _build_service(
-        existing=_existing_record(state)
+def test_cognito_created_replay_persists_when_all_five_items_are_absent() -> None:
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record("COGNITO_CREATED"),
+        cognito_get_outcomes=["cognito-sub-123"],
     )
 
-    with pytest.raises(NotImplementedError, match=rf"{state} replay is not implemented"):
+    result = service.bootstrap_first_admin(
+        full_name="Maria da Silva",
+        email="admin@example.com",
+        operation_id=_OPERATION_ID,
+        actor_id="github:other-executor",
+    )
+
+    expected_items = _expected_replay_items()
+    assert result.state == "COMPLETED"
+    assert result.replayed is True
+    assert ids.calls == 0
+    assert clock.calls == 3
+    assert cognito.get_calls == [
+        {
+            "user_pool_id": "pool-123",
+            "user_id": _USER_ID,
+            "expected_email": "admin@example.com",
+        }
+    ]
+    assert cognito.create_calls == []
+    assert cognito.resend_calls == [
+        {"user_pool_id": "pool-123", "user_id": _USER_ID}
+    ]
+    assert provisioning.read_calls == [
+        {"name": "user_profile", "users_table_name": "users-table", "user_id": _USER_ID},
+        {
+            "name": "unique_email",
+            "users_table_name": "users-table",
+            "normalized_email": "admin@example.com",
+        },
+        {
+            "name": "cognito_projection",
+            "users_table_name": "users-table",
+            "cognito_sub": "cognito-sub-123",
+        },
+        {"name": "bootstrap_marker", "users_table_name": "users-table"},
+        {
+            "name": "audit_event",
+            "audit_table_name": "audit-table",
+            "user_id": _USER_ID,
+            "occurred_at": "2026-08-20T13:45:12.347Z",
+            "event_id": _EVENT_ID,
+        },
+    ]
+    assert provisioning.calls == [
+        {
+            "users_table_name": "users-table",
+            "audit_table_name": "audit-table",
+            "user_profile": expected_items[0],
+            "unique_email": expected_items[1],
+            "cognito_projection": expected_items[2],
+            "bootstrap_marker": expected_items[3],
+            "audit_event": expected_items[4],
+            "client_request_token": _OPERATION_ID,
+        }
+    ]
+    assert expected_items[0]["createdBy"] == "github:original"
+    assert expected_items[0]["updatedBy"] == "github:original"
+    assert expected_items[3] == {
+        "PK": "CONTROL#FIRST_ADMIN_BOOTSTRAP",
+        "SK": "CONTROL",
+        "userId": _USER_ID,
+        "operationId": _OPERATION_ID,
+        "createdAt": "2026-08-20T13:45:12.347Z",
+        "createdBy": "github:original",
+    }
+    assert expected_items[4]["eventId"] == _EVENT_ID
+    assert expected_items[4]["correlationId"] == _CORRELATION_ID
+    assert expected_items[4]["occurredAt"] == "2026-08-20T13:45:12.347Z"
+    assert expected_items[4]["expiresAt"] == 1_795_009_512
+    assert expected_items[4]["actorId"] == "github:original"
+    assert [transition["next_state"] for transition in idempotency.transitions] == [
+        "PERSISTENCE_COMPLETED",
+        "INVITATION_SENT",
+        "COMPLETED",
+    ]
+
+
+def test_cognito_created_replay_accepts_five_exact_items_without_transaction() -> None:
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record("COGNITO_CREATED"),
+        cognito_get_outcomes=["cognito-sub-123"],
+    )
+    _set_provisioning_results(provisioning, _expected_replay_items())
+
+    result = service.bootstrap_first_admin(
+        full_name="Maria da Silva",
+        email="admin@example.com",
+        operation_id=_OPERATION_ID,
+        actor_id="github:other-executor",
+    )
+
+    assert result.state == "COMPLETED"
+    assert result.replayed is True
+    assert ids.calls == 0
+    assert clock.calls == 3
+    assert provisioning.calls == []
+    assert cognito.resend_calls == [
+        {"user_pool_id": "pool-123", "user_id": _USER_ID}
+    ]
+    assert [transition["next_state"] for transition in idempotency.transitions] == [
+        "PERSISTENCE_COMPLETED",
+        "INVITATION_SENT",
+        "COMPLETED",
+    ]
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        "only-user",
+        "audit-absent",
+        "marker-incompatible",
+        "user-incompatible",
+        "audit-incompatible",
+        "absent-and-incompatible",
+    ],
+)
+def test_cognito_created_replay_marks_partial_or_incompatible_items_for_reconciliation(
+    scenario: str,
+) -> None:
+    expected = list(_expected_replay_items())
+    if scenario == "only-user":
+        actual: list[dict[str, object] | None] = [expected[0], None, None, None, None]
+    else:
+        actual = list(expected)
+        if scenario == "audit-absent":
+            actual[4] = None
+        elif scenario == "marker-incompatible":
+            actual[3] = {**expected[3], "operationId": _CORRELATION_ID}
+        elif scenario == "user-incompatible":
+            actual[0] = {**expected[0], "status": "ACTIVE"}
+        elif scenario == "audit-incompatible":
+            actual[4] = {**expected[4], "result": "FAILURE"}
+        else:
+            actual[0] = None
+            actual[3] = {**expected[3], "createdBy": "github:other"}
+
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record("COGNITO_CREATED"),
+        cognito_get_outcomes=["cognito-sub-123"],
+    )
+    _set_provisioning_results(provisioning, tuple(actual))
+
+    result = service.bootstrap_first_admin(
+        full_name="Maria da Silva",
+        email="admin@example.com",
+        operation_id=_OPERATION_ID,
+        actor_id="github:other-executor",
+    )
+
+    assert result.state == "RECONCILIATION_REQUIRED"
+    assert result.replayed is True
+    assert ids.calls == 0
+    assert clock.calls == 1
+    assert provisioning.calls == []
+    assert cognito.create_calls == []
+    assert cognito.resend_calls == []
+    assert [transition["next_state"] for transition in idempotency.transitions] == [
+        "RECONCILIATION_REQUIRED"
+    ]
+
+
+@pytest.mark.parametrize(
+    "cognito_outcome",
+    [
+        "different-sub",
+        CognitoIdentityValidationError("identity is incompatible"),
+        AwsStyleError("UserNotFoundException"),
+    ],
+)
+def test_cognito_created_replay_marks_cognito_inconsistency_before_dynamo(
+    cognito_outcome: object,
+) -> None:
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record("COGNITO_CREATED"),
+        cognito_get_outcomes=[cognito_outcome],
+    )
+
+    result = service.bootstrap_first_admin(
+        full_name="Maria da Silva",
+        email="admin@example.com",
+        operation_id=_OPERATION_ID,
+        actor_id="github:other-executor",
+    )
+
+    assert result.state == "RECONCILIATION_REQUIRED"
+    assert ids.calls == 0
+    assert clock.calls == 1
+    assert provisioning.read_calls == []
+    assert provisioning.calls == []
+    assert cognito.create_calls == []
+    assert cognito.resend_calls == []
+    assert idempotency.transitions[0]["current_state"] == "COGNITO_CREATED"
+    assert idempotency.transitions[0]["next_state"] == "RECONCILIATION_REQUIRED"
+
+
+def test_cognito_created_replay_propagates_inconclusive_cognito_read() -> None:
+    read_error = AwsStyleError("InternalErrorException")
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record("COGNITO_CREATED"),
+        cognito_get_outcomes=[read_error],
+    )
+
+    with pytest.raises(AwsStyleError) as raised:
         service.bootstrap_first_admin(
             full_name="Maria da Silva",
             email="admin@example.com",
             operation_id=_OPERATION_ID,
-            actor_id="github:raphael",
+            actor_id="github:other-executor",
         )
 
-    assert events == ["idempotency:get"]
-    assert clock.calls == 0
+    assert raised.value is read_error
     assert ids.calls == 0
-    assert idempotency.started_records == []
+    assert clock.calls == 0
+    assert provisioning.read_calls == []
+    assert provisioning.calls == []
     assert idempotency.transitions == []
     assert cognito.create_calls == []
     assert cognito.resend_calls == []
+
+
+def test_cognito_created_replay_propagates_dynamo_read_failure_without_effects() -> None:
+    read_error = RuntimeError("consistent read failed")
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record("COGNITO_CREATED"),
+        cognito_get_outcomes=["cognito-sub-123"],
+    )
+    provisioning.read_error_at = "cognito_projection"
+    provisioning.read_error = read_error
+
+    with pytest.raises(RuntimeError) as raised:
+        service.bootstrap_first_admin(
+            full_name="Maria da Silva",
+            email="admin@example.com",
+            operation_id=_OPERATION_ID,
+            actor_id="github:other-executor",
+        )
+
+    assert raised.value is read_error
+    assert ids.calls == 0
+    assert clock.calls == 0
+    assert len(provisioning.read_calls) == 3
     assert provisioning.calls == []
+    assert idempotency.transitions == []
+    assert cognito.resend_calls == []
+
+
+def test_cognito_created_replay_propagates_transaction_failure_without_advancing() -> None:
+    transaction_error = RuntimeError("transaction failed")
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record("COGNITO_CREATED"),
+        cognito_get_outcomes=["cognito-sub-123"],
+    )
+    provisioning.persist_error = transaction_error
+
+    with pytest.raises(RuntimeError) as raised:
+        service.bootstrap_first_admin(
+            full_name="Maria da Silva",
+            email="admin@example.com",
+            operation_id=_OPERATION_ID,
+            actor_id="github:other-executor",
+        )
+
+    assert raised.value is transaction_error
+    assert ids.calls == 0
+    assert clock.calls == 0
+    assert len(provisioning.read_calls) == 5
+    assert len(provisioning.calls) == 1
+    assert idempotency.transitions == []
+    assert cognito.resend_calls == []
 
 
 def test_replay_payload_mismatch_fails_before_any_effect() -> None:
