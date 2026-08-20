@@ -7,6 +7,11 @@ BootstrapTerminalState = Literal[
     "RECONCILIATION_REQUIRED",
 ]
 
+ResumeInvitationTerminalState = Literal[
+    "COMPLETED",
+    "RECONCILIATION_REQUIRED",
+]
+
 
 @dataclass(frozen=True)
 class FirstAdminBootstrapConfig:
@@ -36,4 +41,11 @@ class BootstrapResult:
     operation_id: str
     user_id: str
     state: BootstrapTerminalState
+    replayed: bool
+
+
+@dataclass(frozen=True)
+class ResumeInvitationResult:
+    operation_id: str
+    state: ResumeInvitationTerminalState
     replayed: bool
