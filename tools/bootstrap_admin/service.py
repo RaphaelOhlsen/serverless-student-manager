@@ -215,6 +215,7 @@ class FirstAdminBootstrapService:
         )
         self._transition(
             record_id=record_id,
+            operation_id=operation_id,
             current_state="STARTED",
             next_state="COGNITO_CREATED",
             cognito_sub=cognito_sub,
@@ -263,6 +264,7 @@ class FirstAdminBootstrapService:
 
         self._transition(
             record_id=record_id,
+            operation_id=operation_id,
             current_state="COGNITO_CREATED",
             next_state="PERSISTENCE_COMPLETED",
         )
@@ -272,11 +274,13 @@ class FirstAdminBootstrapService:
         )
         self._transition(
             record_id=record_id,
+            operation_id=operation_id,
             current_state="PERSISTENCE_COMPLETED",
             next_state="INVITATION_SENT",
         )
         self._transition(
             record_id=record_id,
+            operation_id=operation_id,
             current_state="INVITATION_SENT",
             next_state="COMPLETED",
         )
@@ -304,6 +308,7 @@ class FirstAdminBootstrapService:
         if context.state == "INVITATION_SENT":
             self._transition(
                 record_id=context.record_id,
+                operation_id=context.operation_id,
                 current_state="INVITATION_SENT",
                 next_state="COMPLETED",
             )
@@ -422,6 +427,7 @@ class FirstAdminBootstrapService:
 
         self._transition(
             record_id=context.record_id,
+            operation_id=context.operation_id,
             current_state="COGNITO_CREATED",
             next_state="PERSISTENCE_COMPLETED",
         )
@@ -708,11 +714,13 @@ class FirstAdminBootstrapService:
         )
         self._transition(
             record_id=context.record_id,
+            operation_id=context.operation_id,
             current_state="PERSISTENCE_COMPLETED",
             next_state="INVITATION_SENT",
         )
         self._transition(
             record_id=context.record_id,
+            operation_id=context.operation_id,
             current_state="INVITATION_SENT",
             next_state="COMPLETED",
         )
@@ -835,6 +843,7 @@ class FirstAdminBootstrapService:
     ) -> BootstrapResult:
         self._transition(
             record_id=context.record_id,
+            operation_id=context.operation_id,
             current_state="STARTED",
             next_state="COGNITO_CREATED",
             cognito_sub=cognito_sub,
@@ -854,6 +863,7 @@ class FirstAdminBootstrapService:
     ) -> BootstrapResult:
         self._transition(
             record_id=context.record_id,
+            operation_id=context.operation_id,
             current_state=current_state,
             next_state="RECONCILIATION_REQUIRED",
         )
@@ -862,6 +872,7 @@ class FirstAdminBootstrapService:
     def _mark_compensated(self, context: BootstrapContext) -> BootstrapResult:
         self._transition(
             record_id=context.record_id,
+            operation_id=context.operation_id,
             current_state="COGNITO_CREATED",
             next_state="COMPENSATED",
         )
@@ -884,26 +895,69 @@ class FirstAdminBootstrapService:
         self,
         *,
         record_id: str,
+        operation_id: str,
         current_state: str,
         next_state: str,
         cognito_sub: str | None = None,
     ) -> None:
         updated_at = format_utc_rfc3339_millis(self._clock.now())
-        if cognito_sub is None:
+        try:
+            if cognito_sub is None:
+                self._idempotency_repository.transition_state(
+                    record_id=record_id,
+                    operation="bootstrap-admin",
+                    current_state=current_state,
+                    next_state=next_state,
+                    updated_at=updated_at,
+                )
+                return
+
             self._idempotency_repository.transition_state(
                 record_id=record_id,
                 operation="bootstrap-admin",
                 current_state=current_state,
                 next_state=next_state,
                 updated_at=updated_at,
+                cognito_sub=cognito_sub,
             )
-            return
+        except Exception as transition_error:
+            if (
+                get_aws_error_code(transition_error)
+                != "ConditionalCheckFailedException"
+                and not is_ambiguous_dynamodb_write_error(transition_error)
+            ):
+                raise
+            self._reconcile_transition_error(
+                transition_error,
+                record_id=record_id,
+                operation_id=operation_id,
+                next_state=next_state,
+                cognito_sub=cognito_sub,
+            )
 
-        self._idempotency_repository.transition_state(
-            record_id=record_id,
-            operation="bootstrap-admin",
-            current_state=current_state,
-            next_state=next_state,
-            updated_at=updated_at,
-            cognito_sub=cognito_sub,
+    def _reconcile_transition_error(
+        self,
+        transition_error: Exception,
+        *,
+        record_id: str,
+        operation_id: str,
+        next_state: str,
+        cognito_sub: str | None,
+    ) -> None:
+        record = self._idempotency_repository.get(record_id)
+        if record is None:
+            raise transition_error
+
+        reconciled_context = parse_bootstrap_context(
+            record,
+            expected_environment=self._config.environment,
+            expected_operation_id=operation_id,
         )
+        if reconciled_context.state != next_state:
+            raise transition_error
+        if (
+            next_state == "COGNITO_CREATED"
+            and cognito_sub is not None
+            and reconciled_context.cognito_sub != cognito_sub
+        ):
+            raise transition_error

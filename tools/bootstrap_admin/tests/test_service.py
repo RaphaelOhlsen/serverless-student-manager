@@ -59,9 +59,13 @@ class FakeIdempotencyRepository:
         events: list[str],
         *,
         existing: dict[str, object] | None = None,
+        get_outcomes: list[object] | None = None,
+        transition_outcomes: list[object] | None = None,
     ) -> None:
         self._events = events
         self._existing = existing
+        self._get_outcomes = get_outcomes or []
+        self._transition_outcomes = transition_outcomes or []
         self.get_calls: list[str] = []
         self.started_records: list[dict[str, object]] = []
         self.transitions: list[dict[str, object]] = []
@@ -69,6 +73,13 @@ class FakeIdempotencyRepository:
     def get(self, record_id: str) -> dict[str, object] | None:
         self._events.append("idempotency:get")
         self.get_calls.append(record_id)
+        if self._get_outcomes:
+            outcome = self._get_outcomes.pop(0)
+            if isinstance(outcome, BaseException):
+                raise outcome
+            if outcome is None or isinstance(outcome, dict):
+                return outcome
+            raise AssertionError("unsupported idempotency get outcome")
         return self._existing
 
     def create_started(self, record: dict[str, object]) -> None:
@@ -96,6 +107,12 @@ class FakeIdempotencyRepository:
         if cognito_sub is not None:
             call["cognito_sub"] = cognito_sub
         self.transitions.append(call)
+        if self._transition_outcomes:
+            outcome = self._transition_outcomes.pop(0)
+            if isinstance(outcome, BaseException):
+                raise outcome
+            if outcome is not None:
+                raise AssertionError("unsupported transition outcome")
 
 
 class FakeCognitoRepository:
@@ -433,6 +450,8 @@ def _set_provisioning_results(
 def _build_service(
     *,
     existing: dict[str, object] | None = None,
+    idempotency_get_outcomes: list[object] | None = None,
+    transition_outcomes: list[object] | None = None,
     cognito_get_outcomes: list[object] | None = None,
     cognito_create_outcomes: list[object] | None = None,
     cognito_delete_outcomes: list[object] | None = None,
@@ -456,7 +475,12 @@ def _build_service(
         [_USER_ID, _EVENT_ID, _CORRELATION_ID],
         events,
     )
-    idempotency = FakeIdempotencyRepository(events, existing=existing)
+    idempotency = FakeIdempotencyRepository(
+        events,
+        existing=existing,
+        get_outcomes=idempotency_get_outcomes,
+        transition_outcomes=transition_outcomes,
+    )
     cognito = FakeCognitoRepository(
         events,
         get_outcomes=cognito_get_outcomes,
@@ -2156,3 +2180,235 @@ def test_invalid_input_fails_before_any_dependency_call(
     assert cognito.create_calls == []
     assert cognito.resend_calls == []
     assert provisioning.calls == []
+
+
+@pytest.mark.parametrize(
+    "transition_error",
+    [
+        AwsStyleError("InternalServerError"),
+        ConnectionClosedError(endpoint_url="https://dynamodb.example"),
+        AwsStyleError("ConditionalCheckFailedException"),
+    ],
+)
+def test_completed_cas_error_accepts_consistently_confirmed_next_state(
+    transition_error: BaseException,
+) -> None:
+    completed = _existing_record("COMPLETED")
+    completed["updatedAt"] = "2026-08-20T14:55:00.000Z"
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        idempotency_get_outcomes=[_existing_record("INVITATION_SENT"), completed],
+        transition_outcomes=[transition_error],
+    )
+
+    result = service.bootstrap_first_admin(
+        full_name="Maria da Silva",
+        email="admin@example.com",
+        operation_id=_OPERATION_ID,
+        actor_id="github:other-executor",
+    )
+
+    assert result.state == "COMPLETED"
+    assert result.replayed is True
+    assert len(idempotency.transitions) == 1
+    assert len(idempotency.get_calls) == 2
+    assert clock.calls == 1
+    assert ids.calls == 0
+    assert cognito.create_calls == []
+    assert cognito.resend_calls == []
+    assert provisioning.calls == []
+
+
+@pytest.mark.parametrize(
+    ("reconciled_state", "post_error_record"),
+    [
+        ("INVITATION_SENT", _existing_record("INVITATION_SENT")),
+        ("PERSISTENCE_COMPLETED", _existing_record("PERSISTENCE_COMPLETED")),
+        ("missing", None),
+    ],
+)
+def test_completed_cas_error_propagates_when_next_state_is_not_confirmed(
+    reconciled_state: str,
+    post_error_record: dict[str, object] | None,
+) -> None:
+    transition_error = AwsStyleError("InternalServerError")
+    service, _, _, _, idempotency, cognito, _ = _build_service(
+        idempotency_get_outcomes=[
+            _existing_record("INVITATION_SENT"),
+            post_error_record,
+        ],
+        transition_outcomes=[transition_error],
+    )
+
+    with pytest.raises(AwsStyleError) as raised:
+        service.bootstrap_first_admin(
+            full_name="Maria da Silva",
+            email="admin@example.com",
+            operation_id=_OPERATION_ID,
+            actor_id="github:other-executor",
+        )
+
+    assert raised.value is transition_error
+    assert reconciled_state in {"INVITATION_SENT", "PERSISTENCE_COMPLETED", "missing"}
+    assert len(idempotency.transitions) == 1
+    assert cognito.resend_calls == []
+
+
+def test_cas_reconciliation_propagates_read_error() -> None:
+    transition_error = AwsStyleError("InternalServerError")
+    read_error = AwsStyleError("InternalServerError")
+    service, _, _, _, idempotency, _, _ = _build_service(
+        idempotency_get_outcomes=[_existing_record("INVITATION_SENT"), read_error],
+        transition_outcomes=[transition_error],
+    )
+
+    with pytest.raises(AwsStyleError) as raised:
+        service.bootstrap_first_admin(
+            full_name="Maria da Silva",
+            email="admin@example.com",
+            operation_id=_OPERATION_ID,
+            actor_id="github:other-executor",
+        )
+
+    assert raised.value is read_error
+    assert len(idempotency.transitions) == 1
+
+
+def test_cas_reconciliation_rejects_structurally_invalid_record() -> None:
+    transition_error = AwsStyleError("InternalServerError")
+    invalid_record = _existing_record("COMPLETED")
+    invalid_record["operationId"] = "invalid"
+    service, _, _, _, idempotency, _, _ = _build_service(
+        idempotency_get_outcomes=[_existing_record("INVITATION_SENT"), invalid_record],
+        transition_outcomes=[transition_error],
+    )
+
+    with pytest.raises(InvalidBootstrapRecordError):
+        service.bootstrap_first_admin(
+            full_name="Maria da Silva",
+            email="admin@example.com",
+            operation_id=_OPERATION_ID,
+            actor_id="github:other-executor",
+        )
+
+    assert len(idempotency.transitions) == 1
+
+
+def test_non_ambiguous_cas_error_propagates_without_reconciliation_read() -> None:
+    transition_error = AwsStyleError("ValidationException")
+    service, _, _, _, idempotency, _, _ = _build_service(
+        existing=_existing_record("INVITATION_SENT"),
+        transition_outcomes=[transition_error],
+    )
+
+    with pytest.raises(AwsStyleError) as raised:
+        service.bootstrap_first_admin(
+            full_name="Maria da Silva",
+            email="admin@example.com",
+            operation_id=_OPERATION_ID,
+            actor_id="github:other-executor",
+        )
+
+    assert raised.value is transition_error
+    assert len(idempotency.get_calls) == 1
+    assert len(idempotency.transitions) == 1
+
+
+@pytest.mark.parametrize(
+    ("transition_error", "persisted_sub", "succeeds"),
+    [
+        (AwsStyleError("InternalServerError"), "cognito-sub-123", True),
+        (
+            AwsStyleError("ConditionalCheckFailedException"),
+            "cognito-sub-123",
+            True,
+        ),
+        (AwsStyleError("InternalServerError"), "different-sub", False),
+        (
+            AwsStyleError("ConditionalCheckFailedException"),
+            "different-sub",
+            False,
+        ),
+    ],
+)
+def test_cognito_created_cas_reconciliation_requires_matching_sub(
+    transition_error: BaseException,
+    persisted_sub: str,
+    succeeds: bool,
+) -> None:
+    reconciled = _existing_record("COGNITO_CREATED")
+    reconciled["cognitoSub"] = persisted_sub
+    reconciled["updatedAt"] = "2026-08-20T14:55:00.000Z"
+    service, _, _, ids, idempotency, cognito, provisioning = _build_service(
+        idempotency_get_outcomes=[_existing_record("STARTED"), reconciled],
+        transition_outcomes=[transition_error],
+        cognito_get_outcomes=["cognito-sub-123"],
+    )
+    _set_provisioning_results(provisioning, _expected_replay_items())
+
+    if succeeds:
+        result = service.bootstrap_first_admin(
+            full_name="Maria da Silva",
+            email="admin@example.com",
+            operation_id=_OPERATION_ID,
+            actor_id="github:other-executor",
+        )
+        assert result.state == "COMPLETED"
+    else:
+        with pytest.raises(type(transition_error)) as raised:
+            service.bootstrap_first_admin(
+                full_name="Maria da Silva",
+                email="admin@example.com",
+                operation_id=_OPERATION_ID,
+                actor_id="github:other-executor",
+            )
+        assert raised.value is transition_error
+        assert provisioning.read_calls == []
+        assert cognito.resend_calls == []
+
+    assert len(idempotency.transitions) == (4 if succeeds else 1)
+    assert idempotency.transitions[0]["next_state"] == "COGNITO_CREATED"
+    assert ids.calls == 0
+
+
+@pytest.mark.parametrize(
+    ("target_state", "cognito_get_outcomes", "provisioning_items"),
+    [
+        ("COMPENSATED", ["cognito-sub-123"], (None, None, None, _safe_foreign_marker(), None)),
+        (
+            "RECONCILIATION_REQUIRED",
+            [AwsStyleError("UserNotFoundException")],
+            (None, None, None, None, None),
+        ),
+    ],
+)
+def test_terminal_cas_error_accepts_confirmed_terminal_state(
+    target_state: str,
+    cognito_get_outcomes: list[object],
+    provisioning_items: tuple[
+        dict[str, object] | None,
+        dict[str, object] | None,
+        dict[str, object] | None,
+        dict[str, object] | None,
+        dict[str, object] | None,
+    ],
+) -> None:
+    transition_error = AwsStyleError("InternalServerError")
+    reconciled = _existing_record(target_state)
+    service, _, _, ids, idempotency, _, provisioning = _build_service(
+        idempotency_get_outcomes=[_existing_record("COGNITO_CREATED"), reconciled],
+        transition_outcomes=[transition_error],
+        cognito_get_outcomes=cognito_get_outcomes,
+    )
+    _set_provisioning_results(provisioning, provisioning_items)
+
+    result = service.bootstrap_first_admin(
+        full_name="Maria da Silva",
+        email="admin@example.com",
+        operation_id=_OPERATION_ID,
+        actor_id="github:other-executor",
+    )
+
+    assert result.state == target_state
+    assert result.replayed is True
+    assert len(idempotency.transitions) == 1
+    assert ids.calls == 0
