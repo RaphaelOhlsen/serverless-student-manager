@@ -1,6 +1,6 @@
 # Modelo de dados
 
-**Versão:** 2.6
+**Versão:** 2.7
 **Status:** Approved
 
 ## 1. Estratégia
@@ -126,6 +126,39 @@ O contador é protegido transacionalmente.
 
 Usuários com status `INVITED` não participam do contador.
 
+### Trava singleton do primeiro Administrador
+
+```text
+PK = CONTROL#FIRST_ADMIN_BOOTSTRAP
+SK = CONTROL
+```
+
+Atributos:
+
+```text
+userId
+operationId
+createdAt
+createdBy
+```
+
+O marker:
+
+- é permanente e não possui TTL;
+- é criado exclusivamente pela transação do bootstrap inicial;
+- nunca é removido automaticamente;
+- impede que outra operação materialize um segundo "primeiro Admin".
+
+O bootstrap inicial usa uma única `TransactWriteItems` com cinco operações `Put` atômicas:
+
+1. USER profile;
+2. UNIQUE EMAIL;
+3. COGNITO projection;
+4. `CONTROL#FIRST_ADMIN_BOOTSTRAP / CONTROL`;
+5. audit event `USER_CREATED`.
+
+Todos os itens impedem sobrescrita por condição de inexistência. O item `CONTROL#ACTIVE_ADMIN_COUNT / CONTROL` não participa enquanto o usuário estiver `INVITED`.
+
 ### GSI
 
 ```text
@@ -208,11 +241,50 @@ Tabela técnica compartilhada.
 
 Objetivos:
 
-- estado `INPROGRESS`/`COMPLETE`;
+- protocolo de estados compatível com a origem e a operação;
 - hash de payload;
 - resposta técnica mínima;
 - TTL de 24 horas;
 - proteção de writes repetidos.
+
+A tabela é compartilhada, mas suas máquinas de estado não são artificialmente unificadas:
+
+- fluxos HTTP podem utilizar `INPROGRESS` e `COMPLETE`, conforme ADR-012;
+- operações não HTTP utilizam máquinas de estados próprias, conforme ADR-018 e suas especializações;
+- `bootstrap-admin` utiliza os estados e as transições normais e excepcionais definidos pela ADR-024;
+- `resume-first-admin-invitation` utiliza `STARTED`, `COMPLETED` e `RECONCILIATION_REQUIRED`, conforme ADR-024.
+
+### Bootstrap do primeiro Administrador
+
+O registro idempotente de `bootstrap-admin` preserva:
+
+```text
+userId
+eventId
+correlationId
+operationId
+payloadHash
+occurredAt
+auditExpiresAt
+actorId
+createdAt
+updatedAt
+expiration
+```
+
+`fullName` e e-mail não são duplicados nesse registro. Em replay, o payload original é reapresentado, normalizado deterministicamente e validado pelo `payloadHash` antes de qualquer reconstrução ou efeito.
+
+O token da transação é derivado deterministicamente:
+
+```text
+ClientRequestToken = operationId
+```
+
+`clientRequestToken` não é persistido como atributo separado.
+
+Os IDs técnicos são UUIDv4 canônicos e os timestamps de criação usam UTC RFC3339 com precisão de milissegundos e sufixo `Z`, conforme ADR-024.
+
+Após o TTL de 24 horas, o marker permanente continua protegendo contra um novo bootstrap. A operação `resume-first-admin-invitation` pode retomar somente o convite do mesmo `ADMIN` em estado `INVITED`, depois da reconciliação completa, sem criar ou alterar USER, UNIQUE EMAIL, COGNITO projection ou marker.
 
 ## 6. Consistência
 
@@ -235,3 +307,5 @@ authVersion          é incrementado
 ```
 
 O histórico de auditoria não é reescrito.
+
+Essa recuperação da ADR-019 é exclusiva para um `ADMIN` `ACTIVE` sem acesso ao TOTP e não se confunde com `resume-first-admin-invitation`, restrita ao primeiro Admin ainda `INVITED`.

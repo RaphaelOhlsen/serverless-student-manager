@@ -1,6 +1,6 @@
 # Arquitetura de segurança
 
-**Versão:** 2.6
+**Versão:** 2.7
 **Status:** Approved
 
 ## 1. Autenticação
@@ -75,6 +75,8 @@ A aplicação usa `role` e `status` atuais no DynamoDB.
 
 O primeiro Administrador é criado por workflow manual com OIDC e função temporária associada ao GitHub Environment `dev-bootstrap-admin`.
 
+Se o primeiro Administrador permanecer `INVITED` depois da expiração do contexto idempotente original, `resume-first-admin-invitation` poderá somente reenviar o convite para a identidade existente e integralmente reconciliada. O procedimento não cria outro usuário, não substitui a identidade e não altera o marker singleton.
+
 A recuperação excepcional do único Administrador usa roles operacionais independentes e GitHub Environments próprios:
 
 - `dev-admin-recovery`;
@@ -109,3 +111,5 @@ Cognito anterior, criação de nova identidade, atualização de `COGNITO#<sub>`
 incremento de `authVersion`, auditoria e novo `MFA_SETUP`.
 
 O procedimento não reduz a política global de MFA.
+
+Essa recuperação é exclusiva para `ADMIN` `ACTIVE` sem acesso ao TOTP. Ela não se confunde com `resume-first-admin-invitation`, que se aplica somente ao primeiro Admin ainda `INVITED`.

@@ -83,7 +83,7 @@ Não executar sem autorização humana:
 - CI/CD: GitHub Actions com OIDC.
 - Observabilidade: CloudWatch.
 - Ambientes: `dev` e `prod`, inicialmente na mesma conta AWS.
-- ADR-001 a ADR-023: `Approved`.
+- ADR-001 a ADR-024: `Approved`.
 
 ## 6. Segurança
 
@@ -162,7 +162,7 @@ Uma nova decisão arquitetural deve ser registrada em uma nova ADR.
 
 ## 11. Engenharia pronta
 
-A documentação canônica v2.4 está classificada como `Engineering Ready`.
+A documentação canônica v2.7 está classificada como `Engineering Ready`.
 
 Isso não autoriza automaticamente deploy, `terraform apply`, alterações destrutivas,
 mudanças de produção ou decisões arquiteturais novas. Essas ações continuam sujeitas

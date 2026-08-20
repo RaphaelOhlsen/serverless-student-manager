@@ -38,6 +38,19 @@ target      = dataset-v1
 operationId = <uuid>
 ```
 
+### Retomada do convite do primeiro Administrador
+
+```text
+environment = dev
+operation   = resume-first-admin-invitation
+target      = first-admin
+operationId = <uuid-v4 próprio da retomada>
+```
+
+Essa operação reutiliza o mesmo `operationId` em todos os retries da mesma retomada e pode transicionar apenas de `STARTED` para `COMPLETED`. As transições são validadas por `operation`; essa regra não autoriza globalmente `STARTED → COMPLETED`.
+
+Ela se aplica somente ao primeiro Admin `INVITED` com marker, USER, projeção e identidade Cognito reconciliados. Não substitui a recuperação da ADR-019 para o único Admin `ACTIVE` sem TOTP.
+
 ### Reset administrativo de MFA
 
 ```text

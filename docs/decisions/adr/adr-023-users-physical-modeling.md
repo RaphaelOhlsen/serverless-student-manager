@@ -394,3 +394,9 @@ Devem existir testes para:
 13. listagem paginada pelo GSI;
 14. pesquisa por prefixo de nome;
 15. ausência de incremento do contador de Administradores ativos para usuário `INVITED`.
+
+## Refinamento posterior — ADR-024
+
+A **ADR-024 — Protocolo determinístico e trava singleton do bootstrap do primeiro Admin**, aprovada em 2026-08-20, refina este modelo exclusivamente para o bootstrap inicial ao adicionar o item permanente `CONTROL#FIRST_ADMIN_BOOTSTRAP / CONTROL`.
+
+Nesse fluxo especial, a transação passa de quatro para cinco itens. A criação normal de usuários preserva os quatro itens originalmente definidos nesta ADR e não utiliza o marker singleton.

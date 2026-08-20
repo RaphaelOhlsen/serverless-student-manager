@@ -203,3 +203,9 @@ Devem existir testes para:
 8. falha da compensação e fallback para disable;
 9. falha no `RESEND`;
 10. reenvio posterior do convite.
+
+## Refinamento posterior — ADR-024
+
+A **ADR-024 — Protocolo determinístico e trava singleton do bootstrap do primeiro Admin**, aprovada em 2026-08-20, complementa esta decisão exclusivamente para o bootstrap inicial. Nesse fluxo especial, a transação passa de quatro para cinco itens com a inclusão de `CONTROL#FIRST_ADMIN_BOOTSTRAP / CONTROL`, e a reconciliação confirma também o marker e o audit event.
+
+O provisionamento normal de usuários preserva a transação original de quatro itens descrita nesta ADR e não utiliza o marker singleton do primeiro Admin.

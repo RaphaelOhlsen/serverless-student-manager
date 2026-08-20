@@ -1,8 +1,8 @@
 # Versão documental canônica
 
 **Projeto:** Serverless Student Manager  
-**Versão:** 2.6 — Engineering Ready
-**Data:** 2026-08-19
+**Versão:** 2.7 — Engineering Ready
+**Data:** 2026-08-20
 **Status:** Canônica — engenharia em andamento
 
 ## Escopo desta versão
@@ -10,7 +10,7 @@
 Esta versão consolida:
 
 - SRS v1.2 com MFA e rastreabilidade atualizados;
-- ADR-001 a ADR-023 aprovadas;
+- ADR-001 a ADR-024 aprovadas;
 - modelos físicos de dados;
 - autenticação, autorização e MFA;
 - bootstrap do primeiro Administrador;
@@ -29,18 +29,19 @@ Esta versão consolida:
 - guia canônico de leitura;
 - manifesto com SHA-256.
 
-## Mudanças principais em relação à v2.5
+## Mudanças principais em relação à v2.6
 
-1. ADR-023 aprovada — modelagem física da tabela `users`.
-2. Chave composta `PK + SK` formalizada para a tabela `users`.
-3. Item principal definido como `USER#<userId> / PROFILE`.
-4. Itens técnicos de unicidade de e-mail e projeção Cognito receberam chaves físicas completas.
-5. `gsi-all-users-name` formalizado com `GSI1PK = USERS` e ordenação por nome normalizado.
-6. Convenções de `normalizedName` e `normalizedEmail` formalizadas.
-7. Modelo físico alinhado ao módulo Terraform, testes, state e tabela já implantada.
-8. Decision Register atualizado para ADR-001 a ADR-023.
-9. Manifesto SHA-256 atualizado para a versão documental v2.6.
+1. ADR-024 aprovada — protocolo determinístico e trava singleton do bootstrap do primeiro Admin.
+2. `operationId`, `userId`, `eventId` e `correlationId` do bootstrap definidos como UUIDv4 canônicos.
+3. `ClientRequestToken = operationId`, sem transformação e sem persistência duplicada do token.
+4. Marker permanente `CONTROL#FIRST_ADMIN_BOOTSTRAP / CONTROL` incorporado ao modelo físico de `users`.
+5. Transação do bootstrap ampliada para cinco itens e reconciliação obrigatória dos cinco itens.
+6. Registro idempotente do bootstrap ampliado com metadados determinísticos de evento, auditoria e ator.
+7. `createdBy` e `updatedBy` alinhados ao `actorId` original.
+8. Timestamps do bootstrap padronizados em UTC RFC3339 com precisão de milissegundos e sufixo `Z`.
+9. Operação `resume-first-admin-invitation` definida para retomar o convite do primeiro Admin `INVITED` reconciliado.
+10. Marker singleton mantém a proteção mesmo após o TTL de 24 horas do registro idempotente.
 
 ## Regra de precedência
 
-Esta versão substitui documentalmente a v2.5 como fonte de verdade para a engenharia.
+Esta versão substitui documentalmente a v2.6 como fonte de verdade para a engenharia.

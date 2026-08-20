@@ -1,21 +1,24 @@
 # Pendências após a arquitetura
 
-**Versão:** 2.6
-**Data:** 2026-08-19
+**Versão:** 2.7
+**Data:** 2026-08-20
 **Status:** Engenharia em andamento
 
-Não existem ADRs arquiteturais pendentes entre ADR-001 e ADR-023.
+As ADR-001 a ADR-024 estão aprovadas. Não há ADR proposta pendente nesta baseline.
+
+## Detalhamento operacional pendente
+
+A taxonomia completa dos eventos operacionais e de auditoria para falhas, compensações, falhas de compensação, reconciliação e alertas permanece como ponto a detalhar durante a implementação e no runbook correspondente.
 
 ## Próximas atividades de engenharia
 
-1. concluir o acesso operacional controlado via GitHub Actions OIDC;
-2. implementar o bootstrap seguro do primeiro Administrador;
-3. evoluir os endpoints restantes da Students API;
-4. implementar o domínio de usuários;
-5. implementar os fluxos de auditoria da aplicação;
-6. desenvolver o frontend React;
-7. ampliar observabilidade e testes integrados/end-to-end;
-8. realizar hardening e preparar o ambiente `prod`.
+1. implementar o bootstrap seguro do primeiro Administrador;
+2. evoluir os endpoints restantes da Students API;
+3. implementar o domínio de usuários;
+4. implementar os fluxos de auditoria da aplicação;
+5. desenvolver o frontend React;
+6. ampliar observabilidade e testes integrados/end-to-end;
+7. realizar hardening e preparar o ambiente `prod`.
 
 ## Itens que podem gerar novas ADRs
 
