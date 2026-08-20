@@ -51,27 +51,39 @@ def _cognito_projection() -> dict[str, object]:
     }
 
 
+def _bootstrap_marker() -> dict[str, object]:
+    return {
+        "PK": "CONTROL#FIRST_ADMIN_BOOTSTRAP",
+        "SK": "CONTROL",
+        "userId": "user-123",
+        "operationId": "operation-123",
+        "createdAt": "2026-08-20T12:00:00.000Z",
+        "createdBy": "github:raphael",
+    }
+
+
 def _audit_event() -> dict[str, object]:
     return {
         "PK": "RESOURCE#USER#user-123",
-        "SK": "TS#2026-08-20T12:00:00Z#EVENT#event-123",
+        "SK": "TS#2026-08-20T12:00:00.000Z#EVENT#event-123",
         "eventType": "USER_CREATED",
         "expiresAt": 1_779_278_400,
     }
 
 
-def test_persist_user_with_audit_uses_one_conditional_transaction() -> None:
+def test_persist_first_admin_with_audit_uses_one_conditional_transaction() -> None:
     client = FakeDynamoDBClient()
     repository = ProvisioningRepository(client)
 
-    repository.persist_user_with_audit(
+    repository.persist_first_admin_with_audit(
         users_table_name="users-table",
         audit_table_name="audit-table",
         user_profile=_user_profile(),
         unique_email=_unique_email(),
         cognito_projection=_cognito_projection(),
+        bootstrap_marker=_bootstrap_marker(),
         audit_event=_audit_event(),
-        client_request_token="operation-token-123",
+        client_request_token="literal-client-request-token",
     )
 
     assert client.last_transaction == {
@@ -119,10 +131,26 @@ def test_persist_user_with_audit_uses_one_conditional_transaction() -> None:
             },
             {
                 "Put": {
+                    "TableName": "users-table",
+                    "Item": {
+                        "PK": {"S": "CONTROL#FIRST_ADMIN_BOOTSTRAP"},
+                        "SK": {"S": "CONTROL"},
+                        "userId": {"S": "user-123"},
+                        "operationId": {"S": "operation-123"},
+                        "createdAt": {"S": "2026-08-20T12:00:00.000Z"},
+                        "createdBy": {"S": "github:raphael"},
+                    },
+                    "ConditionExpression": (
+                        "attribute_not_exists(PK) AND attribute_not_exists(SK)"
+                    ),
+                }
+            },
+            {
+                "Put": {
                     "TableName": "audit-table",
                     "Item": {
                         "PK": {"S": "RESOURCE#USER#user-123"},
-                        "SK": {"S": "TS#2026-08-20T12:00:00Z#EVENT#event-123"},
+                        "SK": {"S": "TS#2026-08-20T12:00:00.000Z#EVENT#event-123"},
                         "eventType": {"S": "USER_CREATED"},
                         "expiresAt": {"N": "1779278400"},
                     },
@@ -132,7 +160,7 @@ def test_persist_user_with_audit_uses_one_conditional_transaction() -> None:
                 }
             },
         ],
-        "ClientRequestToken": "operation-token-123",
+        "ClientRequestToken": "literal-client-request-token",
     }
     assert client.put_item_calls == 0
 
@@ -146,16 +174,17 @@ class FailingDynamoDBClient(FakeDynamoDBClient):
         raise DynamoDBFailure("transaction failed")
 
 
-def test_persist_user_with_audit_propagates_client_exception() -> None:
+def test_persist_first_admin_with_audit_propagates_client_exception() -> None:
     repository = ProvisioningRepository(FailingDynamoDBClient())
 
     with pytest.raises(DynamoDBFailure, match="transaction failed"):
-        repository.persist_user_with_audit(
+        repository.persist_first_admin_with_audit(
             users_table_name="users-table",
             audit_table_name="audit-table",
             user_profile=_user_profile(),
             unique_email=_unique_email(),
             cognito_projection=_cognito_projection(),
+            bootstrap_marker=_bootstrap_marker(),
             audit_event=_audit_event(),
             client_request_token="operation-token-123",
         )
@@ -243,6 +272,96 @@ def test_get_cognito_projection_uses_exact_key_and_consistent_read() -> None:
         }
     ]
     assert item == _cognito_projection()
+
+
+def test_get_bootstrap_marker_uses_exact_key_and_consistent_read() -> None:
+    client = FakeDynamoDBClient()
+    client.get_responses = [
+        {
+            "Item": {
+                "PK": {"S": "CONTROL#FIRST_ADMIN_BOOTSTRAP"},
+                "SK": {"S": "CONTROL"},
+                "userId": {"S": "user-123"},
+                "operationId": {"S": "operation-123"},
+                "createdAt": {"S": "2026-08-20T12:00:00.000Z"},
+                "createdBy": {"S": "github:raphael"},
+            }
+        }
+    ]
+    repository = ProvisioningRepository(client)
+
+    item = repository.get_bootstrap_marker(users_table_name="users-table")
+
+    assert client.get_calls == [
+        {
+            "TableName": "users-table",
+            "Key": {
+                "PK": {"S": "CONTROL#FIRST_ADMIN_BOOTSTRAP"},
+                "SK": {"S": "CONTROL"},
+            },
+            "ConsistentRead": True,
+        }
+    ]
+    assert item == _bootstrap_marker()
+
+
+def test_get_bootstrap_marker_returns_none_when_item_is_missing() -> None:
+    client = FakeDynamoDBClient()
+    client.get_responses = [{}]
+    repository = ProvisioningRepository(client)
+
+    item = repository.get_bootstrap_marker(users_table_name="users-table")
+
+    assert item is None
+
+
+def test_get_audit_event_uses_composed_key_and_consistent_read() -> None:
+    client = FakeDynamoDBClient()
+    client.get_responses = [
+        {
+            "Item": {
+                "PK": {"S": "RESOURCE#USER#user-123"},
+                "SK": {"S": "TS#2026-08-20T12:00:00.000Z#EVENT#event-123"},
+                "eventType": {"S": "USER_CREATED"},
+                "expiresAt": {"N": "1779278400"},
+            }
+        }
+    ]
+    repository = ProvisioningRepository(client)
+
+    item = repository.get_audit_event(
+        audit_table_name="audit-table",
+        user_id="user-123",
+        occurred_at="2026-08-20T12:00:00.000Z",
+        event_id="event-123",
+    )
+
+    assert client.get_calls == [
+        {
+            "TableName": "audit-table",
+            "Key": {
+                "PK": {"S": "RESOURCE#USER#user-123"},
+                "SK": {"S": "TS#2026-08-20T12:00:00.000Z#EVENT#event-123"},
+            },
+            "ConsistentRead": True,
+        }
+    ]
+    assert item == _audit_event()
+
+
+def test_get_audit_event_returns_none_when_item_is_missing() -> None:
+    client = FakeDynamoDBClient()
+    client.get_responses = [{}]
+    repository = ProvisioningRepository(client)
+
+    item = repository.get_audit_event(
+        audit_table_name="audit-table",
+        user_id="user-123",
+        occurred_at="2026-08-20T12:00:00Z",
+        event_id="event-123",
+    )
+
+    assert item is None
 
 
 def test_get_returns_none_when_item_is_missing() -> None:

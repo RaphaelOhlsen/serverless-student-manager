@@ -21,7 +21,7 @@ class ProvisioningRepository:
         self._serializer = TypeSerializer()
         self._deserializer = TypeDeserializer()
 
-    def persist_user_with_audit(
+    def persist_first_admin_with_audit(
         self,
         *,
         users_table_name: str,
@@ -29,6 +29,7 @@ class ProvisioningRepository:
         user_profile: dict[str, object],
         unique_email: dict[str, object],
         cognito_projection: dict[str, object],
+        bootstrap_marker: dict[str, object],
         audit_event: dict[str, object],
         client_request_token: str,
     ) -> None:
@@ -37,6 +38,7 @@ class ProvisioningRepository:
                 self._build_put(users_table_name, user_profile),
                 self._build_put(users_table_name, unique_email),
                 self._build_put(users_table_name, cognito_projection),
+                self._build_put(users_table_name, bootstrap_marker),
                 self._build_put(audit_table_name, audit_event),
             ],
             ClientRequestToken=client_request_token,
@@ -76,6 +78,31 @@ class ProvisioningRepository:
             table_name=users_table_name,
             partition_key=f"COGNITO#{cognito_sub}",
             sort_key="AUTHORIZATION",
+        )
+
+    def get_bootstrap_marker(
+        self,
+        *,
+        users_table_name: str,
+    ) -> dict[str, object] | None:
+        return self._get_item(
+            table_name=users_table_name,
+            partition_key="CONTROL#FIRST_ADMIN_BOOTSTRAP",
+            sort_key="CONTROL",
+        )
+
+    def get_audit_event(
+        self,
+        *,
+        audit_table_name: str,
+        user_id: str,
+        occurred_at: str,
+        event_id: str,
+    ) -> dict[str, object] | None:
+        return self._get_item(
+            table_name=audit_table_name,
+            partition_key=f"RESOURCE#USER#{user_id}",
+            sort_key=f"TS#{occurred_at}#EVENT#{event_id}",
         )
 
     def _build_put(self, table_name: str, item: dict[str, object]) -> dict[str, object]:

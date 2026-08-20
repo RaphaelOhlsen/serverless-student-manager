@@ -60,3 +60,20 @@ def build_cognito_projection(
         "status": "INVITED",
         "authVersion": 1,
     }
+
+
+def build_first_admin_bootstrap_marker(
+    *,
+    user_id: str,
+    operation_id: str,
+    created_at: str,
+    created_by: str,
+) -> dict[str, object]:
+    return {
+        "PK": "CONTROL#FIRST_ADMIN_BOOTSTRAP",
+        "SK": "CONTROL",
+        "userId": user_id,
+        "operationId": operation_id,
+        "createdAt": created_at,
+        "createdBy": created_by,
+    }

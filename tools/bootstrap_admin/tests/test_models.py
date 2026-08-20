@@ -1,5 +1,6 @@
 from tools.bootstrap_admin.models import (
     build_cognito_projection,
+    build_first_admin_bootstrap_marker,
     build_unique_email,
     build_user_profile,
 )
@@ -62,3 +63,23 @@ def test_build_cognito_projection_uses_adr_023_physical_model() -> None:
         "status": "INVITED",
         "authVersion": 1,
     }
+
+
+def test_build_first_admin_bootstrap_marker_uses_exact_permanent_model() -> None:
+    item = build_first_admin_bootstrap_marker(
+        user_id="user-123",
+        operation_id="operation-123",
+        created_at="2026-08-20T12:00:00.000Z",
+        created_by="github:raphael",
+    )
+
+    assert item == {
+        "PK": "CONTROL#FIRST_ADMIN_BOOTSTRAP",
+        "SK": "CONTROL",
+        "userId": "user-123",
+        "operationId": "operation-123",
+        "createdAt": "2026-08-20T12:00:00.000Z",
+        "createdBy": "github:raphael",
+    }
+    assert "expiration" not in item
+    assert "expiresAt" not in item
