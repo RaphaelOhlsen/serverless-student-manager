@@ -1,7 +1,7 @@
 def build_user_created_audit_event(
     *,
     user_id: str,
-    github_actor: str,
+    actor_id: str,
     event_id: str,
     correlation_id: str,
     occurred_at: str,
@@ -9,7 +9,6 @@ def build_user_created_audit_event(
 ) -> dict[str, object]:
     sort_key = f"TS#{occurred_at}#EVENT#{event_id}"
     period = occurred_at[:7]
-    actor_id = f"github:{github_actor}"
 
     return {
         "PK": f"RESOURCE#USER#{user_id}",
