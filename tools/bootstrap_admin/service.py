@@ -3,7 +3,11 @@ from typing import Protocol
 
 from tools.bootstrap_admin.audit import build_user_created_audit_event
 from tools.bootstrap_admin.clock import Clock, format_utc_rfc3339_millis, to_epoch_seconds
-from tools.bootstrap_admin.idempotency import build_started_record
+from tools.bootstrap_admin.context import BootstrapContext, parse_bootstrap_context
+from tools.bootstrap_admin.idempotency import (
+    build_started_record,
+    validate_existing_record,
+)
 from tools.bootstrap_admin.ids import IdGenerator, validate_uuid4
 from tools.bootstrap_admin.models import (
     build_cognito_projection,
@@ -14,6 +18,7 @@ from tools.bootstrap_admin.models import (
 from tools.bootstrap_admin.normalization import normalize_email, normalize_name
 from tools.bootstrap_admin.service_models import (
     BootstrapResult,
+    BootstrapTerminalState,
     FirstAdminBootstrapConfig,
 )
 
@@ -99,8 +104,19 @@ class FirstAdminBootstrapService:
             f"{operation_id}"
         )
 
-        if self._idempotency_repository.get(record_id) is not None:
-            raise NotImplementedError("replay is not implemented")
+        existing = self._idempotency_repository.get(record_id)
+        if existing is not None:
+            context = parse_bootstrap_context(
+                existing,
+                expected_environment=self._config.environment,
+                expected_operation_id=operation_id,
+            )
+            validate_existing_record(
+                existing,
+                full_name=full_name,
+                normalized_email=normalized_email,
+            )
+            return self._replay(context)
 
         user_id = validate_uuid4(self._id_generator.new_uuid4())
         event_id = validate_uuid4(self._id_generator.new_uuid4())
@@ -208,6 +224,53 @@ class FirstAdminBootstrapService:
             user_id=user_id,
             state="COMPLETED",
             replayed=False,
+        )
+
+    def _replay(self, context: BootstrapContext) -> BootstrapResult:
+        if context.state == "COMPLETED":
+            return self._replay_result(context, state="COMPLETED")
+        if context.state == "COMPENSATED":
+            return self._replay_result(context, state="COMPENSATED")
+        if context.state == "RECONCILIATION_REQUIRED":
+            return self._replay_result(context, state="RECONCILIATION_REQUIRED")
+        if context.state == "INVITATION_SENT":
+            self._transition(
+                record_id=context.record_id,
+                current_state="INVITATION_SENT",
+                next_state="COMPLETED",
+            )
+            return self._replay_result(context, state="COMPLETED")
+        if context.state == "PERSISTENCE_COMPLETED":
+            self._cognito_repository.resend_invitation(
+                user_pool_id=self._config.user_pool_id,
+                user_id=context.user_id,
+            )
+            self._transition(
+                record_id=context.record_id,
+                current_state="PERSISTENCE_COMPLETED",
+                next_state="INVITATION_SENT",
+            )
+            self._transition(
+                record_id=context.record_id,
+                current_state="INVITATION_SENT",
+                next_state="COMPLETED",
+            )
+            return self._replay_result(context, state="COMPLETED")
+        if context.state == "STARTED":
+            raise NotImplementedError("STARTED replay is not implemented")
+        raise NotImplementedError("COGNITO_CREATED replay is not implemented")
+
+    @staticmethod
+    def _replay_result(
+        context: BootstrapContext,
+        *,
+        state: BootstrapTerminalState,
+    ) -> BootstrapResult:
+        return BootstrapResult(
+            operation_id=context.operation_id,
+            user_id=context.user_id,
+            state=state,
+            replayed=True,
         )
 
     def _transition(

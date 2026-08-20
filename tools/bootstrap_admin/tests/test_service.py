@@ -3,6 +3,11 @@ from typing import Any
 
 import pytest
 
+from tools.bootstrap_admin.context import InvalidBootstrapRecordError
+from tools.bootstrap_admin.idempotency import (
+    IdempotencyConflictError,
+    build_started_record,
+)
 from tools.bootstrap_admin.service import FirstAdminBootstrapService
 from tools.bootstrap_admin.service_models import FirstAdminBootstrapConfig
 
@@ -132,6 +137,33 @@ def _config() -> FirstAdminBootstrapConfig:
         audit_table_name="audit-table",
         audit_retention_days=90,
     )
+
+
+def _existing_record(state: str) -> dict[str, object]:
+    record = build_started_record(
+        environment="dev",
+        operation_id=_OPERATION_ID,
+        correlation_id=_CORRELATION_ID,
+        user_id=_USER_ID,
+        event_id=_EVENT_ID,
+        full_name="Maria da Silva",
+        normalized_email="admin@example.com",
+        created_at="2026-08-20T13:45:12.347Z",
+        occurred_at="2026-08-20T13:45:12.347Z",
+        audit_expires_at=1_795_009_512,
+        actor_id="github:original",
+        expiration=1_787_319_912,
+    )
+    record["state"] = state
+    if state in {
+        "COGNITO_CREATED",
+        "PERSISTENCE_COMPLETED",
+        "INVITATION_SENT",
+        "COMPLETED",
+        "COMPENSATED",
+    }:
+        record["cognitoSub"] = "cognito-sub-123"
+    return record
 
 
 def _build_service(
@@ -350,12 +382,129 @@ def test_bootstrap_first_admin_executes_deterministic_happy_path() -> None:
     ]
 
 
-def test_existing_record_fails_without_partial_replay() -> None:
+@pytest.mark.parametrize(
+    "state",
+    ["COMPLETED", "COMPENSATED", "RECONCILIATION_REQUIRED"],
+)
+def test_terminal_state_replay_returns_without_effects(state: str) -> None:
     service, events, clock, ids, idempotency, cognito, provisioning = _build_service(
-        existing={"state": "STARTED"}
+        existing=_existing_record(state)
     )
 
-    with pytest.raises(NotImplementedError, match="replay is not implemented"):
+    result = service.bootstrap_first_admin(
+        full_name="Maria da Silva",
+        email="admin@example.com",
+        operation_id=_OPERATION_ID,
+        actor_id="github:other-executor",
+    )
+
+    assert result.operation_id == _OPERATION_ID
+    assert result.user_id == _USER_ID
+    assert result.state == state
+    assert result.replayed is True
+    assert events == ["idempotency:get"]
+    assert clock.calls == 0
+    assert ids.calls == 0
+    assert idempotency.started_records == []
+    assert idempotency.transitions == []
+    assert cognito.create_calls == []
+    assert cognito.resend_calls == []
+    assert provisioning.calls == []
+
+
+def test_invitation_sent_replay_only_completes_operation() -> None:
+    service, events, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record("INVITATION_SENT")
+    )
+
+    result = service.bootstrap_first_admin(
+        full_name="Maria da Silva",
+        email="admin@example.com",
+        operation_id=_OPERATION_ID,
+        actor_id="github:other-executor",
+    )
+
+    record_id = f"NONHTTP#dev#bootstrap-admin#first-admin#{_OPERATION_ID}"
+    assert result.state == "COMPLETED"
+    assert result.replayed is True
+    assert clock.calls == 1
+    assert ids.calls == 0
+    assert idempotency.transitions == [
+        {
+            "record_id": record_id,
+            "operation": "bootstrap-admin",
+            "current_state": "INVITATION_SENT",
+            "next_state": "COMPLETED",
+            "updated_at": "2026-08-20T13:45:12.347Z",
+        }
+    ]
+    assert cognito.create_calls == []
+    assert cognito.resend_calls == []
+    assert provisioning.calls == []
+    assert events == [
+        "idempotency:get",
+        "clock:1",
+        "idempotency:transition:COMPLETED",
+    ]
+
+
+def test_persistence_completed_replay_resends_and_completes_operation() -> None:
+    service, events, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record("PERSISTENCE_COMPLETED")
+    )
+
+    result = service.bootstrap_first_admin(
+        full_name="Maria da Silva",
+        email="admin@example.com",
+        operation_id=_OPERATION_ID,
+        actor_id="github:other-executor",
+    )
+
+    record_id = f"NONHTTP#dev#bootstrap-admin#first-admin#{_OPERATION_ID}"
+    assert result.state == "COMPLETED"
+    assert result.replayed is True
+    assert clock.calls == 2
+    assert ids.calls == 0
+    assert cognito.create_calls == []
+    assert cognito.resend_calls == [
+        {"user_pool_id": "pool-123", "user_id": _USER_ID}
+    ]
+    assert provisioning.calls == []
+    assert idempotency.transitions == [
+        {
+            "record_id": record_id,
+            "operation": "bootstrap-admin",
+            "current_state": "PERSISTENCE_COMPLETED",
+            "next_state": "INVITATION_SENT",
+            "updated_at": "2026-08-20T13:45:12.347Z",
+        },
+        {
+            "record_id": record_id,
+            "operation": "bootstrap-admin",
+            "current_state": "INVITATION_SENT",
+            "next_state": "COMPLETED",
+            "updated_at": "2026-08-20T13:46:12.347Z",
+        },
+    ]
+    assert events == [
+        "idempotency:get",
+        "cognito:resend",
+        "clock:1",
+        "idempotency:transition:INVITATION_SENT",
+        "clock:2",
+        "idempotency:transition:COMPLETED",
+    ]
+
+
+@pytest.mark.parametrize("state", ["STARTED", "COGNITO_CREATED"])
+def test_unimplemented_intermediate_state_replay_fails_without_effects(
+    state: str,
+) -> None:
+    service, events, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record(state)
+    )
+
+    with pytest.raises(NotImplementedError, match=rf"{state} replay is not implemented"):
         service.bootstrap_first_admin(
             full_name="Maria da Silva",
             email="admin@example.com",
@@ -367,6 +516,52 @@ def test_existing_record_fails_without_partial_replay() -> None:
     assert clock.calls == 0
     assert ids.calls == 0
     assert idempotency.started_records == []
+    assert idempotency.transitions == []
+    assert cognito.create_calls == []
+    assert cognito.resend_calls == []
+    assert provisioning.calls == []
+
+
+def test_replay_payload_mismatch_fails_before_any_effect() -> None:
+    service, events, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record("COMPLETED")
+    )
+
+    with pytest.raises(IdempotencyConflictError, match="incompatible payload"):
+        service.bootstrap_first_admin(
+            full_name="Different Name",
+            email="admin@example.com",
+            operation_id=_OPERATION_ID,
+            actor_id="github:other-executor",
+        )
+
+    assert events == ["idempotency:get"]
+    assert clock.calls == 0
+    assert ids.calls == 0
+    assert idempotency.transitions == []
+    assert cognito.create_calls == []
+    assert cognito.resend_calls == []
+    assert provisioning.calls == []
+
+
+def test_structurally_invalid_replay_record_fails_before_any_effect() -> None:
+    existing = _existing_record("COMPLETED")
+    existing["id"] = "incompatible-record-id"
+    service, events, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=existing
+    )
+
+    with pytest.raises(InvalidBootstrapRecordError, match="id"):
+        service.bootstrap_first_admin(
+            full_name="Maria da Silva",
+            email="admin@example.com",
+            operation_id=_OPERATION_ID,
+            actor_id="github:other-executor",
+        )
+
+    assert events == ["idempotency:get"]
+    assert clock.calls == 0
+    assert ids.calls == 0
     assert idempotency.transitions == []
     assert cognito.create_calls == []
     assert cognito.resend_calls == []
