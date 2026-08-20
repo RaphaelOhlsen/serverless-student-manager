@@ -124,6 +124,7 @@ class FakeCognitoRepository:
         create_outcomes: list[object] | None = None,
         delete_outcomes: list[object] | None = None,
         disable_outcomes: list[object] | None = None,
+        resend_outcomes: list[object] | None = None,
     ) -> None:
         self._events = events
         self._get_outcomes = get_outcomes or []
@@ -132,6 +133,7 @@ class FakeCognitoRepository:
         self._disable_outcomes = (
             disable_outcomes if disable_outcomes is not None else [None]
         )
+        self._resend_outcomes = resend_outcomes if resend_outcomes is not None else []
         self.get_calls: list[dict[str, str]] = []
         self.create_calls: list[dict[str, str]] = []
         self.delete_calls: list[dict[str, str]] = []
@@ -220,6 +222,12 @@ class FakeCognitoRepository:
                 "user_id": user_id,
             }
         )
+        if self._resend_outcomes:
+            outcome = self._resend_outcomes.pop(0)
+            if isinstance(outcome, BaseException):
+                raise outcome
+            if outcome is not None:
+                raise AssertionError("unsupported resend outcome")
 
 
 class FakeProvisioningRepository:
@@ -456,6 +464,7 @@ def _build_service(
     cognito_create_outcomes: list[object] | None = None,
     cognito_delete_outcomes: list[object] | None = None,
     cognito_disable_outcomes: list[object] | None = None,
+    cognito_resend_outcomes: list[object] | None = None,
 ) -> tuple[
     FirstAdminBootstrapService,
     list[str],
@@ -487,6 +496,7 @@ def _build_service(
         create_outcomes=cognito_create_outcomes,
         delete_outcomes=cognito_delete_outcomes,
         disable_outcomes=cognito_disable_outcomes,
+        resend_outcomes=cognito_resend_outcomes,
     )
     provisioning = FakeProvisioningRepository(events)
     service = FirstAdminBootstrapService(
@@ -2412,3 +2422,222 @@ def test_terminal_cas_error_accepts_confirmed_terminal_state(
     assert result.replayed is True
     assert len(idempotency.transitions) == 1
     assert ids.calls == 0
+
+
+@pytest.mark.parametrize(
+    "resend_error",
+    [
+        AwsStyleError("CodeDeliveryFailureException"),
+        AwsStyleError("TooManyRequestsException"),
+        AwsStyleError("InternalErrorException"),
+        ConnectionClosedError(endpoint_url="https://cognito.example"),
+    ],
+)
+def test_persistence_completed_replay_propagates_resend_error_without_effects(
+    resend_error: BaseException,
+) -> None:
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record("PERSISTENCE_COMPLETED"),
+        cognito_resend_outcomes=[resend_error],
+    )
+
+    with pytest.raises(type(resend_error)) as raised:
+        service.bootstrap_first_admin(
+            full_name="Maria da Silva",
+            email="admin@example.com",
+            operation_id=_OPERATION_ID,
+            actor_id="github:other-executor",
+        )
+
+    assert raised.value is resend_error
+    assert len(cognito.resend_calls) == 1
+    assert cognito.delete_calls == []
+    assert cognito.disable_calls == []
+    assert idempotency.transitions == []
+    assert provisioning.calls == []
+    assert clock.calls == 0
+    assert ids.calls == 0
+
+
+def test_persistence_completed_replay_marks_missing_cognito_for_reconciliation() -> None:
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record("PERSISTENCE_COMPLETED"),
+        cognito_resend_outcomes=[AwsStyleError("UserNotFoundException")],
+    )
+
+    result = service.bootstrap_first_admin(
+        full_name="Maria da Silva",
+        email="admin@example.com",
+        operation_id=_OPERATION_ID,
+        actor_id="github:other-executor",
+    )
+
+    assert result.state == "RECONCILIATION_REQUIRED"
+    assert result.replayed is True
+    assert len(cognito.resend_calls) == 1
+    assert cognito.delete_calls == []
+    assert cognito.disable_calls == []
+    assert provisioning.calls == []
+    assert clock.calls == 1
+    assert ids.calls == 0
+    assert [call["next_state"] for call in idempotency.transitions] == [
+        "RECONCILIATION_REQUIRED"
+    ]
+
+
+def test_resend_user_not_found_accepts_reconciled_terminal_cas() -> None:
+    transition_error = AwsStyleError("InternalServerError")
+    service, _, clock, _, idempotency, cognito, _ = _build_service(
+        idempotency_get_outcomes=[
+            _existing_record("PERSISTENCE_COMPLETED"),
+            _existing_record("RECONCILIATION_REQUIRED"),
+        ],
+        transition_outcomes=[transition_error],
+        cognito_resend_outcomes=[AwsStyleError("UserNotFoundException")],
+    )
+
+    result = service.bootstrap_first_admin(
+        full_name="Maria da Silva",
+        email="admin@example.com",
+        operation_id=_OPERATION_ID,
+        actor_id="github:other-executor",
+    )
+
+    assert result.state == "RECONCILIATION_REQUIRED"
+    assert result.replayed is True
+    assert len(cognito.resend_calls) == 1
+    assert len(idempotency.transitions) == 1
+    assert len(idempotency.get_calls) == 2
+    assert clock.calls == 1
+
+
+def test_resend_success_accepts_reconciled_invitation_sent_cas() -> None:
+    transition_error = AwsStyleError("InternalServerError")
+    service, _, clock, _, idempotency, cognito, _ = _build_service(
+        idempotency_get_outcomes=[
+            _existing_record("PERSISTENCE_COMPLETED"),
+            _existing_record("INVITATION_SENT"),
+        ],
+        transition_outcomes=[transition_error],
+    )
+
+    result = service.bootstrap_first_admin(
+        full_name="Maria da Silva",
+        email="admin@example.com",
+        operation_id=_OPERATION_ID,
+        actor_id="github:other-executor",
+    )
+
+    assert result.state == "COMPLETED"
+    assert len(cognito.resend_calls) == 1
+    assert [call["next_state"] for call in idempotency.transitions] == [
+        "INVITATION_SENT",
+        "COMPLETED",
+    ]
+    assert clock.calls == 2
+
+
+def test_resend_success_propagates_unconfirmed_invitation_sent_cas() -> None:
+    transition_error = AwsStyleError("InternalServerError")
+    service, _, clock, _, idempotency, cognito, _ = _build_service(
+        idempotency_get_outcomes=[
+            _existing_record("PERSISTENCE_COMPLETED"),
+            _existing_record("PERSISTENCE_COMPLETED"),
+        ],
+        transition_outcomes=[transition_error],
+    )
+
+    with pytest.raises(AwsStyleError) as raised:
+        service.bootstrap_first_admin(
+            full_name="Maria da Silva",
+            email="admin@example.com",
+            operation_id=_OPERATION_ID,
+            actor_id="github:other-executor",
+        )
+
+    assert raised.value is transition_error
+    assert len(cognito.resend_calls) == 1
+    assert len(idempotency.transitions) == 1
+    assert clock.calls == 1
+
+
+def test_separate_replays_may_resend_after_prior_failure() -> None:
+    first_error = AwsStyleError("CodeDeliveryFailureException")
+    service, _, clock, ids, idempotency, cognito, _ = _build_service(
+        existing=_existing_record("PERSISTENCE_COMPLETED"),
+        cognito_resend_outcomes=[first_error, None],
+    )
+
+    with pytest.raises(AwsStyleError) as raised:
+        service.bootstrap_first_admin(
+            full_name="Maria da Silva",
+            email="admin@example.com",
+            operation_id=_OPERATION_ID,
+            actor_id="github:first-executor",
+        )
+    result = service.bootstrap_first_admin(
+        full_name="Maria da Silva",
+        email="admin@example.com",
+        operation_id=_OPERATION_ID,
+        actor_id="github:second-executor",
+    )
+
+    assert raised.value is first_error
+    assert result.state == "COMPLETED"
+    assert result.replayed is True
+    assert len(cognito.resend_calls) == 2
+    assert len(idempotency.transitions) == 2
+    assert clock.calls == 2
+    assert ids.calls == 0
+
+
+def test_happy_path_resend_user_not_found_returns_non_replayed_reconciliation() -> None:
+    service, _, clock, _, idempotency, cognito, provisioning = _build_service(
+        cognito_resend_outcomes=[AwsStyleError("UserNotFoundException")],
+    )
+
+    result = service.bootstrap_first_admin(
+        full_name="  Maria   da Silva  ",
+        email=" ADMIN@Example.COM ",
+        operation_id=_OPERATION_ID,
+        actor_id="github:raphael",
+    )
+
+    assert result.state == "RECONCILIATION_REQUIRED"
+    assert result.replayed is False
+    assert len(provisioning.calls) == 1
+    assert len(cognito.resend_calls) == 1
+    assert cognito.delete_calls == []
+    assert cognito.disable_calls == []
+    assert [call["next_state"] for call in idempotency.transitions] == [
+        "COGNITO_CREATED",
+        "PERSISTENCE_COMPLETED",
+        "RECONCILIATION_REQUIRED",
+    ]
+    assert clock.calls == 4
+
+
+def test_happy_path_propagates_resend_error_without_rollback() -> None:
+    resend_error = AwsStyleError("CodeDeliveryFailureException")
+    service, _, clock, _, idempotency, cognito, provisioning = _build_service(
+        cognito_resend_outcomes=[resend_error],
+    )
+
+    with pytest.raises(AwsStyleError) as raised:
+        service.bootstrap_first_admin(
+            full_name="Maria da Silva",
+            email="admin@example.com",
+            operation_id=_OPERATION_ID,
+            actor_id="github:raphael",
+        )
+
+    assert raised.value is resend_error
+    assert len(provisioning.calls) == 1
+    assert len(cognito.resend_calls) == 1
+    assert cognito.delete_calls == []
+    assert cognito.disable_calls == []
+    assert [call["next_state"] for call in idempotency.transitions] == [
+        "COGNITO_CREATED",
+        "PERSISTENCE_COMPLETED",
+    ]
+    assert clock.calls == 3

@@ -268,27 +268,10 @@ class FirstAdminBootstrapService:
             current_state="COGNITO_CREATED",
             next_state="PERSISTENCE_COMPLETED",
         )
-        self._cognito_repository.resend_invitation(
-            user_pool_id=self._config.user_pool_id,
-            user_id=user_id,
-        )
-        self._transition(
+        return self._complete_after_persistence(
             record_id=record_id,
             operation_id=operation_id,
-            current_state="PERSISTENCE_COMPLETED",
-            next_state="INVITATION_SENT",
-        )
-        self._transition(
-            record_id=record_id,
-            operation_id=operation_id,
-            current_state="INVITATION_SENT",
-            next_state="COMPLETED",
-        )
-
-        return BootstrapResult(
-            operation_id=operation_id,
             user_id=user_id,
-            state="COMPLETED",
             replayed=False,
         )
 
@@ -314,7 +297,12 @@ class FirstAdminBootstrapService:
             )
             return self._replay_result(context, state="COMPLETED")
         if context.state == "PERSISTENCE_COMPLETED":
-            return self._complete_after_persistence(context)
+            return self._complete_after_persistence(
+                record_id=context.record_id,
+                operation_id=context.operation_id,
+                user_id=context.user_id,
+                replayed=True,
+            )
         if context.state == "STARTED":
             return self._replay_started(
                 context,
@@ -431,7 +419,12 @@ class FirstAdminBootstrapService:
             current_state="COGNITO_CREATED",
             next_state="PERSISTENCE_COMPLETED",
         )
-        return self._complete_after_persistence(context)
+        return self._complete_after_persistence(
+            record_id=context.record_id,
+            operation_id=context.operation_id,
+            user_id=context.user_id,
+            replayed=True,
+        )
 
     def _classify_persistence_state(
         self,
@@ -706,25 +699,51 @@ class FirstAdminBootstrapService:
 
     def _complete_after_persistence(
         self,
-        context: BootstrapContext,
+        *,
+        record_id: str,
+        operation_id: str,
+        user_id: str,
+        replayed: bool,
     ) -> BootstrapResult:
-        self._cognito_repository.resend_invitation(
-            user_pool_id=self._config.user_pool_id,
-            user_id=context.user_id,
-        )
+        try:
+            self._cognito_repository.resend_invitation(
+                user_pool_id=self._config.user_pool_id,
+                user_id=user_id,
+            )
+        except Exception as resend_error:
+            if get_aws_error_code(resend_error) != "UserNotFoundException":
+                raise
+            self._transition(
+                record_id=record_id,
+                operation_id=operation_id,
+                current_state="PERSISTENCE_COMPLETED",
+                next_state="RECONCILIATION_REQUIRED",
+            )
+            return BootstrapResult(
+                operation_id=operation_id,
+                user_id=user_id,
+                state="RECONCILIATION_REQUIRED",
+                replayed=replayed,
+            )
+
         self._transition(
-            record_id=context.record_id,
-            operation_id=context.operation_id,
+            record_id=record_id,
+            operation_id=operation_id,
             current_state="PERSISTENCE_COMPLETED",
             next_state="INVITATION_SENT",
         )
         self._transition(
-            record_id=context.record_id,
-            operation_id=context.operation_id,
+            record_id=record_id,
+            operation_id=operation_id,
             current_state="INVITATION_SENT",
             next_state="COMPLETED",
         )
-        return self._replay_result(context, state="COMPLETED")
+        return BootstrapResult(
+            operation_id=operation_id,
+            user_id=user_id,
+            state="COMPLETED",
+            replayed=replayed,
+        )
 
     def _replay_started(
         self,
