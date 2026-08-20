@@ -29,9 +29,13 @@ def build_started_record(
     operation_id: str,
     correlation_id: str,
     user_id: str,
+    event_id: str,
     full_name: str,
     normalized_email: str,
     created_at: str,
+    occurred_at: str,
+    audit_expires_at: int,
+    actor_id: str,
     expiration: int,
 ) -> dict[str, object]:
     return {
@@ -46,7 +50,11 @@ def build_started_record(
         ),
         "state": "STARTED",
         "userId": user_id,
+        "eventId": event_id,
         "correlationId": correlation_id,
+        "occurredAt": occurred_at,
+        "auditExpiresAt": audit_expires_at,
+        "actorId": actor_id,
         "createdAt": created_at,
         "updatedAt": created_at,
         "expiration": expiration,
@@ -72,29 +80,45 @@ def validate_existing_record(
         raise IdempotencyConflictError("operationId already exists with an incompatible payload")
 
 
-_VALID_STATE_TRANSITIONS: dict[str, set[str]] = {
-    "STARTED": {
-        "COGNITO_CREATED",
-        "RECONCILIATION_REQUIRED",
+_VALID_STATE_TRANSITIONS_BY_OPERATION: dict[str, dict[str, set[str]]] = {
+    "bootstrap-admin": {
+        "STARTED": {
+            "COGNITO_CREATED",
+            "RECONCILIATION_REQUIRED",
+        },
+        "COGNITO_CREATED": {
+            "PERSISTENCE_COMPLETED",
+            "COMPENSATED",
+            "RECONCILIATION_REQUIRED",
+        },
+        "PERSISTENCE_COMPLETED": {
+            "INVITATION_SENT",
+            "RECONCILIATION_REQUIRED",
+        },
+        "INVITATION_SENT": {
+            "COMPLETED",
+            "RECONCILIATION_REQUIRED",
+        },
+        "COMPLETED": set(),
+        "COMPENSATED": set(),
+        "RECONCILIATION_REQUIRED": set(),
     },
-    "COGNITO_CREATED": {
-        "PERSISTENCE_COMPLETED",
-        "COMPENSATED",
-        "RECONCILIATION_REQUIRED",
+    "resume-first-admin-invitation": {
+        "STARTED": {
+            "COMPLETED",
+            "RECONCILIATION_REQUIRED",
+        },
+        "COMPLETED": set(),
+        "RECONCILIATION_REQUIRED": set(),
     },
-    "PERSISTENCE_COMPLETED": {
-        "INVITATION_SENT",
-        "RECONCILIATION_REQUIRED",
-    },
-    "INVITATION_SENT": {
-        "COMPLETED",
-        "RECONCILIATION_REQUIRED",
-    },
-    "COMPLETED": set(),
-    "COMPENSATED": set(),
-    "RECONCILIATION_REQUIRED": set(),
 }
 
 
-def is_valid_state_transition(current_state: str, next_state: str) -> bool:
-    return next_state in _VALID_STATE_TRANSITIONS.get(current_state, set())
+def is_valid_state_transition(
+    *,
+    operation: str,
+    current_state: str,
+    next_state: str,
+) -> bool:
+    operation_transitions = _VALID_STATE_TRANSITIONS_BY_OPERATION.get(operation, {})
+    return next_state in operation_transitions.get(current_state, set())

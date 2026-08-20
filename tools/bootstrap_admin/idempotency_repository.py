@@ -56,29 +56,51 @@ class IdempotencyRepository:
         self,
         *,
         record_id: str,
+        operation: str,
         current_state: str,
         next_state: str,
         updated_at: str,
-        cognito_sub: str,
+        cognito_sub: str | None = None,
     ) -> None:
-        if not is_valid_state_transition(current_state, next_state):
+        if not is_valid_state_transition(
+            operation=operation,
+            current_state=current_state,
+            next_state=next_state,
+        ):
             raise ValueError(
                 f"invalid idempotency state transition: {current_state} -> {next_state}"
             )
 
+        if (
+            operation == "bootstrap-admin"
+            and current_state == "STARTED"
+            and next_state == "COGNITO_CREATED"
+            and cognito_sub is None
+        ):
+            raise ValueError("cognito_sub is required for STARTED -> COGNITO_CREATED")
+
+        update_assignments = [
+            "#state = :next_state",
+            "updatedAt = :updated_at",
+        ]
+        expression_attribute_values: dict[str, object] = {
+            ":current_state": current_state,
+            ":next_state": next_state,
+            ":updated_at": updated_at,
+            ":operation": operation,
+        }
+
+        if cognito_sub is not None:
+            update_assignments.append("cognitoSub = :cognito_sub")
+            expression_attribute_values[":cognito_sub"] = cognito_sub
+
         self._table.update_item(
             Key={"id": record_id},
-            UpdateExpression=(
-                "SET #state = :next_state, updatedAt = :updated_at, cognitoSub = :cognito_sub"
-            ),
-            ConditionExpression="#state = :current_state",
+            UpdateExpression=f"SET {', '.join(update_assignments)}",
+            ConditionExpression="#state = :current_state AND #operation = :operation",
             ExpressionAttributeNames={
                 "#state": "state",
+                "#operation": "operation",
             },
-            ExpressionAttributeValues={
-                ":current_state": current_state,
-                ":next_state": next_state,
-                ":updated_at": updated_at,
-                ":cognito_sub": cognito_sub,
-            },
+            ExpressionAttributeValues=expression_attribute_values,
         )
