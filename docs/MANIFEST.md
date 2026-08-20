@@ -46,11 +46,11 @@ O próprio `MANIFEST.md` não é listado para evitar hash autorreferencial.
 | `docs/decisions/adr/adr-021-audit-index-modeling.md` | `d3bf7ec8a6c88780e3c0693810488e3b9db2b09db478d83568b326da04579f8b` |
 | `docs/decisions/adr/adr-022-operational-access-oidc.md` | `a81b774cea28468848fe065c318393267665856cfa29c3eb935cdd04250cf1b4` |
 | `docs/decisions/adr/adr-023-users-physical-modeling.md` | `da25a5288557267c4f18760d4519aa72d5c52fe295083c127c1b14e6d1ff9717` |
-| `docs/decisions/adr/adr-024-first-admin-bootstrap-execution-protocol.md` | `4f1d8159d56c6368e531e885b423564330920ef84336dcbedfbbeba8635b88a7` |
+| `docs/decisions/adr/adr-024-first-admin-bootstrap-execution-protocol.md` | `7bd59dce435ce826ec6231347329079aa786b12d1b975710e155f4c5aa5b7303` |
 | `docs/decisions/decision-register.md` | `627116e6dc943901e2d47a61331975459ea8b1b901bf446a64da9fdd72b2e081` |
 | `docs/decisions/pending-decisions.md` | `9a8524b823533c2c5186c91d7fae61375be0ba95995cb5cc7ecaf55b0c0cd22a` |
 | `docs/operations/cognito-dynamodb-compensation.md` | `d2914292047679b7858e6b130f4baf04440913f9fb0809b243df22323d448807` |
-| `docs/operations/non-http-idempotency.md` | `0e6a12eab93e2c019ed450cd579fccb06957001d2f51465cea02b34a73bc5ba2` |
+| `docs/operations/non-http-idempotency.md` | `8d9a271af32d05a345a1b66e72fe51bdf274ddee7ba868deaae251768fbbf197` |
 | `docs/operations/rollback-strategy.md` | `0341e5837516cb745a42b76b57247e3ac3bb8e3afc02d6bce92c26ba4f606d91` |
 | `docs/operations/sole-admin-mfa-recovery.md` | `30dce5d37c002be252e16509fd43afa0e26f38ad2e05453eb0656cee0ff24797` |
 | `docs/overview.md` | `b2b59684b040212a5eceda06b9316d4897859f46273ddb82e2c419e1be96348d` |

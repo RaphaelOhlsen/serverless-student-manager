@@ -514,7 +514,7 @@ A implementação deverá cobrir, no mínimo:
 22. replay de `resume-first-admin-invitation` reutilizando o mesmo `operationId`;
 23. estado `COMPLETED` da retomada sem execução de novo `RESEND`;
 24. resultado ambíguo de `RESEND` repetido sem criar ou modificar qualquer item persistente;
-25. payload incompatível no replay do bootstrap rejeitado antes de qualquer efeito.
+25. payload incompatível no replay do bootstrap rejeitado antes de qualquer efeito;
 26. incompatibilidade na retomada transicionando `STARTED → RECONCILIATION_REQUIRED`;
 27. USER `ACTIVE` consistente transicionando `STARTED → COMPLETED` sem `RESEND`;
 28. USER `ACTIVE` com identidade, projeção ou marker incompatível resultando em `RECONCILIATION_REQUIRED`;
