@@ -6,6 +6,7 @@ from tools.bootstrap_admin.audit import build_user_created_audit_event
 from tools.bootstrap_admin.aws_errors import (
     get_aws_error_code,
     is_ambiguous_aws_transport_error,
+    is_ambiguous_dynamodb_write_error,
 )
 from tools.bootstrap_admin.clock import Clock, format_utc_rfc3339_millis, to_epoch_seconds
 from tools.bootstrap_admin.cognito_repository import (
@@ -380,7 +381,23 @@ class FirstAdminBootstrapService:
         )
 
         if all(item is None for item in actual_items):
-            self._persist_replay_items(context, expected_items)
+            try:
+                self._persist_replay_items(context, expected_items)
+            except Exception as write_error:
+                if not is_ambiguous_dynamodb_write_error(write_error):
+                    raise
+                actual_items = self._read_provisioning_items(
+                    context,
+                    normalized_email=normalized_email,
+                    cognito_sub=cognito_sub,
+                )
+                if all(item is None for item in actual_items):
+                    raise
+                if actual_items != expected_items:
+                    return self._mark_reconciliation_required(
+                        context,
+                        current_state="COGNITO_CREATED",
+                    )
         elif actual_items != expected_items:
             return self._mark_reconciliation_required(
                 context,

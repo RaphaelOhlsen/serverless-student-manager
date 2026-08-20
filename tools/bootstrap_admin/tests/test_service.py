@@ -181,12 +181,31 @@ class FakeProvisioningRepository:
         self.audit_event_result: dict[str, object] | None = None
         self.read_error_at: str | None = None
         self.read_error: Exception | None = None
+        self.read_error_after_persist_at: str | None = None
+        self.read_error_after_persist: Exception | None = None
         self.persist_error: Exception | None = None
+        self.results_after_persist_error: tuple[
+            dict[str, object] | None,
+            dict[str, object] | None,
+            dict[str, object] | None,
+            dict[str, object] | None,
+            dict[str, object] | None,
+        ] | None = None
 
     def persist_first_admin_with_audit(self, **kwargs: Any) -> None:
         self._events.append("provisioning:persist")
         self.calls.append(dict(kwargs))
         if self.persist_error is not None:
+            self.read_error_at = self.read_error_after_persist_at
+            self.read_error = self.read_error_after_persist
+            if self.results_after_persist_error is not None:
+                (
+                    self.user_profile_result,
+                    self.unique_email_result,
+                    self.cognito_projection_result,
+                    self.bootstrap_marker_result,
+                    self.audit_event_result,
+                ) = self.results_after_persist_error
             raise self.persist_error
 
     def get_user_profile(
@@ -408,9 +427,11 @@ def _build_service(
 
 
 class AwsStyleError(Exception):
-    def __init__(self, code: str) -> None:
+    def __init__(self, code: str, *, http_status: int | None = None) -> None:
         super().__init__(code)
-        self.response = {"Error": {"Code": code}}
+        self.response: dict[str, object] = {"Error": {"Code": code}}
+        if http_status is not None:
+            self.response["ResponseMetadata"] = {"HTTPStatusCode": http_status}
 
 
 def _assert_started_replay_has_no_downstream_effects(
@@ -1416,6 +1437,167 @@ def test_cognito_created_replay_propagates_transaction_failure_without_advancing
     assert clock.calls == 0
     assert len(provisioning.read_calls) == 5
     assert len(provisioning.calls) == 1
+    assert idempotency.transitions == []
+    assert cognito.resend_calls == []
+
+
+@pytest.mark.parametrize(
+    "transaction_error",
+    [
+        AwsStyleError("InternalServerError"),
+        AwsStyleError("UnknownServiceError", http_status=503),
+        ConnectionClosedError(endpoint_url="https://dynamodb.example"),
+    ],
+)
+def test_cognito_created_reconciles_materialized_items_after_ambiguous_transaction(
+    transaction_error: BaseException,
+) -> None:
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record("COGNITO_CREATED"),
+        cognito_get_outcomes=["cognito-sub-123"],
+    )
+    provisioning.persist_error = transaction_error
+    provisioning.results_after_persist_error = _expected_replay_items()
+
+    result = service.bootstrap_first_admin(
+        full_name="Maria da Silva",
+        email="admin@example.com",
+        operation_id=_OPERATION_ID,
+        actor_id="github:other-executor",
+    )
+
+    assert result.state == "COMPLETED"
+    assert result.replayed is True
+    assert len(provisioning.calls) == 1
+    assert len(provisioning.read_calls) == 10
+    assert clock.calls == 3
+    assert ids.calls == 0
+    assert len(cognito.resend_calls) == 1
+    assert [transition["next_state"] for transition in idempotency.transitions] == [
+        "PERSISTENCE_COMPLETED",
+        "INVITATION_SENT",
+        "COMPLETED",
+    ]
+
+
+def test_cognito_created_propagates_original_ambiguous_error_when_items_absent() -> None:
+    transaction_error = AwsStyleError("InternalServerError")
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record("COGNITO_CREATED"),
+        cognito_get_outcomes=["cognito-sub-123"],
+    )
+    provisioning.persist_error = transaction_error
+
+    with pytest.raises(AwsStyleError) as raised:
+        service.bootstrap_first_admin(
+            full_name="Maria da Silva",
+            email="admin@example.com",
+            operation_id=_OPERATION_ID,
+            actor_id="github:other-executor",
+        )
+
+    assert raised.value is transaction_error
+    assert len(provisioning.calls) == 1
+    assert len(provisioning.read_calls) == 10
+    assert clock.calls == 0
+    assert ids.calls == 0
+    assert idempotency.transitions == []
+    assert cognito.resend_calls == []
+
+
+@pytest.mark.parametrize("scenario", ["partial", "incompatible"])
+def test_cognito_created_marks_reconciliation_after_ambiguous_transaction_state(
+    scenario: str,
+) -> None:
+    expected = list(_expected_replay_items())
+    if scenario == "partial":
+        expected[4] = None
+    else:
+        expected[3] = {**expected[3], "operationId": _CORRELATION_ID}
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record("COGNITO_CREATED"),
+        cognito_get_outcomes=["cognito-sub-123"],
+    )
+    provisioning.persist_error = AwsStyleError("InternalServerError")
+    provisioning.results_after_persist_error = tuple(expected)
+
+    result = service.bootstrap_first_admin(
+        full_name="Maria da Silva",
+        email="admin@example.com",
+        operation_id=_OPERATION_ID,
+        actor_id="github:other-executor",
+    )
+
+    assert result.state == "RECONCILIATION_REQUIRED"
+    assert len(provisioning.calls) == 1
+    assert len(provisioning.read_calls) == 10
+    assert clock.calls == 1
+    assert ids.calls == 0
+    assert cognito.resend_calls == []
+    assert idempotency.transitions[0]["next_state"] == "RECONCILIATION_REQUIRED"
+
+
+def test_cognito_created_propagates_post_error_read_failure() -> None:
+    post_error_read = RuntimeError("post-error read failed")
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record("COGNITO_CREATED"),
+        cognito_get_outcomes=["cognito-sub-123"],
+    )
+    provisioning.persist_error = AwsStyleError("InternalServerError")
+    provisioning.read_error_after_persist_at = "user_profile"
+    provisioning.read_error_after_persist = post_error_read
+
+    with pytest.raises(RuntimeError) as raised:
+        service.bootstrap_first_admin(
+            full_name="Maria da Silva",
+            email="admin@example.com",
+            operation_id=_OPERATION_ID,
+            actor_id="github:other-executor",
+        )
+
+    assert raised.value is post_error_read
+    assert len(provisioning.calls) == 1
+    assert len(provisioning.read_calls) == 6
+    assert clock.calls == 0
+    assert ids.calls == 0
+    assert idempotency.transitions == []
+    assert cognito.resend_calls == []
+
+
+@pytest.mark.parametrize(
+    "error_code",
+    [
+        "TransactionCanceledException",
+        "TransactionConflictException",
+        "TooManyRequestsException",
+        "ThrottlingException",
+        "ProvisionedThroughputExceededException",
+        "ValidationException",
+    ],
+)
+def test_cognito_created_propagates_non_ambiguous_transaction_without_extra_reads(
+    error_code: str,
+) -> None:
+    transaction_error = AwsStyleError(error_code)
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record("COGNITO_CREATED"),
+        cognito_get_outcomes=["cognito-sub-123"],
+    )
+    provisioning.persist_error = transaction_error
+
+    with pytest.raises(AwsStyleError) as raised:
+        service.bootstrap_first_admin(
+            full_name="Maria da Silva",
+            email="admin@example.com",
+            operation_id=_OPERATION_ID,
+            actor_id="github:other-executor",
+        )
+
+    assert raised.value is transaction_error
+    assert len(provisioning.calls) == 1
+    assert len(provisioning.read_calls) == 5
+    assert clock.calls == 0
+    assert ids.calls == 0
     assert idempotency.transitions == []
     assert cognito.resend_calls == []
 
