@@ -3,7 +3,7 @@
 **Projeto:** Serverless Student Manager
 **Versão:** 2.7
 **Data:** 2026-08-20
-**Arquivos listados:** 47
+**Arquivos listados:** 48
 
 O próprio `MANIFEST.md` não é listado para evitar hash autorreferencial.
 
@@ -50,11 +50,12 @@ O próprio `MANIFEST.md` não é listado para evitar hash autorreferencial.
 | `docs/decisions/decision-register.md` | `627116e6dc943901e2d47a61331975459ea8b1b901bf446a64da9fdd72b2e081` |
 | `docs/decisions/pending-decisions.md` | `9a8524b823533c2c5186c91d7fae61375be0ba95995cb5cc7ecaf55b0c0cd22a` |
 | `docs/operations/cognito-dynamodb-compensation.md` | `d2914292047679b7858e6b130f4baf04440913f9fb0809b243df22323d448807` |
-| `docs/operations/non-http-idempotency.md` | `8d9a271af32d05a345a1b66e72fe51bdf274ddee7ba868deaae251768fbbf197` |
+| `docs/operations/first-admin-invitation-resume.md` | `8882b7fa91702756680f14889d33e5826cc0d8ab16beb6623c337c59643f3ace` |
+| `docs/operations/non-http-idempotency.md` | `5fa1abb45fc5c5c06d75c1115a292662fc0ca402f0ad303b2e97ee4a8dad0804` |
 | `docs/operations/rollback-strategy.md` | `0341e5837516cb745a42b76b57247e3ac3bb8e3afc02d6bce92c26ba4f606d91` |
 | `docs/operations/sole-admin-mfa-recovery.md` | `30dce5d37c002be252e16509fd43afa0e26f38ad2e05453eb0656cee0ff24797` |
 | `docs/overview.md` | `b2b59684b040212a5eceda06b9316d4897859f46273ddb82e2c419e1be96348d` |
 | `docs/references.md` | `f86b0ea29df69ea0ba5e6bad78e6dc661cad6ee24dc45bcc63222fd6735ff236` |
 | `docs/requirements/srs.md` | `01613134925ef8f3d584b612c7bb4b3a5746ca8992d9af0adfea7ba925eadb91` |
-| `docs/serverless-student-manager-ordem-de-leitura.md` | `21a26287db1cd5fb644e4af18788092cc6980eb307c52ab2d789e45cfdc1b823` |
+| `docs/serverless-student-manager-ordem-de-leitura.md` | `97faf4c85cb91f636e3e5b87e990c680428a2027b5fea6ce29404a0e3e23f123` |
 | `docs/serverless-student-manager-ordem-de-leitura.png` | `0243000a218ca8860a10c45b0eeb21a02195664f9c4da1eacb1f8abf9ceed611` |

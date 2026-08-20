@@ -57,14 +57,15 @@ Antes de qualquer implementação, o Codex deve ler `../AGENTS.md`.
 
 38. `operations/cognito-dynamodb-compensation.md`
 39. `operations/non-http-idempotency.md`
-40. `operations/sole-admin-mfa-recovery.md`
-41. `operations/rollback-strategy.md`
+40. `operations/first-admin-invitation-resume.md`
+41. `operations/sole-admin-mfa-recovery.md`
+42. `operations/rollback-strategy.md`
 
 ## 6. Apoio e auditoria
 
-42. `references.md`
-43. `AUDIT-REPORT.md`
-44. `MANIFEST.md`
+43. `references.md`
+44. `AUDIT-REPORT.md`
+45. `MANIFEST.md`
 
 ## Leitura rápida para orientação
 

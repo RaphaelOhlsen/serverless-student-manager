@@ -67,6 +67,8 @@ As transições são validadas por `operation`. Isso não torna `STARTED → COM
 
 Ela se aplica somente ao primeiro Admin `INVITED` com marker, USER, projeção e identidade Cognito reconciliados. Não substitui a recuperação da ADR-019 para o único Admin `ACTIVE` sem TOTP.
 
+O contrato operacional completo está em [Retomada do convite do primeiro Administrador](first-admin-invitation-resume.md).
+
 ### Reset administrativo de MFA
 
 ```text
