@@ -69,6 +69,10 @@ class CognitoRepository(Protocol):
 
     def resend_invitation(self, *, user_pool_id: str, user_id: str) -> None: ...
 
+    def delete_user(self, *, user_pool_id: str, user_id: str) -> None: ...
+
+    def disable_user(self, *, user_pool_id: str, user_id: str) -> None: ...
+
 
 class ProvisioningRepository(Protocol):
     def persist_first_admin_with_audit(
@@ -341,9 +345,11 @@ class FirstAdminBootstrapService:
             )
         except Exception as read_error:
             if get_aws_error_code(read_error) == "UserNotFoundException":
-                return self._mark_reconciliation_required(
+                return self._reconcile_missing_cognito(
                     context,
-                    current_state="COGNITO_CREATED",
+                    full_name=full_name,
+                    normalized_email=normalized_email,
+                    cognito_sub=cognito_sub,
                 )
             raise
 
@@ -379,26 +385,36 @@ class FirstAdminBootstrapService:
             normalized_email=normalized_email,
             cognito_sub=cognito_sub,
         )
+        persistence_state = self._classify_persistence_state(
+            context,
+            expected_items=expected_items,
+            actual_items=actual_items,
+        )
 
-        if all(item is None for item in actual_items):
+        if persistence_state == "ALL_ABSENT":
             try:
                 self._persist_replay_items(context, expected_items)
             except Exception as write_error:
-                if not is_ambiguous_dynamodb_write_error(write_error):
+                if (
+                    get_aws_error_code(write_error) != "TransactionCanceledException"
+                    and not is_ambiguous_dynamodb_write_error(write_error)
+                ):
                     raise
                 actual_items = self._read_provisioning_items(
                     context,
                     normalized_email=normalized_email,
                     cognito_sub=cognito_sub,
                 )
-                if all(item is None for item in actual_items):
+                persistence_state = self._classify_persistence_state(
+                    context,
+                    expected_items=expected_items,
+                    actual_items=actual_items,
+                )
+                if persistence_state == "ALL_ABSENT":
                     raise
-                if actual_items != expected_items:
-                    return self._mark_reconciliation_required(
-                        context,
-                        current_state="COGNITO_CREATED",
-                    )
-        elif actual_items != expected_items:
+        if persistence_state == "FOREIGN_MARKER":
+            return self._handle_foreign_marker(context, marker=actual_items[3])
+        if persistence_state == "PARTIAL_OR_INCOMPATIBLE":
             return self._mark_reconciliation_required(
                 context,
                 current_state="COGNITO_CREATED",
@@ -410,6 +426,164 @@ class FirstAdminBootstrapService:
             next_state="PERSISTENCE_COMPLETED",
         )
         return self._complete_after_persistence(context)
+
+    def _classify_persistence_state(
+        self,
+        context: BootstrapContext,
+        *,
+        expected_items: tuple[
+            dict[str, object],
+            dict[str, object],
+            dict[str, object],
+            dict[str, object],
+            dict[str, object],
+        ],
+        actual_items: tuple[
+            dict[str, object] | None,
+            dict[str, object] | None,
+            dict[str, object] | None,
+            dict[str, object] | None,
+            dict[str, object] | None,
+        ],
+    ) -> str:
+        if all(item is None for item in actual_items):
+            return "ALL_ABSENT"
+        if self._marker_belongs_to_other_operation(context, actual_items[3]):
+            return "FOREIGN_MARKER"
+        if actual_items == expected_items:
+            return "OUR_COMPLETE_PERSISTENCE"
+        return "PARTIAL_OR_INCOMPATIBLE"
+
+    @staticmethod
+    def _validated_marker_identity(
+        marker: dict[str, object] | None,
+    ) -> tuple[str, str] | None:
+        if marker is None:
+            return None
+        if marker.get("PK") != "CONTROL#FIRST_ADMIN_BOOTSTRAP":
+            return None
+        if marker.get("SK") != "CONTROL":
+            return None
+
+        user_id = marker.get("userId")
+        operation_id = marker.get("operationId")
+        created_at = marker.get("createdAt")
+        created_by = marker.get("createdBy")
+        if not isinstance(user_id, str) or user_id == "":
+            return None
+        if not isinstance(operation_id, str) or operation_id == "":
+            return None
+        if not isinstance(created_at, str) or created_at == "":
+            return None
+        if not isinstance(created_by, str) or created_by == "":
+            return None
+        try:
+            validate_uuid4(user_id)
+            validate_uuid4(operation_id)
+        except ValueError:
+            return None
+        return user_id, operation_id
+
+    @classmethod
+    def _marker_belongs_to_other_operation(
+        cls,
+        context: BootstrapContext,
+        marker: dict[str, object] | None,
+    ) -> bool:
+        marker_identity = cls._validated_marker_identity(marker)
+        if marker_identity is None:
+            return False
+        user_id, operation_id = marker_identity
+        return user_id != context.user_id or operation_id != context.operation_id
+
+    @classmethod
+    def _marker_authorizes_compensation(
+        cls,
+        context: BootstrapContext,
+        marker: dict[str, object] | None,
+    ) -> bool:
+        marker_identity = cls._validated_marker_identity(marker)
+        if marker_identity is None:
+            return False
+        user_id, operation_id = marker_identity
+        return user_id != context.user_id and operation_id != context.operation_id
+
+    def _handle_foreign_marker(
+        self,
+        context: BootstrapContext,
+        *,
+        marker: dict[str, object] | None,
+    ) -> BootstrapResult:
+        if self._marker_authorizes_compensation(context, marker):
+            return self._compensate_current_identity(context)
+        return self._mark_reconciliation_required(
+            context,
+            current_state="COGNITO_CREATED",
+        )
+
+    def _reconcile_missing_cognito(
+        self,
+        context: BootstrapContext,
+        *,
+        full_name: str,
+        normalized_email: str,
+        cognito_sub: str,
+    ) -> BootstrapResult:
+        expected_items = self._build_replay_items(
+            context,
+            full_name=full_name,
+            normalized_email=normalized_email,
+            cognito_sub=cognito_sub,
+        )
+        actual_items = self._read_provisioning_items(
+            context,
+            normalized_email=normalized_email,
+            cognito_sub=cognito_sub,
+        )
+        persistence_state = self._classify_persistence_state(
+            context,
+            expected_items=expected_items,
+            actual_items=actual_items,
+        )
+        if persistence_state == "FOREIGN_MARKER" and self._marker_authorizes_compensation(
+            context,
+            actual_items[3],
+        ):
+            return self._mark_compensated(context)
+        return self._mark_reconciliation_required(
+            context,
+            current_state="COGNITO_CREATED",
+        )
+
+    def _compensate_current_identity(
+        self,
+        context: BootstrapContext,
+    ) -> BootstrapResult:
+        try:
+            self._cognito_repository.delete_user(
+                user_pool_id=self._config.user_pool_id,
+                user_id=context.user_id,
+            )
+        except Exception as delete_error:
+            if get_aws_error_code(delete_error) == "UserNotFoundException":
+                return self._mark_compensated(context)
+            try:
+                self._cognito_repository.disable_user(
+                    user_pool_id=self._config.user_pool_id,
+                    user_id=context.user_id,
+                )
+            except Exception as disable_error:
+                if get_aws_error_code(disable_error) == "UserNotFoundException":
+                    return self._mark_compensated(context)
+                return self._mark_reconciliation_required(
+                    context,
+                    current_state="COGNITO_CREATED",
+                )
+            return self._mark_reconciliation_required(
+                context,
+                current_state="COGNITO_CREATED",
+            )
+        return self._mark_compensated(context)
 
     def _build_replay_items(
         self,
@@ -684,6 +858,14 @@ class FirstAdminBootstrapService:
             next_state="RECONCILIATION_REQUIRED",
         )
         return self._replay_result(context, state="RECONCILIATION_REQUIRED")
+
+    def _mark_compensated(self, context: BootstrapContext) -> BootstrapResult:
+        self._transition(
+            record_id=context.record_id,
+            current_state="COGNITO_CREATED",
+            next_state="COMPENSATED",
+        )
+        return self._replay_result(context, state="COMPENSATED")
 
     @staticmethod
     def _replay_result(

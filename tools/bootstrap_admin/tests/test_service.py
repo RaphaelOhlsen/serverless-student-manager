@@ -105,12 +105,20 @@ class FakeCognitoRepository:
         *,
         get_outcomes: list[object] | None = None,
         create_outcomes: list[object] | None = None,
+        delete_outcomes: list[object] | None = None,
+        disable_outcomes: list[object] | None = None,
     ) -> None:
         self._events = events
         self._get_outcomes = get_outcomes or []
         self._create_outcomes = create_outcomes or ["cognito-sub-123"]
+        self._delete_outcomes = delete_outcomes if delete_outcomes is not None else [None]
+        self._disable_outcomes = (
+            disable_outcomes if disable_outcomes is not None else [None]
+        )
         self.get_calls: list[dict[str, str]] = []
         self.create_calls: list[dict[str, str]] = []
+        self.delete_calls: list[dict[str, str]] = []
+        self.disable_calls: list[dict[str, str]] = []
         self.resend_calls: list[dict[str, str]] = []
 
     def get_existing_user_sub(
@@ -135,6 +143,34 @@ class FakeCognitoRepository:
             raise outcome
         assert isinstance(outcome, str)
         return outcome
+
+    def delete_user(self, *, user_pool_id: str, user_id: str) -> None:
+        self._events.append("cognito:delete")
+        self.delete_calls.append(
+            {
+                "user_pool_id": user_pool_id,
+                "user_id": user_id,
+            }
+        )
+        if not self._delete_outcomes:
+            raise AssertionError("unexpected delete_user call")
+        outcome = self._delete_outcomes.pop(0)
+        if isinstance(outcome, BaseException):
+            raise outcome
+
+    def disable_user(self, *, user_pool_id: str, user_id: str) -> None:
+        self._events.append("cognito:disable")
+        self.disable_calls.append(
+            {
+                "user_pool_id": user_pool_id,
+                "user_id": user_id,
+            }
+        )
+        if not self._disable_outcomes:
+            raise AssertionError("unexpected disable_user call")
+        outcome = self._disable_outcomes.pop(0)
+        if isinstance(outcome, BaseException):
+            raise outcome
 
     def create_suppressed_user(
         self,
@@ -357,6 +393,24 @@ def _expected_replay_items() -> tuple[
     )
 
 
+def _foreign_marker(*, operation_id: str, user_id: str) -> dict[str, object]:
+    return {
+        "PK": "CONTROL#FIRST_ADMIN_BOOTSTRAP",
+        "SK": "CONTROL",
+        "userId": user_id,
+        "operationId": operation_id,
+        "createdAt": "2026-08-20T13:45:12.347Z",
+        "createdBy": "github:winner",
+    }
+
+
+def _safe_foreign_marker() -> dict[str, object]:
+    return _foreign_marker(
+        operation_id=_CORRELATION_ID,
+        user_id=_EVENT_ID,
+    )
+
+
 def _set_provisioning_results(
     provisioning: FakeProvisioningRepository,
     items: tuple[
@@ -381,6 +435,8 @@ def _build_service(
     existing: dict[str, object] | None = None,
     cognito_get_outcomes: list[object] | None = None,
     cognito_create_outcomes: list[object] | None = None,
+    cognito_delete_outcomes: list[object] | None = None,
+    cognito_disable_outcomes: list[object] | None = None,
 ) -> tuple[
     FirstAdminBootstrapService,
     list[str],
@@ -405,6 +461,8 @@ def _build_service(
         events,
         get_outcomes=cognito_get_outcomes,
         create_outcomes=cognito_create_outcomes,
+        delete_outcomes=cognito_delete_outcomes,
+        disable_outcomes=cognito_disable_outcomes,
     )
     provisioning = FakeProvisioningRepository(events)
     service = FirstAdminBootstrapService(
@@ -1336,7 +1394,6 @@ def test_cognito_created_replay_marks_partial_or_incompatible_items_for_reconcil
     [
         "different-sub",
         CognitoIdentityValidationError("identity is incompatible"),
-        AwsStyleError("UserNotFoundException"),
     ],
 )
 def test_cognito_created_replay_marks_cognito_inconsistency_before_dynamo(
@@ -1567,7 +1624,6 @@ def test_cognito_created_propagates_post_error_read_failure() -> None:
 @pytest.mark.parametrize(
     "error_code",
     [
-        "TransactionCanceledException",
         "TransactionConflictException",
         "TooManyRequestsException",
         "ThrottlingException",
@@ -1600,6 +1656,429 @@ def test_cognito_created_propagates_non_ambiguous_transaction_without_extra_read
     assert ids.calls == 0
     assert idempotency.transitions == []
     assert cognito.resend_calls == []
+
+
+@pytest.mark.parametrize(
+    ("marker_operation_id", "marker_user_id", "expected_state", "delete_count"),
+    [
+        (_OPERATION_ID, _CORRELATION_ID, "RECONCILIATION_REQUIRED", 0),
+        (_CORRELATION_ID, _USER_ID, "RECONCILIATION_REQUIRED", 0),
+        (_CORRELATION_ID, _EVENT_ID, "COMPENSATED", 1),
+    ],
+)
+def test_transaction_canceled_detects_structurally_valid_foreign_marker(
+    marker_operation_id: str,
+    marker_user_id: str,
+    expected_state: str,
+    delete_count: int,
+) -> None:
+    expected = list(_expected_replay_items())
+    expected[3] = _foreign_marker(
+        operation_id=marker_operation_id,
+        user_id=marker_user_id,
+    )
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record("COGNITO_CREATED"),
+        cognito_get_outcomes=["cognito-sub-123"],
+    )
+    provisioning.persist_error = AwsStyleError("TransactionCanceledException")
+    provisioning.results_after_persist_error = tuple(expected)
+
+    result = service.bootstrap_first_admin(
+        full_name="Maria da Silva",
+        email="admin@example.com",
+        operation_id=_OPERATION_ID,
+        actor_id="github:other-executor",
+    )
+
+    assert result.state == expected_state
+    assert result.replayed is True
+    assert len(provisioning.calls) == 1
+    assert len(provisioning.read_calls) == 10
+    assert clock.calls == 1
+    assert ids.calls == 0
+    assert cognito.create_calls == []
+    assert len(cognito.delete_calls) == delete_count
+    assert cognito.disable_calls == []
+    assert cognito.resend_calls == []
+    assert idempotency.transitions[0]["next_state"] == expected_state
+
+
+def test_transaction_canceled_does_not_trust_malformed_foreign_marker() -> None:
+    expected = list(_expected_replay_items())
+    expected[3] = {
+        "PK": "WRONG",
+        "SK": "CONTROL",
+        "userId": _CORRELATION_ID,
+        "operationId": _CORRELATION_ID,
+        "createdAt": "2026-08-20T13:45:12.347Z",
+        "createdBy": "github:winner",
+    }
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record("COGNITO_CREATED"),
+        cognito_get_outcomes=["cognito-sub-123"],
+    )
+    provisioning.persist_error = AwsStyleError("TransactionCanceledException")
+    provisioning.results_after_persist_error = tuple(expected)
+
+    result = service.bootstrap_first_admin(
+        full_name="Maria da Silva",
+        email="admin@example.com",
+        operation_id=_OPERATION_ID,
+        actor_id="github:other-executor",
+    )
+
+    assert result.state == "RECONCILIATION_REQUIRED"
+    assert len(provisioning.calls) == 1
+    assert clock.calls == 1
+    assert ids.calls == 0
+    assert cognito.resend_calls == []
+
+
+def test_transaction_canceled_accepts_our_complete_persistence() -> None:
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record("COGNITO_CREATED"),
+        cognito_get_outcomes=["cognito-sub-123"],
+    )
+    provisioning.persist_error = AwsStyleError("TransactionCanceledException")
+    provisioning.results_after_persist_error = _expected_replay_items()
+
+    result = service.bootstrap_first_admin(
+        full_name="Maria da Silva",
+        email="admin@example.com",
+        operation_id=_OPERATION_ID,
+        actor_id="github:other-executor",
+    )
+
+    assert result.state == "COMPLETED"
+    assert len(provisioning.calls) == 1
+    assert len(provisioning.read_calls) == 10
+    assert clock.calls == 3
+    assert ids.calls == 0
+    assert len(cognito.resend_calls) == 1
+
+
+def test_transaction_canceled_propagates_original_error_when_all_items_absent() -> None:
+    transaction_error = AwsStyleError("TransactionCanceledException")
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record("COGNITO_CREATED"),
+        cognito_get_outcomes=["cognito-sub-123"],
+    )
+    provisioning.persist_error = transaction_error
+
+    with pytest.raises(AwsStyleError) as raised:
+        service.bootstrap_first_admin(
+            full_name="Maria da Silva",
+            email="admin@example.com",
+            operation_id=_OPERATION_ID,
+            actor_id="github:other-executor",
+        )
+
+    assert raised.value is transaction_error
+    assert len(provisioning.calls) == 1
+    assert len(provisioning.read_calls) == 10
+    assert clock.calls == 0
+    assert ids.calls == 0
+    assert idempotency.transitions == []
+    assert cognito.resend_calls == []
+
+
+@pytest.mark.parametrize("scenario", ["own-marker-audit-absent", "marker-absent-user-present"])
+def test_transaction_canceled_marks_partial_state_for_reconciliation(
+    scenario: str,
+) -> None:
+    expected = list(_expected_replay_items())
+    if scenario == "own-marker-audit-absent":
+        expected[4] = None
+    else:
+        expected = [expected[0], None, None, None, None]
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record("COGNITO_CREATED"),
+        cognito_get_outcomes=["cognito-sub-123"],
+    )
+    provisioning.persist_error = AwsStyleError("TransactionCanceledException")
+    provisioning.results_after_persist_error = tuple(expected)
+
+    result = service.bootstrap_first_admin(
+        full_name="Maria da Silva",
+        email="admin@example.com",
+        operation_id=_OPERATION_ID,
+        actor_id="github:other-executor",
+    )
+
+    assert result.state == "RECONCILIATION_REQUIRED"
+    assert len(provisioning.calls) == 1
+    assert clock.calls == 1
+    assert ids.calls == 0
+    assert cognito.resend_calls == []
+
+
+@pytest.mark.parametrize(
+    "write_error",
+    [
+        AwsStyleError("InternalServerError"),
+        ConnectionClosedError(endpoint_url="https://dynamodb.example"),
+    ],
+)
+def test_ambiguous_write_detects_foreign_marker(
+    write_error: BaseException,
+) -> None:
+    expected = list(_expected_replay_items())
+    expected[3] = _foreign_marker(
+        operation_id=_CORRELATION_ID,
+        user_id=_EVENT_ID,
+    )
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record("COGNITO_CREATED"),
+        cognito_get_outcomes=["cognito-sub-123"],
+    )
+    provisioning.persist_error = write_error
+    provisioning.results_after_persist_error = tuple(expected)
+
+    result = service.bootstrap_first_admin(
+        full_name="Maria da Silva",
+        email="admin@example.com",
+        operation_id=_OPERATION_ID,
+        actor_id="github:other-executor",
+    )
+
+    assert result.state == "COMPENSATED"
+    assert len(provisioning.calls) == 1
+    assert clock.calls == 1
+    assert ids.calls == 0
+    assert cognito.delete_calls == [
+        {"user_pool_id": "pool-123", "user_id": _USER_ID}
+    ]
+    assert cognito.disable_calls == []
+    assert cognito.resend_calls == []
+
+
+def test_normal_read_detects_foreign_marker_without_transaction() -> None:
+    expected = list(_expected_replay_items())
+    expected[3] = _foreign_marker(
+        operation_id=_CORRELATION_ID,
+        user_id=_EVENT_ID,
+    )
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record("COGNITO_CREATED"),
+        cognito_get_outcomes=["cognito-sub-123"],
+    )
+    _set_provisioning_results(provisioning, tuple(expected))
+
+    result = service.bootstrap_first_admin(
+        full_name="Maria da Silva",
+        email="admin@example.com",
+        operation_id=_OPERATION_ID,
+        actor_id="github:other-executor",
+    )
+
+    assert result.state == "COMPENSATED"
+    assert provisioning.calls == []
+    assert clock.calls == 1
+    assert ids.calls == 0
+    assert cognito.delete_calls == [
+        {"user_pool_id": "pool-123", "user_id": _USER_ID}
+    ]
+    assert cognito.delete_calls[0]["user_id"] != _EVENT_ID
+    assert cognito.disable_calls == []
+    assert cognito.resend_calls == []
+
+
+def test_normal_read_treats_own_marker_with_incompatible_item_as_reconciliation() -> None:
+    expected = list(_expected_replay_items())
+    expected[0] = {**expected[0], "status": "ACTIVE"}
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record("COGNITO_CREATED"),
+        cognito_get_outcomes=["cognito-sub-123"],
+    )
+    _set_provisioning_results(provisioning, tuple(expected))
+
+    result = service.bootstrap_first_admin(
+        full_name="Maria da Silva",
+        email="admin@example.com",
+        operation_id=_OPERATION_ID,
+        actor_id="github:other-executor",
+    )
+
+    assert result.state == "RECONCILIATION_REQUIRED"
+    assert provisioning.calls == []
+    assert clock.calls == 1
+    assert ids.calls == 0
+    assert cognito.resend_calls == []
+
+
+def test_foreign_marker_delete_user_not_found_is_compensated() -> None:
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record("COGNITO_CREATED"),
+        cognito_get_outcomes=["cognito-sub-123"],
+        cognito_delete_outcomes=[AwsStyleError("UserNotFoundException")],
+    )
+    _set_provisioning_results(
+        provisioning,
+        (None, None, None, _safe_foreign_marker(), None),
+    )
+
+    result = service.bootstrap_first_admin(
+        full_name="Maria da Silva",
+        email="admin@example.com",
+        operation_id=_OPERATION_ID,
+        actor_id="github:other-executor",
+    )
+
+    assert result.state == "COMPENSATED"
+    assert len(cognito.delete_calls) == 1
+    assert cognito.disable_calls == []
+    assert clock.calls == 1
+    assert ids.calls == 0
+    assert idempotency.transitions[0]["next_state"] == "COMPENSATED"
+
+
+@pytest.mark.parametrize(
+    ("disable_outcome", "expected_state"),
+    [
+        (None, "RECONCILIATION_REQUIRED"),
+        (AwsStyleError("UserNotFoundException"), "COMPENSATED"),
+        (AwsStyleError("InternalErrorException"), "RECONCILIATION_REQUIRED"),
+    ],
+)
+def test_foreign_marker_delete_failure_uses_disable_fallback(
+    disable_outcome: object,
+    expected_state: str,
+) -> None:
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record("COGNITO_CREATED"),
+        cognito_get_outcomes=["cognito-sub-123"],
+        cognito_delete_outcomes=[AwsStyleError("InternalErrorException")],
+        cognito_disable_outcomes=[disable_outcome],
+    )
+    _set_provisioning_results(
+        provisioning,
+        (None, None, None, _safe_foreign_marker(), None),
+    )
+
+    result = service.bootstrap_first_admin(
+        full_name="Maria da Silva",
+        email="admin@example.com",
+        operation_id=_OPERATION_ID,
+        actor_id="github:other-executor",
+    )
+
+    assert result.state == expected_state
+    assert cognito.delete_calls == [
+        {"user_pool_id": "pool-123", "user_id": _USER_ID}
+    ]
+    assert cognito.disable_calls == [
+        {"user_pool_id": "pool-123", "user_id": _USER_ID}
+    ]
+    assert clock.calls == 1
+    assert ids.calls == 0
+    assert cognito.resend_calls == []
+    assert idempotency.transitions[0]["next_state"] == expected_state
+
+
+def test_missing_cognito_with_safe_foreign_marker_recovers_compensated_state() -> None:
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record("COGNITO_CREATED"),
+        cognito_get_outcomes=[AwsStyleError("UserNotFoundException")],
+    )
+    _set_provisioning_results(
+        provisioning,
+        (None, None, None, _safe_foreign_marker(), None),
+    )
+
+    result = service.bootstrap_first_admin(
+        full_name="Maria da Silva",
+        email="admin@example.com",
+        operation_id=_OPERATION_ID,
+        actor_id="github:other-executor",
+    )
+
+    assert result.state == "COMPENSATED"
+    assert result.replayed is True
+    assert cognito.delete_calls == []
+    assert cognito.disable_calls == []
+    assert provisioning.calls == []
+    assert clock.calls == 1
+    assert ids.calls == 0
+    assert idempotency.transitions[0]["next_state"] == "COMPENSATED"
+
+
+@pytest.mark.parametrize(
+    "actual_items",
+    [
+        (
+            None,
+            None,
+            None,
+            _foreign_marker(operation_id=_CORRELATION_ID, user_id=_USER_ID),
+            None,
+        ),
+        _expected_replay_items(),
+        (
+            None,
+            None,
+            None,
+            {
+                "PK": "WRONG",
+                "SK": "CONTROL",
+                "userId": _EVENT_ID,
+                "operationId": _CORRELATION_ID,
+                "createdAt": "2026-08-20T13:45:12.347Z",
+                "createdBy": "github:winner",
+            },
+            None,
+        ),
+    ],
+)
+def test_missing_cognito_without_safe_foreign_marker_requires_reconciliation(
+    actual_items: tuple[
+        dict[str, object] | None,
+        dict[str, object] | None,
+        dict[str, object] | None,
+        dict[str, object] | None,
+        dict[str, object] | None,
+    ],
+) -> None:
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record("COGNITO_CREATED"),
+        cognito_get_outcomes=[AwsStyleError("UserNotFoundException")],
+    )
+    _set_provisioning_results(provisioning, actual_items)
+
+    result = service.bootstrap_first_admin(
+        full_name="Maria da Silva",
+        email="admin@example.com",
+        operation_id=_OPERATION_ID,
+        actor_id="github:other-executor",
+    )
+
+    assert result.state == "RECONCILIATION_REQUIRED"
+    assert cognito.delete_calls == []
+    assert cognito.disable_calls == []
+    assert provisioning.calls == []
+    assert clock.calls == 1
+    assert ids.calls == 0
+
+
+def test_compensated_replay_has_no_compensation_effects() -> None:
+    service, _, clock, ids, _, cognito, provisioning = _build_service(
+        existing=_existing_record("COMPENSATED"),
+    )
+
+    result = service.bootstrap_first_admin(
+        full_name="Maria da Silva",
+        email="admin@example.com",
+        operation_id=_OPERATION_ID,
+        actor_id="github:other-executor",
+    )
+
+    assert result.state == "COMPENSATED"
+    assert result.replayed is True
+    assert cognito.delete_calls == []
+    assert cognito.disable_calls == []
+    assert provisioning.calls == []
+    assert clock.calls == 0
+    assert ids.calls == 0
 
 
 def test_replay_payload_mismatch_fails_before_any_effect() -> None:
