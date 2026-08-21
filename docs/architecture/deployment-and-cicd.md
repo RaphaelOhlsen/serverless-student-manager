@@ -102,7 +102,7 @@ Ambos usam somente `workflow_dispatch`. Seus jobs estão associados, respectivam
 
 Os workflows estão versionados, os Environments estão protegidos e suas Environment variables estão completas e verificadas: `8/8` para o bootstrap e `6/6` para a retomada, sem Environment secrets. A role e a policy dedicadas à retomada foram aplicadas e verificadas na AWS; o apply criou três recursos sem alterar ou destruir infraestrutura existente, e o plan pós-apply confirmou convergência sem drift.
 
-Assim, ambos estão tecnicamente prontos para `workflow_dispatch`. Eles continuam sendo workflows operacionais manuais privilegiados, não etapas do pipeline normal de CI ou deploy, e ainda não foram executados nem validados end-to-end.
+Os workflows estarão tecnicamente disponíveis para `workflow_dispatch` após sua promoção para a default branch `main`. Até essa promoção, a infraestrutura operacional está pronta, mas o trigger manual ainda não está disponível no GitHub Actions. Eles continuam sendo workflows operacionais manuais privilegiados, não etapas do pipeline normal de CI ou deploy, e ainda não foram executados nem validados end-to-end.
 
 O provider OIDC existente é reutilizado pelas roles operacionais; nenhum segundo provider OIDC é criado.
 

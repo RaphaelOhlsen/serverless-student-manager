@@ -432,7 +432,7 @@ Ainda pendente:
 1. executar operacionalmente os workflows quando houver necessidade autorizada;
 2. validar o comportamento end-to-end dessas execuções.
 
-Os dois workflows estão tecnicamente prontos para `workflow_dispatch`, mas nenhum deles foi executado nesta validação operacional. Isso não significa que o bootstrap tenha sido realizado, que a retomada tenha sido acionada, que um primeiro Administrador tenha sido criado ou que um convite tenha sido enviado. O escopo inicial permanece restrito a `dev`; `prod` continua fora desta implementação enquanto não existir capacidade equivalente de bootstrap inicial em `prod`.
+A infraestrutura, as roles e policies IAM, os GitHub Environments e suas variables estão configurados e validados. Os workflows ainda existem somente na branch `feature/first-admin-bootstrap`; como `workflow_dispatch` requer que o arquivo do workflow exista na default branch, eles ficarão disponíveis para despacho manual somente após sua promoção para `main`. Nenhum workflow foi executado ou validado end-to-end; o primeiro Administrador não foi criado e nenhum convite foi enviado. O escopo inicial permanece restrito a `dev`; `prod` continua fora desta implementação enquanto não existir capacidade equivalente de bootstrap inicial em `prod`.
 
 ## Referências
 
