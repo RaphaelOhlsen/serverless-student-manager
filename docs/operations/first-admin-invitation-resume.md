@@ -288,7 +288,7 @@ O workflow versionado é `.github/workflows/resume-first-admin-invitation.yml` e
 github:<github.actor>@<github.actor_id>
 ```
 
-O job usa o GitHub Environment `dev-resume-first-admin-invitation`. A role e a policy dedicadas estão definidas em Terraform, respectivamente, como:
+O job usa o GitHub Environment `dev-resume-first-admin-invitation`. A role e a policy dedicadas, definidas em Terraform, aplicadas e verificadas na AWS, são, respectivamente:
 
 ```text
 student-manager-github-dev-resume-first-admin-invitation
@@ -313,7 +313,7 @@ Não são concedidos:
 - acesso à tabela `audit-events`;
 - acesso à tabela `students`.
 
-A role e a policy de retomada estão apenas definidas no Terraform versionado. Ainda não foram aplicadas nem confirmadas na AWS.
+A trust policy efetiva da role foi verificada na AWS: permite somente `sts:AssumeRoleWithWebIdentity` pelo provider OIDC do GitHub, exige audience `sts.amazonaws.com` e restringe o `sub` ao Environment `dev-resume-first-admin-invitation` por correspondência exata, sem wildcard. A policy efetiva e seu attachment à role também foram verificados, sem `Action="*"` ou `Resource="*"`.
 
 ## Bootstrap inicial operacional
 
@@ -368,7 +368,7 @@ A CLI preserva os seguintes códigos de saída no job:
 
 Os códigos `1` e `2` deixam o job não-verde.
 
-## GitHub Environments e configuração pendente
+## GitHub Environments e configuração operacional
 
 Os Environments `dev-bootstrap-admin` e `dev-resume-first-admin-invitation` já foram criados e estão protegidos. O estado externo confirmado de ambos é:
 
@@ -378,11 +378,10 @@ prevent_self_review                  = false
 can_admins_bypass                    = false
 wait timer                           = none
 custom deployment branch/tag policy = none
-variables                            = 0
 secrets                              = 0
 ```
 
-As variables necessárias para `dev-bootstrap-admin`, ainda não configuradas, são:
+As oito variables configuradas e verificadas em `dev-bootstrap-admin` são:
 
 ```text
 AWS_ROLE_ARN
@@ -395,7 +394,7 @@ IDEMPOTENCY_TABLE_NAME
 AUDIT_RETENTION_DAYS
 ```
 
-As variables necessárias para `dev-resume-first-admin-invitation`, também ainda não configuradas, são:
+As seis variables configuradas e verificadas em `dev-resume-first-admin-invitation` são:
 
 ```text
 AWS_ROLE_ARN
@@ -406,7 +405,7 @@ USERS_TABLE_NAME
 IDEMPOTENCY_TABLE_NAME
 ```
 
-Esses valores somente serão configurados depois de `terraform plan`, revisão humana, `terraform apply` autorizado e leitura dos outputs reais.
+Não há variables extras nem Environment secrets nos dois Environments. Os nomes configurados correspondem exatamente aos contratos dos respectivos workflows.
 
 ## Estado de operacionalização
 
@@ -418,23 +417,22 @@ Implementado e versionado:
 - definição Terraform da role e policy de retomada;
 - GitHub Environments criados e protegidos.
 
-Estado externo já confirmado:
+Estado externo confirmado:
 
 - `dev-bootstrap-admin` protegido;
 - `dev-resume-first-admin-invitation` criado e protegido;
-- ambos sem variables e secrets.
+- apply Terraform da capacidade de retomada concluído com `3 added, 0 changed, 0 destroyed`;
+- pós-apply convergente: `No changes. Your infrastructure matches the configuration.`;
+- role, policy, trust OIDC e attachment da retomada verificados na AWS;
+- variables completas e verificadas: `8/8` no bootstrap e `6/6` na retomada;
+- ambos sem Environment secrets.
 
 Ainda pendente:
 
-1. executar `terraform plan` real;
-2. revisar o plan;
-3. executar `terraform apply` somente após autorização;
-4. confirmar a role e a policy de retomada na AWS;
-5. ler os outputs reais;
-6. configurar as Environment variables;
-7. executar e testar operacionalmente os workflows.
+1. executar operacionalmente os workflows quando houver necessidade autorizada;
+2. validar o comportamento end-to-end dessas execuções.
 
-Portanto, os workflows ainda não estão prontos para execução. O escopo inicial permanece restrito a `dev`; `prod` continua fora desta implementação enquanto não existir capacidade equivalente de bootstrap inicial em `prod`.
+Os dois workflows estão tecnicamente prontos para `workflow_dispatch`, mas nenhum deles foi executado nesta validação operacional. Isso não significa que o bootstrap tenha sido realizado, que a retomada tenha sido acionada, que um primeiro Administrador tenha sido criado ou que um convite tenha sido enviado. O escopo inicial permanece restrito a `dev`; `prod` continua fora desta implementação enquanto não existir capacidade equivalente de bootstrap inicial em `prod`.
 
 ## Referências
 

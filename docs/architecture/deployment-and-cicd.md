@@ -100,7 +100,9 @@ O bootstrap inicial e a retomada do convite possuem workflows privilegiados manu
 
 Ambos usam somente `workflow_dispatch`. Seus jobs estão associados, respectivamente, a `dev-bootstrap-admin` e `dev-resume-first-admin-invitation`. Os dois Environments exigem `RaphaelOhlsen` como reviewer, usam `prevent_self_review=false`, não permitem bypass administrativo e não possuem wait timer ou política customizada de branches/tags.
 
-Os workflows estão versionados e os Environments estão protegidos, mas ainda não houve execução operacional. As Environment variables permanecem pendentes. A role e a policy de retomada estão definidas em Terraform, porém sua aplicação depende de plan e revisão explícita antes de qualquer `apply` autorizado.
+Os workflows estão versionados, os Environments estão protegidos e suas Environment variables estão completas e verificadas: `8/8` para o bootstrap e `6/6` para a retomada, sem Environment secrets. A role e a policy dedicadas à retomada foram aplicadas e verificadas na AWS; o apply criou três recursos sem alterar ou destruir infraestrutura existente, e o plan pós-apply confirmou convergência sem drift.
+
+Assim, ambos estão tecnicamente prontos para `workflow_dispatch`. Eles continuam sendo workflows operacionais manuais privilegiados, não etapas do pipeline normal de CI ou deploy, e ainda não foram executados nem validados end-to-end.
 
 O provider OIDC existente é reutilizado pelas roles operacionais; nenhum segundo provider OIDC é criado.
 
