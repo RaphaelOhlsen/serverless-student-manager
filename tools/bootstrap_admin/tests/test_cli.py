@@ -2,8 +2,13 @@ import json
 from typing import Any
 
 import pytest
+from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 
 from tools.bootstrap_admin.idempotency import IdempotencyConflictError
+from tools.bootstrap_admin.operational_error import (
+    OperationalError,
+    OperationalErrorDetails,
+)
 from tools.bootstrap_admin.service_models import (
     BootstrapResult,
     ResumeInvitationResult,
@@ -215,7 +220,10 @@ def test_unknown_result_state_fails_closed_without_json_or_state_disclosure(
     assert exit_code == 1
     output = capsys.readouterr()
     assert output.out == ""
-    assert output.err == "error: operation failed\n"
+    assert "error: operation failed" in output.err
+    assert "stage=UNCLASSIFIED_OPERATION" in output.err
+    assert "exceptionClass=RuntimeError" in output.err
+    assert f"operationId={_OPERATION_ID}" in output.err
     assert unknown_state not in output.err
     assert "Traceback" not in output.err
 
@@ -287,6 +295,62 @@ def test_errors_are_sanitized_without_traceback_or_personal_input(
     assert "Sensitive Name" not in output.err
     assert "sensitive@example.com" not in output.err
     assert "payload" not in output.err
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "ValidationException",
+        "AccessDeniedException",
+        "ResourceNotFoundException",
+        "TransactionCanceledException",
+    ],
+)
+def test_operational_client_errors_emit_safe_diagnostic(
+    code: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from tools.bootstrap_admin.cli import run
+
+    cause = ClientError(
+        {
+            "Error": {
+                "Code": code,
+                "Message": "Sensitive Name sensitive@example.com",
+            },
+            "ResponseMetadata": {"RequestId": "request-id-123"},
+        },
+        "TransactWriteItems",
+    )
+    diagnostic = OperationalError(
+        OperationalErrorDetails.from_exception(
+            cause,
+            stage="PERSIST_FIRST_ADMIN_TRANSACTION",
+            service="dynamodb",
+            operation="TransactWriteItems",
+            operation_id=_OPERATION_ID,
+        )
+    )
+    service = FakeBootstrapService(diagnostic)
+
+    exit_code = run(
+        _bootstrap_args(),
+        bootstrap_service_factory=lambda: service,
+        resume_service_factory=_unexpected_factory,
+    )
+
+    assert exit_code == 1
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert "stage=PERSIST_FIRST_ADMIN_TRANSACTION" in output.err
+    assert "service=dynamodb" in output.err
+    assert "operation=TransactWriteItems" in output.err
+    assert "exceptionClass=ClientError" in output.err
+    assert f"awsErrorCode={code}" in output.err
+    assert "awsRequestId=request-id-123" in output.err
+    assert f"operationId={_OPERATION_ID}" in output.err
+    assert "Sensitive Name" not in output.err
+    assert "sensitive@example.com" not in output.err
 
 
 def test_invalid_uuid_returns_one_without_generating_operation_id(

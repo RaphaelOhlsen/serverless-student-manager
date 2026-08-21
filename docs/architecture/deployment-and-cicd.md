@@ -102,7 +102,9 @@ Ambos usam somente `workflow_dispatch`. Seus jobs estão associados, respectivam
 
 Os workflows estão versionados, os Environments estão protegidos e suas Environment variables estão completas e verificadas: `8/8` para o bootstrap e `6/6` para a retomada, sem Environment secrets. A role e a policy dedicadas à retomada foram aplicadas e verificadas na AWS; o apply criou três recursos sem alterar ou destruir infraestrutura existente, e o plan pós-apply confirmou convergência sem drift.
 
-Os workflows estarão tecnicamente disponíveis para `workflow_dispatch` após sua promoção para a default branch `main`. Até essa promoção, a infraestrutura operacional está pronta, mas o trigger manual ainda não está disponível no GitHub Actions. Eles continuam sendo workflows operacionais manuais privilegiados, não etapas do pipeline normal de CI ou deploy, e ainda não foram executados nem validados end-to-end.
+Os workflows estão disponíveis para `workflow_dispatch` na default branch `main`. Eles continuam sendo workflows operacionais manuais privilegiados, não etapas do pipeline normal de CI ou deploy. A primeira execução do bootstrap falhou após criar a identidade Cognito com mensagem suprimida e antes da persistência transacional; nenhum convite foi enviado e não houve validação end-to-end. O estado parcial deve permanecer congelado até reconciliação aprovada.
+
+No bootstrap, nome e e-mail são lidos em runtime do payload indicado por `GITHUB_EVENT_PATH`, recebem `add-mask` antes do uso e não são declarados no bloco `env`. O masking protege a saída do runner, mas não transforma inputs de `workflow_dispatch` em secrets nem elimina sua exposição potencial na metadata ou UI do GitHub.
 
 O provider OIDC existente é reutilizado pelas roles operacionais; nenhum segundo provider OIDC é criado.
 

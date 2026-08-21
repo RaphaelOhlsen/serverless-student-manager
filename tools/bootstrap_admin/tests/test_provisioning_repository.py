@@ -1,7 +1,16 @@
 from typing import Any
 
 import pytest
+from botocore.session import Session  # type: ignore[import-untyped]
+from botocore.validate import validate_parameters  # type: ignore[import-untyped]
 
+from tools.bootstrap_admin.audit import build_user_created_audit_event
+from tools.bootstrap_admin.models import (
+    build_cognito_projection,
+    build_first_admin_bootstrap_marker,
+    build_unique_email,
+    build_user_profile,
+)
 from tools.bootstrap_admin.provisioning_repository import ProvisioningRepository
 
 
@@ -163,6 +172,84 @@ def test_persist_first_admin_with_audit_uses_one_conditional_transaction() -> No
         "ClientRequestToken": "literal-client-request-token",
     }
     assert client.put_item_calls == 0
+
+
+def test_complete_transaction_matches_botocore_service_model_and_has_unique_keys() -> None:
+    client = FakeDynamoDBClient()
+    repository = ProvisioningRepository(client)
+    user_id = "223e4567-e89b-42d3-a456-426614174001"
+    cognito_sub = "323e4567-e89b-42d3-a456-426614174002"
+    operation_id = "123e4567-e89b-42d3-a456-426614174000"
+    occurred_at = "2026-08-20T12:00:00.000Z"
+
+    repository.persist_first_admin_with_audit(
+        users_table_name="users-table",
+        audit_table_name="audit-table",
+        user_profile=build_user_profile(
+            user_id=user_id,
+            cognito_sub=cognito_sub,
+            full_name="Example Admin",
+            email="example-admin@example.invalid",
+            created_at=occurred_at,
+            created_by="github:example@123",
+        ),
+        unique_email=build_unique_email(
+            user_id=user_id,
+            email="example-admin@example.invalid",
+        ),
+        cognito_projection=build_cognito_projection(
+            user_id=user_id,
+            cognito_sub=cognito_sub,
+        ),
+        bootstrap_marker=build_first_admin_bootstrap_marker(
+            user_id=user_id,
+            operation_id=operation_id,
+            created_at=occurred_at,
+            created_by="github:example@123",
+        ),
+        audit_event=build_user_created_audit_event(
+            user_id=user_id,
+            actor_id="github:example@123",
+            event_id="423e4567-e89b-42d3-a456-426614174003",
+            correlation_id="523e4567-e89b-42d3-a456-426614174004",
+            occurred_at=occurred_at,
+            expires_at=1_795_009_512,
+        ),
+        client_request_token=operation_id,
+    )
+
+    transaction = client.last_transaction
+    assert transaction is not None
+    operation_model = Session().get_service_model("dynamodb").operation_model("TransactWriteItems")
+    validate_parameters(transaction, operation_model.input_shape)
+
+    transact_items = transaction["TransactItems"]
+    assert isinstance(transact_items, list)
+    assert len(transact_items) == 5
+    keys: set[tuple[str, str, str]] = set()
+    for action in transact_items:
+        assert isinstance(action, dict)
+        put = action["Put"]
+        assert isinstance(put, dict)
+        item = put["Item"]
+        assert isinstance(item, dict)
+        table_name = put["TableName"]
+        assert isinstance(table_name, str)
+        pk = item["PK"]
+        sk = item["SK"]
+        assert isinstance(pk, dict)
+        assert isinstance(sk, dict)
+        key = (table_name, pk["S"], sk["S"])
+        assert all(isinstance(value, str) for value in key)
+        assert key not in keys
+        keys.add(key)
+        assert put["ConditionExpression"] == (
+            "attribute_not_exists(PK) AND attribute_not_exists(SK)"
+        )
+
+    assert transaction["ClientRequestToken"] == operation_id
+    assert "role" in transact_items[0]["Put"]["Item"]
+    assert "GSI3PK" in transact_items[4]["Put"]["Item"]
 
 
 class DynamoDBFailure(RuntimeError):

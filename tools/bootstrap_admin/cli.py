@@ -20,6 +20,11 @@ from tools.bootstrap_admin.config import (
 from tools.bootstrap_admin.idempotency import IdempotencyConflictError
 from tools.bootstrap_admin.idempotency_repository import IdempotencyRepository
 from tools.bootstrap_admin.ids import Uuid4Generator
+from tools.bootstrap_admin.operational_error import (
+    UNCLASSIFIED_OPERATION,
+    OperationalError,
+    OperationalErrorDetails,
+)
 from tools.bootstrap_admin.provisioning_repository import ProvisioningRepository
 from tools.bootstrap_admin.resume_discovery import (
     ResumeInvitationDiscovery,
@@ -176,6 +181,7 @@ def run(
     bootstrap_service_factory: Callable[[], BootstrapService] = _build_bootstrap_service,
     resume_service_factory: Callable[[], ResumeService] = _build_resume_service,
 ) -> int:
+    arguments: argparse.Namespace | None = None
     try:
         arguments = build_parser().parse_args(argv)
         if arguments.command == "bootstrap-first-admin":
@@ -202,8 +208,19 @@ def run(
         print("error: idempotency conflict", file=sys.stderr)
     except ValueError:
         print("error: invalid input", file=sys.stderr)
-    except Exception:
-        print("error: operation failed", file=sys.stderr)
+    except OperationalError as error:
+        print(error.details.format_for_operator(), file=sys.stderr)
+    except Exception as error:
+        operation_id = getattr(arguments, "operation_id", "unavailable")
+        command = getattr(arguments, "command", "unknown")
+        details = OperationalErrorDetails.from_exception(
+            error,
+            stage=UNCLASSIFIED_OPERATION,
+            service="application",
+            operation=command,
+            operation_id=operation_id,
+        )
+        print(details.format_for_operator(), file=sys.stderr)
     return 1
 
 

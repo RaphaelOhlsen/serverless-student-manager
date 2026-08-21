@@ -335,7 +335,7 @@ python -m tools.bootstrap_admin bootstrap-first-admin \
   --email <email>
 ```
 
-`full_name` e `email` são inputs de `workflow_dispatch`; eles não são secrets. As proteções implementadas evitam logging e propagação desnecessária: os valores são enviados ao step por variáveis de ambiente, não são ecoados e não aparecem em summary, outputs, concurrency ou `role-session-name`.
+`full_name` e `email` são inputs de `workflow_dispatch`; eles não são secrets. O step lê esses valores do payload indicado por `GITHUB_EVENT_PATH`, registra `add-mask` antes do uso e os mantém somente em variáveis locais do shell, sem declará-los no bloco `env`. Eles não são ecoados e não aparecem em summary, outputs, concurrency ou `role-session-name`. O masking reduz exposição nos logs do runner, mas não altera a natureza dos inputs nem garante confidencialidade na metadata ou UI do GitHub.
 
 ## Segurança dos workflows
 
@@ -429,10 +429,19 @@ Estado externo confirmado:
 
 Ainda pendente:
 
-1. executar operacionalmente os workflows quando houver necessidade autorizada;
-2. validar o comportamento end-to-end dessas execuções.
+1. diagnosticar e corrigir, por PR, a falha técnica observada na persistência da primeira execução do bootstrap;
+2. reconciliar de forma controlada o estado parcial somente após aprovação específica;
+3. concluir e validar o comportamento end-to-end.
 
-A infraestrutura, as roles e policies IAM, os GitHub Environments e suas variables estão configurados e validados. Os workflows ainda existem somente na branch `feature/first-admin-bootstrap`; como `workflow_dispatch` requer que o arquivo do workflow exista na default branch, eles ficarão disponíveis para despacho manual somente após sua promoção para `main`. Nenhum workflow foi executado ou validado end-to-end; o primeiro Administrador não foi criado e nenhum convite foi enviado. O escopo inicial permanece restrito a `dev`; `prod` continua fora desta implementação enquanto não existir capacidade equivalente de bootstrap inicial em `prod`.
+A infraestrutura, as roles e policies IAM, os GitHub Environments e suas variables estão configurados e validados, e os workflows estão disponíveis na default branch `main`. A primeira execução do bootstrap falhou depois da criação suprimida da identidade Cognito e da transição idempotente para `COGNITO_CREATED`, antes da persistência transacional. Nenhum item de domínio ou auditoria foi persistido, nenhum convite foi enviado e não houve validação end-to-end. O estado parcial não autoriza retry cego, retomada ou compensação; o `operation_id` original e a identidade existente devem ser preservados até diagnóstico e reconciliação aprovados. O escopo inicial permanece restrito a `dev`; `prod` continua fora desta implementação enquanto não existir capacidade equivalente de bootstrap inicial em `prod`.
+
+## Diagnóstico seguro de falhas
+
+Falhas operacionais preservam contexto técnico sanitizado em formato determinístico. Na persistência dos cinco itens do primeiro Administrador, o estágio é `PERSIST_FIRST_ADMIN_TRANSACTION`; quando disponíveis, o diagnóstico inclui `service=dynamodb`, `operation=TransactWriteItems`, classe da exceção, AWS error code, AWS request ID e `operationId`. Para cancelamentos transacionais, somente os códigos das cancellation reasons podem ser expostos; mensagens e itens associados não são registrados.
+
+O diagnóstico nunca deve incluir nome completo, e-mail, atributos Cognito pessoais, payload da transação, senhas, tokens ou credenciais. A causa original permanece encadeada internamente para testes e depuração, mas o traceback e a mensagem bruta da AWS não fazem parte da saída normal do operador.
+
+Quando a operação está em `COGNITO_CREATED`, tanto a execução inicial quanto o replay leem os cinco artefatos autoritativos antes da persistência. Uma falha ambígua é seguida de read-back: persistência completa permite continuar; estado parcial exige reconciliação; ausência total preserva a falha técnica. O fluxo reutiliza os IDs e timestamps do contexto idempotente, não cria uma segunda identidade e não envia convite antes de `PERSISTENCE_COMPLETED`.
 
 ## Referências
 

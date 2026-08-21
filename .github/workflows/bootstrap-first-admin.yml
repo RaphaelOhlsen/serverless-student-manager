@@ -61,8 +61,6 @@ jobs:
         env:
           OPERATION_ID: ${{ inputs.operation_id }}
           ACTOR_ID: github:${{ github.actor }}@${{ github.actor_id }}
-          BOOTSTRAP_FULL_NAME: ${{ inputs.full_name }}
-          BOOTSTRAP_EMAIL: ${{ inputs.email }}
           AWS_REGION: ${{ vars.AWS_REGION }}
           APP_ENVIRONMENT: ${{ vars.APP_ENVIRONMENT }}
           COGNITO_USER_POOL_ID: ${{ vars.COGNITO_USER_POOL_ID }}
@@ -72,8 +70,32 @@ jobs:
           AUDIT_RETENTION_DAYS: ${{ vars.AUDIT_RETENTION_DAYS }}
         run: |
           set -euo pipefail
+
+          bootstrap_full_name_raw="$(
+            jq -er '.inputs.full_name | strings' "$GITHUB_EVENT_PATH"
+          )"
+          bootstrap_email_raw="$(
+            jq -er '.inputs.email | strings' "$GITHUB_EVENT_PATH"
+          )"
+
+          mask_workflow_value() {
+            local value="$1"
+            value="${value//'%'/'%25'}"
+            value="${value//$'\r'/'%0D'}"
+            value="${value//$'\n'/'%0A'}"
+            printf '::add-mask::%s\n' "$value"
+          }
+
+          mask_workflow_value "$bootstrap_full_name_raw"
+          mask_workflow_value "$bootstrap_email_raw"
+
+          bootstrap_full_name="$bootstrap_full_name_raw"
+          bootstrap_email="$bootstrap_email_raw"
+
+          unset bootstrap_full_name_raw bootstrap_email_raw
+
           python -m tools.bootstrap_admin bootstrap-first-admin \
             --operation-id "$OPERATION_ID" \
             --actor-id "$ACTOR_ID" \
-            --full-name "$BOOTSTRAP_FULL_NAME" \
-            --email "$BOOTSTRAP_EMAIL"
+            --full-name "$bootstrap_full_name" \
+            --email "$bootstrap_email"

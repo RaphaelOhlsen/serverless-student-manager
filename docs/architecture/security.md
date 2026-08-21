@@ -79,7 +79,9 @@ Se o primeiro Administrador permanecer `INVITED` depois da expiração do contex
 
 Bootstrap e retomada são capacidades separadas. A role dedicada `student-manager-github-dev-resume-first-admin-invitation` foi aplicada e verificada na AWS. Ela concede somente leitura da identidade persistida, leitura do Cognito, `AdminCreateUser` para `RESEND` e operações técnicas no registro idempotente. Não concede delete ou disable Cognito, `TransactWriteItems`, wildcards de ação ou recurso, nem acesso às tabelas de auditoria e alunos.
 
-Os Environments `dev-bootstrap-admin` e `dev-resume-first-admin-invitation` exigem reviewer, impedem bypass administrativo e vinculam os jobs a trust policies OIDC com `sub` exato, sem wildcards. Os workflows usam credenciais temporárias OIDC e não armazenam credenciais AWS estáticas. As capacidades possuem infraestrutura, IAM, Environments e variables configurados e validados, sem Environment secrets. A disponibilidade operacional por `workflow_dispatch` permanece condicionada à promoção dos arquivos dos workflows para a default branch `main`. Nenhuma execução operacional ou validação end-to-end foi realizada.
+Os Environments `dev-bootstrap-admin` e `dev-resume-first-admin-invitation` exigem reviewer, impedem bypass administrativo e vinculam os jobs a trust policies OIDC com `sub` exato, sem wildcards. Os workflows usam credenciais temporárias OIDC e não armazenam credenciais AWS estáticas. As capacidades possuem infraestrutura, IAM, Environments e variables configurados e validados, sem Environment secrets, e seus arquivos estão na default branch `main`.
+
+Uma primeira execução do bootstrap falhou após a criação suprimida da identidade Cognito e antes da persistência do domínio. O estado parcial permanece sujeito a reconciliação controlada; não houve convite, criação autoritativa do Administrador ou validação end-to-end. O workflow lê nome e e-mail do payload local do evento, registra masking antes do uso e não os declara no bloco `env`. Esses valores continuam sendo inputs comuns de `workflow_dispatch`, não secrets, portanto permanece risco residual de exposição na metadata ou UI da plataforma.
 
 A recuperação excepcional do único Administrador usa roles operacionais independentes e GitHub Environments próprios:
 
@@ -105,6 +107,8 @@ Não registrar:
 - data de nascimento.
 
 Tags AWS não podem conter PII ou segredos.
+
+Erros operacionais podem registrar somente estágio, serviço/operação AWS, classe da exceção, AWS error code, AWS request ID e `operationId`. Mensagens brutas de serviços, payloads e cancellation reason items são proibidos.
 
 
 ## 9. Recuperação excepcional
