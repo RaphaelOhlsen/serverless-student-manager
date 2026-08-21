@@ -40,3 +40,7 @@ Carga fictícia de usuários e alunos é separada, versionada, idempotente e per
 A sequência de consistência entre Cognito e DynamoDB foi refinada pela **ADR-017 — Consistência de provisionamento entre Cognito e DynamoDB**.
 
 O processo aprovado passa a criar a identidade no Cognito com envio de mensagem suprimido, persistir a projeção e os registros de negócio no DynamoDB e somente então enviar o convite ao usuário.
+
+## Refinamento posterior — ADR-024
+
+A **ADR-024 — Protocolo determinístico e trava singleton do bootstrap do primeiro Admin**, aprovada em 2026-08-20, refina este bootstrap com IDs e timestamps determinísticos, trava singleton permanente, transação de cinco itens, reconciliação completa e protocolo específico de replay.

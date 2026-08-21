@@ -38,6 +38,37 @@ target      = dataset-v1
 operationId = <uuid>
 ```
 
+### Retomada do convite do primeiro Administrador
+
+```text
+environment = dev
+operation   = resume-first-admin-invitation
+target      = first-admin
+operationId = <uuid-v4 próprio da retomada>
+```
+
+Essa operação reutiliza o mesmo `operationId` em todos os retries da mesma retomada.
+
+Fluxo normal:
+
+```text
+STARTED → COMPLETED
+```
+
+Fluxo excepcional:
+
+```text
+STARTED → RECONCILIATION_REQUIRED
+```
+
+`COMPLETED` e `RECONCILIATION_REQUIRED` são terminais para essa operação.
+
+As transições são validadas por `operation`. Isso não torna `STARTED → COMPLETED` uma transição global.
+
+Ela se aplica somente ao primeiro Admin `INVITED` com marker, USER, projeção e identidade Cognito reconciliados. Não substitui a recuperação da ADR-019 para o único Admin `ACTIVE` sem TOTP.
+
+O contrato operacional completo está em [Retomada do convite do primeiro Administrador](first-admin-invitation-resume.md).
+
 ### Reset administrativo de MFA
 
 ```text

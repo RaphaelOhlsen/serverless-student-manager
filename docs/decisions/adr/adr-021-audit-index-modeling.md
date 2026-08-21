@@ -332,3 +332,7 @@ A implementação deverá validar pelo menos:
 - Refina ADR-005 quanto ao modelo físico de `audit-events`.
 - Mantém ADR-015 quanto à retenção da auditoria.
 - Mantém ADR-016 quanto à organização do módulo `audit_store`.
+
+## Refinamento posterior — ADR-024
+
+A **ADR-024 — Protocolo determinístico e trava singleton do bootstrap do primeiro Admin**, aprovada em 2026-08-20, complementa esta decisão para exigir que o audit event determinístico do bootstrap seja confirmado por leitura consistente durante a reconciliação dos cinco itens da transação.

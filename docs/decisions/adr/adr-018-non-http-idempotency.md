@@ -145,3 +145,7 @@ Para cada ferramenta de escrita não HTTP:
 3. retry após falha parcial;
 4. mesmo `operationId` com payload diferente;
 5. novo `operationId` para nova operação legítima.
+
+## Refinamento posterior — ADR-024
+
+A **ADR-024 — Protocolo determinístico e trava singleton do bootstrap do primeiro Admin**, aprovada em 2026-08-20, especializa esta decisão para `bootstrap-admin` e `resume-first-admin-invitation`. Ela define UUIDv4 canônico, metadados determinísticos, `ClientRequestToken = operationId` para a transação do bootstrap e transições de estado validadas por `operation`.

@@ -1,0 +1,79 @@
+name: Bootstrap First Admin
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation_id:
+        description: UUIDv4 for this bootstrap operation
+        required: true
+        type: string
+      full_name:
+        description: Full name of the first Administrator
+        required: true
+        type: string
+      email:
+        description: Email address of the first Administrator
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: bootstrap-first-admin-dev
+  cancel-in-progress: false
+
+jobs:
+  bootstrap-first-admin:
+    name: Bootstrap First Admin
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: dev-bootstrap-admin
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: tools/bootstrap_admin/requirements.txt
+
+      - name: Install operational dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -r tools/bootstrap_admin/requirements.txt
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true
+          role-session-name: bootstrap-first-admin-${{ github.run_id }}
+
+      - name: Bootstrap first Administrator
+        shell: bash
+        env:
+          OPERATION_ID: ${{ inputs.operation_id }}
+          ACTOR_ID: github:${{ github.actor }}@${{ github.actor_id }}
+          BOOTSTRAP_FULL_NAME: ${{ inputs.full_name }}
+          BOOTSTRAP_EMAIL: ${{ inputs.email }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          APP_ENVIRONMENT: ${{ vars.APP_ENVIRONMENT }}
+          COGNITO_USER_POOL_ID: ${{ vars.COGNITO_USER_POOL_ID }}
+          USERS_TABLE_NAME: ${{ vars.USERS_TABLE_NAME }}
+          AUDIT_TABLE_NAME: ${{ vars.AUDIT_TABLE_NAME }}
+          IDEMPOTENCY_TABLE_NAME: ${{ vars.IDEMPOTENCY_TABLE_NAME }}
+          AUDIT_RETENTION_DAYS: ${{ vars.AUDIT_RETENTION_DAYS }}
+        run: |
+          set -euo pipefail
+          python -m tools.bootstrap_admin bootstrap-first-admin \
+            --operation-id "$OPERATION_ID" \
+            --actor-id "$ACTOR_ID" \
+            --full-name "$BOOTSTRAP_FULL_NAME" \
+            --email "$BOOTSTRAP_EMAIL"

@@ -49,7 +49,7 @@ typecheck:
 
 test:
 	@if find $(PYTHON_DIRS) -type f \( -name 'test_*.py' -o -name '*_test.py' \) -print -quit | grep -q .; then \
-		$(VENV_BIN)/pytest; \
+		$(VENV_BIN)/python -m pytest; \
 	else \
 		echo "NOT APPLICABLE: no Python tests"; \
 	fi
@@ -62,7 +62,7 @@ test:
 
 coverage:
 	@if find $(PYTHON_DIRS) -type f \( -name 'test_*.py' -o -name '*_test.py' \) -print -quit | grep -q .; then \
-		$(VENV_BIN)/pytest --cov --cov-report=term-missing --cov-fail-under=80; \
+		$(VENV_BIN)/python -m pytest --cov --cov-report=term-missing --cov-fail-under=80; \
 	else \
 		echo "NOT APPLICABLE: no Python tests for coverage"; \
 	fi

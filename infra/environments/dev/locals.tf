@@ -12,8 +12,9 @@ locals {
 
   github_oidc_provider_arn = "arn:aws:iam::${var.aws_account_id}:oidc-provider/token.actions.githubusercontent.com"
 
-  github_bootstrap_admin_subject = "repo:${local.github_immutable_repository}:environment:dev-bootstrap-admin"
-  github_admin_recovery_subject  = "repo:${local.github_immutable_repository}:environment:dev-admin-recovery"
+  github_bootstrap_admin_subject               = "repo:${local.github_immutable_repository}:environment:dev-bootstrap-admin"
+  github_admin_recovery_subject                = "repo:${local.github_immutable_repository}:environment:dev-admin-recovery"
+  github_resume_first_admin_invitation_subject = "repo:${local.github_immutable_repository}:environment:dev-resume-first-admin-invitation"
 
   common_tags = {
     Project     = local.project_name

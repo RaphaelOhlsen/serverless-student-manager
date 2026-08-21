@@ -158,6 +158,16 @@ output "bootstrap_admin_policy_arn" {
   value       = module.bootstrap_admin_access.policy_arn
 }
 
+output "resume_first_admin_invitation_role_arn" {
+  description = "ARN of the GitHub Actions role used to resume the first Administrator invitation."
+  value       = module.resume_first_admin_invitation_operational_access.role_arn
+}
+
+output "resume_first_admin_invitation_policy_arn" {
+  description = "ARN of the managed IAM policy used to resume the first Administrator invitation."
+  value       = module.resume_first_admin_invitation_operational_access.policy_arn
+}
+
 output "admin_recovery_role_arn" {
   description = "ARN of the GitHub Actions role used for sole Administrator MFA recovery."
   value       = module.admin_recovery_access.role_arn
