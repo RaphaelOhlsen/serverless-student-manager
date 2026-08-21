@@ -73,16 +73,20 @@ A aplicação usa `role` e `status` atuais no DynamoDB.
 
 ## 7. Bootstrap e recuperação
 
-O primeiro Administrador é criado por workflow manual com OIDC e função temporária associada ao GitHub Environment `dev-bootstrap-admin`.
+O primeiro Administrador é criado pelo workflow manual `.github/workflows/bootstrap-first-admin.yml`, com OIDC e a role `student-manager-github-dev-bootstrap-admin`, associada ao GitHub Environment protegido `dev-bootstrap-admin`.
 
-Se o primeiro Administrador permanecer `INVITED` depois da expiração do contexto idempotente original, `resume-first-admin-invitation` poderá somente reenviar o convite para a identidade existente e integralmente reconciliada. O procedimento não cria outro usuário, não substitui a identidade e não altera o marker singleton.
+Se o primeiro Administrador permanecer `INVITED` depois da expiração do contexto idempotente original, o workflow manual `.github/workflows/resume-first-admin-invitation.yml` poderá somente reenviar o convite para a identidade existente e integralmente reconciliada. O procedimento não cria outro usuário, não substitui a identidade e não altera o marker singleton.
+
+Bootstrap e retomada são capacidades separadas. A role dedicada `student-manager-github-dev-resume-first-admin-invitation`, definida em Terraform e ainda não aplicada, concede somente leitura da identidade persistida, leitura do Cognito, `AdminCreateUser` para `RESEND` e operações técnicas no registro idempotente. Ela não concede delete ou disable Cognito, `TransactWriteItems` ou acesso às tabelas de auditoria e alunos.
+
+Os Environments `dev-bootstrap-admin` e `dev-resume-first-admin-invitation` exigem reviewer, impedem bypass administrativo e vinculam os jobs a trust policies OIDC com `sub` exato, sem wildcards. Os workflows usam credenciais temporárias OIDC e não armazenam credenciais AWS estáticas. As Environment variables ainda não estão configuradas, e a execução operacional permanece pendente de plan, revisão, apply autorizado e leitura dos outputs reais.
 
 A recuperação excepcional do único Administrador usa roles operacionais independentes e GitHub Environments próprios:
 
 - `dev-admin-recovery`;
 - `prod-admin-recovery`.
 
-Bootstrap e recuperação possuem trust policies e policies IAM próprias, com menor privilégio e sem reutilização das roles de deploy.
+Bootstrap, retomada e recuperação possuem trust policies e policies IAM próprias, com menor privilégio e sem reutilização das roles de deploy.
 
 Reset de MFA é administrativo e auditado.  
 O único Administrador terá procedimento excepcional controlado de recuperação.

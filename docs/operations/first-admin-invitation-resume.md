@@ -272,29 +272,169 @@ Nesta implementação inicial:
 
 Um evento de domínio poderá ser adicionado quando sua taxonomia estiver formalmente definida.
 
-## Acesso operacional e escopo inicial
+## Implementação operacional versionada
 
-A role `dev-bootstrap-admin` não é a role final desta capacidade. Ela contém privilégios adicionais, incluindo exclusão e desabilitação no Cognito e `TransactWriteItems`.
+A CLI expõe comandos separados para o bootstrap inicial e para a retomada. A retomada é executada por:
 
-Na etapa de operacionalização serão criados:
-
-- uma role dedicada de menor privilégio para leitura dos itens necessários em users, `AdminGetUser`, `AdminCreateUser` usado para `RESEND` e operações necessárias na tabela de idempotência;
-- um GitHub Environment dedicado.
-
-Os nomes finais da role e do environment ainda não são definidos neste runbook. Nenhuma alteração Terraform faz parte desta etapa documental.
-
-O escopo inicial é `dev`. `prod` permanece fora desta implementação enquanto não existir capacidade equivalente de bootstrap inicial nesse ambiente.
-
-## Entrypoint futuro
-
-A ferramenta deve expor comandos explícitos:
-
-```text
-bootstrap-first-admin
-resume-first-admin-invitation
+```bash
+python -m tools.bootstrap_admin resume-first-admin-invitation \
+  --operation-id <UUIDv4> \
+  --actor-id <actor>
 ```
 
-Não usar uma flag que altere silenciosamente a semântica do bootstrap inicial.
+O workflow versionado é `.github/workflows/resume-first-admin-invitation.yml` e possui somente o trigger `workflow_dispatch`. O operador fornece apenas `operation_id`; não fornece `userId`, e-mail, nome completo ou `cognitoSub`. No GitHub Actions, o ator é derivado automaticamente como:
+
+```text
+github:<github.actor>@<github.actor_id>
+```
+
+O job usa o GitHub Environment `dev-resume-first-admin-invitation`. A role e a policy dedicadas estão definidas em Terraform, respectivamente, como:
+
+```text
+student-manager-github-dev-resume-first-admin-invitation
+student-manager-dev-resume-first-admin-invitation
+```
+
+Essa role de menor privilégio define:
+
+- `cognito-idp:AdminGetUser` e `cognito-idp:AdminCreateUser` no User Pool; `AdminCreateUser` é necessário para `MessageAction=RESEND`;
+- `dynamodb:GetItem` na tabela `users`;
+- `dynamodb:GetItem`, `dynamodb:PutItem` e `dynamodb:UpdateItem` na tabela de idempotência.
+
+Não são concedidos:
+
+- `cognito-idp:AdminDeleteUser`;
+- `cognito-idp:AdminDisableUser`;
+- `cognito-idp:AdminUserGlobalSignOut`;
+- `dynamodb:TransactWriteItems`;
+- `dynamodb:DeleteItem`;
+- `dynamodb:Query`;
+- `dynamodb:Scan`;
+- acesso à tabela `audit-events`;
+- acesso à tabela `students`.
+
+A role e a policy de retomada estão apenas definidas no Terraform versionado. Ainda não foram aplicadas nem confirmadas na AWS.
+
+## Bootstrap inicial operacional
+
+O workflow versionado `.github/workflows/bootstrap-first-admin.yml` usa `workflow_dispatch`, o Environment `dev-bootstrap-admin` e a role `student-manager-github-dev-bootstrap-admin`. Seus inputs são:
+
+```text
+operation_id
+full_name
+email
+```
+
+O ator não é um input e é derivado pelo workflow como `github:<github.actor>@<github.actor_id>`. A CLI executada é:
+
+```bash
+python -m tools.bootstrap_admin bootstrap-first-admin \
+  --operation-id <UUIDv4> \
+  --actor-id <actor> \
+  --full-name <full-name> \
+  --email <email>
+```
+
+`full_name` e `email` são inputs de `workflow_dispatch`; eles não são secrets. As proteções implementadas evitam logging e propagação desnecessária: os valores são enviados ao step por variáveis de ambiente, não são ecoados e não aparecem em summary, outputs, concurrency ou `role-session-name`.
+
+## Segurança dos workflows
+
+Os dois workflows declaram somente:
+
+```yaml
+permissions:
+  contents: read
+  id-token: write
+```
+
+As Actions externas são fixadas por SHA completo. A autenticação AWS usa OIDC, sem credenciais AWS estáticas, com `mask-aws-account-id=true`.
+
+Os nomes das sessões são:
+
+```text
+bootstrap-first-admin-${{ github.run_id }}
+resume-first-admin-invitation-${{ github.run_id }}
+```
+
+Eles não incluem PII nem `operationId`. As configurações de concorrência são `bootstrap-first-admin-dev` e `resume-first-admin-invitation-dev`, ambas com `cancel-in-progress=false` e `timeout-minutes=10`. Não há retry automático.
+
+A CLI preserva os seguintes códigos de saída no job:
+
+```text
+0 = terminal bem-sucedido
+1 = erro
+2 = RECONCILIATION_REQUIRED
+```
+
+Os códigos `1` e `2` deixam o job não-verde.
+
+## GitHub Environments e configuração pendente
+
+Os Environments `dev-bootstrap-admin` e `dev-resume-first-admin-invitation` já foram criados e estão protegidos. O estado externo confirmado de ambos é:
+
+```text
+required reviewer                    = RaphaelOhlsen
+prevent_self_review                  = false
+can_admins_bypass                    = false
+wait timer                           = none
+custom deployment branch/tag policy = none
+variables                            = 0
+secrets                              = 0
+```
+
+As variables necessárias para `dev-bootstrap-admin`, ainda não configuradas, são:
+
+```text
+AWS_ROLE_ARN
+AWS_REGION
+APP_ENVIRONMENT
+COGNITO_USER_POOL_ID
+USERS_TABLE_NAME
+AUDIT_TABLE_NAME
+IDEMPOTENCY_TABLE_NAME
+AUDIT_RETENTION_DAYS
+```
+
+As variables necessárias para `dev-resume-first-admin-invitation`, também ainda não configuradas, são:
+
+```text
+AWS_ROLE_ARN
+AWS_REGION
+APP_ENVIRONMENT
+COGNITO_USER_POOL_ID
+USERS_TABLE_NAME
+IDEMPOTENCY_TABLE_NAME
+```
+
+Esses valores somente serão configurados depois de `terraform plan`, revisão humana, `terraform apply` autorizado e leitura dos outputs reais.
+
+## Estado de operacionalização
+
+Implementado e versionado:
+
+- CLI de bootstrap;
+- CLI de retomada;
+- workflows operacionais;
+- definição Terraform da role e policy de retomada;
+- GitHub Environments criados e protegidos.
+
+Estado externo já confirmado:
+
+- `dev-bootstrap-admin` protegido;
+- `dev-resume-first-admin-invitation` criado e protegido;
+- ambos sem variables e secrets.
+
+Ainda pendente:
+
+1. executar `terraform plan` real;
+2. revisar o plan;
+3. executar `terraform apply` somente após autorização;
+4. confirmar a role e a policy de retomada na AWS;
+5. ler os outputs reais;
+6. configurar as Environment variables;
+7. executar e testar operacionalmente os workflows.
+
+Portanto, os workflows ainda não estão prontos para execução. O escopo inicial permanece restrito a `dev`; `prod` continua fora desta implementação enquanto não existir capacidade equivalente de bootstrap inicial em `prod`.
 
 ## Referências
 

@@ -80,15 +80,27 @@ Operações privilegiadas
   → role IAM operacional separada da role de deploy
 ```
 
-GitHub Environments operacionais iniciais:
+GitHub Environments operacionais:
 
 ```text
 dev-bootstrap-admin
+dev-resume-first-admin-invitation
 dev-admin-recovery
 prod-admin-recovery
 ```
 
 Cada capacidade operacional usa trust policy e policy IAM próprias, com `sub` OIDC exato e sem wildcards.
+
+O bootstrap inicial e a retomada do convite possuem workflows privilegiados manuais, distintos dos pipelines normais de CI e deploy:
+
+```text
+.github/workflows/bootstrap-first-admin.yml
+.github/workflows/resume-first-admin-invitation.yml
+```
+
+Ambos usam somente `workflow_dispatch`. Seus jobs estão associados, respectivamente, a `dev-bootstrap-admin` e `dev-resume-first-admin-invitation`. Os dois Environments exigem `RaphaelOhlsen` como reviewer, usam `prevent_self_review=false`, não permitem bypass administrativo e não possuem wait timer ou política customizada de branches/tags.
+
+Os workflows estão versionados e os Environments estão protegidos, mas ainda não houve execução operacional. As Environment variables permanecem pendentes. A role e a policy de retomada estão definidas em Terraform, porém sua aplicação depende de plan e revisão explícita antes de qualquer `apply` autorizado.
 
 O provider OIDC existente é reutilizado pelas roles operacionais; nenhum segundo provider OIDC é criado.
 
