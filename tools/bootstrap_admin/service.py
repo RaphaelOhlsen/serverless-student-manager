@@ -26,6 +26,11 @@ from tools.bootstrap_admin.models import (
     build_user_profile,
 )
 from tools.bootstrap_admin.normalization import normalize_email, normalize_name
+from tools.bootstrap_admin.operational_error import (
+    PERSIST_FIRST_ADMIN_TRANSACTION,
+    OperationalError,
+    OperationalErrorDetails,
+)
 from tools.bootstrap_admin.service_models import (
     BootstrapResult,
     BootstrapTerminalState,
@@ -204,6 +209,11 @@ class FirstAdminBootstrapService:
             expiration=expiration,
         )
         self._idempotency_repository.create_started(started_record)
+        context = parse_bootstrap_context(
+            started_record,
+            expected_environment=self._config.environment,
+            expected_operation_id=operation_id,
+        )
 
         cognito_sub = self._cognito_repository.create_suppressed_user(
             user_pool_id=self._config.user_pool_id,
@@ -218,57 +228,11 @@ class FirstAdminBootstrapService:
             cognito_sub=cognito_sub,
         )
 
-        user_profile = build_user_profile(
-            user_id=user_id,
-            cognito_sub=cognito_sub,
+        return self._continue_cognito_created(
+            replace(context, state="COGNITO_CREATED", cognito_sub=cognito_sub),
             full_name=full_name,
-            email=normalized_email,
-            created_at=created_at,
-            created_by=actor_id,
-        )
-        unique_email = build_unique_email(
-            user_id=user_id,
-            email=normalized_email,
-        )
-        cognito_projection = build_cognito_projection(
-            user_id=user_id,
+            normalized_email=normalized_email,
             cognito_sub=cognito_sub,
-        )
-        bootstrap_marker = build_first_admin_bootstrap_marker(
-            user_id=user_id,
-            operation_id=operation_id,
-            created_at=created_at,
-            created_by=actor_id,
-        )
-        audit_event = build_user_created_audit_event(
-            user_id=user_id,
-            actor_id=actor_id,
-            event_id=event_id,
-            correlation_id=correlation_id,
-            occurred_at=occurred_at,
-            expires_at=audit_expires_at,
-        )
-        self._provisioning_repository.persist_first_admin_with_audit(
-            users_table_name=self._config.users_table_name,
-            audit_table_name=self._config.audit_table_name,
-            user_profile=user_profile,
-            unique_email=unique_email,
-            cognito_projection=cognito_projection,
-            bootstrap_marker=bootstrap_marker,
-            audit_event=audit_event,
-            client_request_token=operation_id,
-        )
-
-        self._transition(
-            record_id=record_id,
-            operation_id=operation_id,
-            current_state="COGNITO_CREATED",
-            next_state="PERSISTENCE_COMPLETED",
-        )
-        return self._complete_after_persistence(
-            record_id=record_id,
-            operation_id=operation_id,
-            user_id=user_id,
             replayed=False,
         )
 
@@ -354,6 +318,7 @@ class FirstAdminBootstrapService:
             full_name=full_name,
             normalized_email=normalized_email,
             cognito_sub=cognito_sub,
+            replayed=True,
         )
 
     def _continue_cognito_created(
@@ -363,6 +328,7 @@ class FirstAdminBootstrapService:
         full_name: str,
         normalized_email: str,
         cognito_sub: str,
+        replayed: bool,
     ) -> BootstrapResult:
         expected_items = self._build_replay_items(
             context,
@@ -390,7 +356,7 @@ class FirstAdminBootstrapService:
                 ) != "TransactionCanceledException" and not is_ambiguous_dynamodb_write_error(
                     write_error
                 ):
-                    raise
+                    self._raise_persistence_error(context, write_error)
                 actual_items = self._read_provisioning_items(
                     context,
                     normalized_email=normalized_email,
@@ -402,7 +368,7 @@ class FirstAdminBootstrapService:
                     actual_items=actual_items,
                 )
                 if persistence_state == "ALL_ABSENT":
-                    raise
+                    self._raise_persistence_error(context, write_error)
         if persistence_state == "FOREIGN_MARKER":
             return self._handle_foreign_marker(context, marker=actual_items[3])
         if persistence_state == "PARTIAL_OR_INCOMPATIBLE":
@@ -421,8 +387,22 @@ class FirstAdminBootstrapService:
             record_id=context.record_id,
             operation_id=context.operation_id,
             user_id=context.user_id,
-            replayed=True,
+            replayed=replayed,
         )
+
+    @staticmethod
+    def _raise_persistence_error(
+        context: BootstrapContext,
+        error: BaseException,
+    ) -> None:
+        details = OperationalErrorDetails.from_exception(
+            error,
+            stage=PERSIST_FIRST_ADMIN_TRANSACTION,
+            service="dynamodb",
+            operation="TransactWriteItems",
+            operation_id=context.operation_id,
+        )
+        raise OperationalError(details) from error
 
     def _classify_persistence_state(
         self,
@@ -871,6 +851,7 @@ class FirstAdminBootstrapService:
             full_name=full_name,
             normalized_email=normalized_email,
             cognito_sub=cognito_sub,
+            replayed=True,
         )
 
     def _mark_reconciliation_required(

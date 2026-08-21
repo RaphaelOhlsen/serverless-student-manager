@@ -27,6 +27,8 @@ O request ID do API Gateway será propagado como `correlationId` para:
 
 `awsRequestId` permanece separado.
 
+CLIs operacionais emitem diagnóstico sanitizado e determinístico. Os campos permitidos são `stage`, `service`, `operation`, `exceptionClass`, `awsErrorCode`, `awsRequestId` e `operationId`; na persistência inicial, o estágio é `PERSIST_FIRST_ADMIN_TRANSACTION`. Códigos de cancellation reasons podem ser registrados sem mensagens ou itens associados. A exceção original permanece encadeada internamente, mas traceback, mensagem bruta da AWS e payloads não são enviados ao log normal do operador.
+
 ## 3. Retenção
 
 | Dado | `dev` | `prod` |
@@ -45,6 +47,8 @@ O request ID do API Gateway será propagado como `correlationId` para:
 - e-mail completo;
 - telefone;
 - nascimento.
+
+Inputs pessoais de `workflow_dispatch` não se tornam secrets por serem mascarados. O runner deve registrar `add-mask` antes do uso, mas metadata e UI do GitHub permanecem fora dessa garantia de masking de logs.
 
 ## 5. Evolução
 

@@ -2,7 +2,10 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
-from botocore.exceptions import ConnectionClosedError  # type: ignore[import-untyped]
+from botocore.exceptions import (  # type: ignore[import-untyped]
+    ClientError,
+    ConnectionClosedError,
+)
 
 from tools.bootstrap_admin.audit import build_user_created_audit_event
 from tools.bootstrap_admin.cognito_repository import (
@@ -20,6 +23,7 @@ from tools.bootstrap_admin.models import (
     build_unique_email,
     build_user_profile,
 )
+from tools.bootstrap_admin.operational_error import OperationalError
 from tools.bootstrap_admin.service import FirstAdminBootstrapService
 from tools.bootstrap_admin.service_models import BootstrapResult, FirstAdminBootstrapConfig
 
@@ -1144,6 +1148,11 @@ def test_bootstrap_first_admin_executes_deterministic_happy_path() -> None:
         "cognito:create_suppressed",
         "clock:2",
         "idempotency:transition:COGNITO_CREATED",
+        "provisioning:get:user_profile",
+        "provisioning:get:unique_email",
+        "provisioning:get:cognito_projection",
+        "provisioning:get:bootstrap_marker",
+        "provisioning:get:audit_event",
         "provisioning:persist",
         "clock:3",
         "idempotency:transition:PERSISTENCE_COMPLETED",
@@ -1153,6 +1162,40 @@ def test_bootstrap_first_admin_executes_deterministic_happy_path() -> None:
         "clock:5",
         "idempotency:transition:COMPLETED",
     ]
+
+
+def test_initial_persistence_failure_preserves_diagnostic_and_stops_before_invite() -> None:
+    transaction_error = ClientError(
+        {
+            "Error": {
+                "Code": "ValidationException",
+                "Message": "unsafe example-admin@example.invalid",
+            },
+            "ResponseMetadata": {"RequestId": "request-id-123"},
+        },
+        "TransactWriteItems",
+    )
+    service, _, _, _, idempotency, cognito, provisioning = _build_service()
+    provisioning.persist_error = transaction_error
+
+    with pytest.raises(OperationalError) as raised:
+        service.bootstrap_first_admin(
+            full_name="Example Admin",
+            email="example-admin@example.invalid",
+            operation_id=_OPERATION_ID,
+            actor_id="github:example@123",
+        )
+
+    assert raised.value.__cause__ is transaction_error
+    assert raised.value.details.stage == "PERSIST_FIRST_ADMIN_TRANSACTION"
+    assert raised.value.details.aws_error_code == "ValidationException"
+    assert raised.value.details.aws_request_id == "request-id-123"
+    assert [transition["next_state"] for transition in idempotency.transitions] == [
+        "COGNITO_CREATED"
+    ]
+    assert len(provisioning.read_calls) == 5
+    assert len(provisioning.calls) == 1
+    assert cognito.resend_calls == []
 
 
 @pytest.mark.parametrize(
@@ -1530,7 +1573,7 @@ def test_cognito_created_replay_propagates_transaction_failure_without_advancing
     )
     provisioning.persist_error = transaction_error
 
-    with pytest.raises(RuntimeError) as raised:
+    with pytest.raises(OperationalError) as raised:
         service.bootstrap_first_admin(
             full_name="Maria da Silva",
             email="admin@example.com",
@@ -1538,7 +1581,8 @@ def test_cognito_created_replay_propagates_transaction_failure_without_advancing
             actor_id="github:other-executor",
         )
 
-    assert raised.value is transaction_error
+    assert raised.value.__cause__ is transaction_error
+    assert raised.value.details.stage == "PERSIST_FIRST_ADMIN_TRANSACTION"
     assert ids.calls == 0
     assert clock.calls == 0
     assert len(provisioning.read_calls) == 5
@@ -1594,7 +1638,7 @@ def test_cognito_created_propagates_original_ambiguous_error_when_items_absent()
     )
     provisioning.persist_error = transaction_error
 
-    with pytest.raises(AwsStyleError) as raised:
+    with pytest.raises(OperationalError) as raised:
         service.bootstrap_first_admin(
             full_name="Maria da Silva",
             email="admin@example.com",
@@ -1602,7 +1646,7 @@ def test_cognito_created_propagates_original_ambiguous_error_when_items_absent()
             actor_id="github:other-executor",
         )
 
-    assert raised.value is transaction_error
+    assert raised.value.__cause__ is transaction_error
     assert len(provisioning.calls) == 1
     assert len(provisioning.read_calls) == 10
     assert clock.calls == 0
@@ -1693,7 +1737,7 @@ def test_cognito_created_propagates_non_ambiguous_transaction_without_extra_read
     )
     provisioning.persist_error = transaction_error
 
-    with pytest.raises(AwsStyleError) as raised:
+    with pytest.raises(OperationalError) as raised:
         service.bootstrap_first_admin(
             full_name="Maria da Silva",
             email="admin@example.com",
@@ -1701,7 +1745,8 @@ def test_cognito_created_propagates_non_ambiguous_transaction_without_extra_read
             actor_id="github:other-executor",
         )
 
-    assert raised.value is transaction_error
+    assert raised.value.__cause__ is transaction_error
+    assert raised.value.details.aws_error_code == error_code
     assert len(provisioning.calls) == 1
     assert len(provisioning.read_calls) == 5
     assert clock.calls == 0
@@ -1818,7 +1863,7 @@ def test_transaction_canceled_propagates_original_error_when_all_items_absent() 
     )
     provisioning.persist_error = transaction_error
 
-    with pytest.raises(AwsStyleError) as raised:
+    with pytest.raises(OperationalError) as raised:
         service.bootstrap_first_admin(
             full_name="Maria da Silva",
             email="admin@example.com",
@@ -1826,7 +1871,8 @@ def test_transaction_canceled_propagates_original_error_when_all_items_absent() 
             actor_id="github:other-executor",
         )
 
-    assert raised.value is transaction_error
+    assert raised.value.__cause__ is transaction_error
+    assert raised.value.details.aws_error_code == "TransactionCanceledException"
     assert len(provisioning.calls) == 1
     assert len(provisioning.read_calls) == 10
     assert clock.calls == 0

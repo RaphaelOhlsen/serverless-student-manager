@@ -19,10 +19,10 @@ O próprio `MANIFEST.md` não é listado para evitar hash autorreferencial.
 | `docs/README.md` | `0255a84b5167767c07a618545256928147d2e660ddb0f8c82ea527f236a61811` |
 | `docs/architecture/architecture-overview.md` | `8b32c3b900aeb63c7b81317fb7e65c404b8f6589f18f901bc4a09941525320af` |
 | `docs/architecture/data-model.md` | `8e37ad31c4891ad27b6976ca2a7b26e8916328518b1a14e6394ac7a4b5a5548a` |
-| `docs/architecture/deployment-and-cicd.md` | `89dbf25fcb9bf0340a7e3274616058c82b570125a8b574cd1db9e2f8e412b814` |
+| `docs/architecture/deployment-and-cicd.md` | `0f9a7264438a0811a7d37e1f69a8490667ea0d28872602dde58d35b2e01fff23` |
 | `docs/architecture/diagrams.md` | `c6d18b9af0cb28f495bb1e86fb785b73da81a63cf508a13716dd9d706b1965cc` |
-| `docs/architecture/observability.md` | `574fd72647b104446f28ea95bcd41ae8b23d4c792f9effbcf0754c4cff641b26` |
-| `docs/architecture/security.md` | `e14aa1767b247cde44e11bc688e461444492d08bc6889ce8ea69ac49c4b0cff4` |
+| `docs/architecture/observability.md` | `fbce8a6786cd5a301548219f2a121cbd61b431a4bfa6656cbeaf94506b3a0d21` |
+| `docs/architecture/security.md` | `9b3602120339f074e754f1a9e43cfcd36f4e43dc1ec62f4fe95b6b07a7d40c17` |
 | `docs/decisions/adr/adr-001-monorepo.md` | `68549fff169d8fd5190e4502f17f6a89b61fb05579ac5b4b0c535bf03f885c8f` |
 | `docs/decisions/adr/adr-002-frontend-hosting.md` | `ca847e03a949c9dcbd74575bd0ac4c2f46985397770456d8089afaeb6d9c0add` |
 | `docs/decisions/adr/adr-003-api-gateway-http-api.md` | `d7746a1ce7e1246d862d91acde9e31e1c4fcd5637855429c1e32b46d6afe8d65` |
@@ -50,7 +50,7 @@ O próprio `MANIFEST.md` não é listado para evitar hash autorreferencial.
 | `docs/decisions/decision-register.md` | `627116e6dc943901e2d47a61331975459ea8b1b901bf446a64da9fdd72b2e081` |
 | `docs/decisions/pending-decisions.md` | `9a8524b823533c2c5186c91d7fae61375be0ba95995cb5cc7ecaf55b0c0cd22a` |
 | `docs/operations/cognito-dynamodb-compensation.md` | `d2914292047679b7858e6b130f4baf04440913f9fb0809b243df22323d448807` |
-| `docs/operations/first-admin-invitation-resume.md` | `5214958a7021b10ad54cca6bb9f14956bb3e6b771b59da0ea64cd16566389d7a` |
+| `docs/operations/first-admin-invitation-resume.md` | `33213a038e5f7400b09cb88cba7f19c75be248ac860b1bccd6af762153f6679a` |
 | `docs/operations/non-http-idempotency.md` | `5fa1abb45fc5c5c06d75c1115a292662fc0ca402f0ad303b2e97ee4a8dad0804` |
 | `docs/operations/rollback-strategy.md` | `0341e5837516cb745a42b76b57247e3ac3bb8e3afc02d6bce92c26ba4f606d91` |
 | `docs/operations/sole-admin-mfa-recovery.md` | `30dce5d37c002be252e16509fd43afa0e26f38ad2e05453eb0656cee0ff24797` |
