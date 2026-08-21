@@ -337,7 +337,7 @@ def test_bootstrap_composition_root_wires_only_bootstrap_dependencies(
 
     service = cli._build_bootstrap_service()
 
-    assert service == "bootstrap-service"
+    assert service is calls["bootstrap_service"]
     assert calls["clients"] == [
         ("cognito-idp", "sa-east-1"),
         ("dynamodb", "sa-east-1"),
@@ -371,7 +371,7 @@ def test_resume_composition_root_reuses_cognito_reader_and_sender(
 
     service = cli._build_resume_service()
 
-    assert service == "resume-service"
+    assert service is calls["resume_service"]
     assert calls["clients"] == [
         ("cognito-idp", "sa-east-1"),
         ("dynamodb", "sa-east-1"),
@@ -457,11 +457,14 @@ def _patch_composition_dependencies(
         calls["bootstrap_config"] = kwargs
         return "bootstrap-config"
 
-    def fake_bootstrap_service(**kwargs: object) -> str:
+    bootstrap_service = FakeBootstrapService(_bootstrap_result())
+
+    def fake_bootstrap_service(**kwargs: object) -> FakeBootstrapService:
         config = kwargs.pop("config")
         assert config == "bootstrap-config"
         calls["bootstrap_dependencies"] = kwargs
-        return "bootstrap-service"
+        calls["bootstrap_service"] = bootstrap_service
+        return bootstrap_service
 
     def fake_discovery_config(**kwargs: object) -> str:
         calls["discovery_config"] = kwargs
@@ -475,9 +478,12 @@ def _patch_composition_dependencies(
         calls["resume_config"] = kwargs
         return "resume-config"
 
-    def fake_resume_service(**kwargs: object) -> str:
+    resume_service = FakeResumeService(_resume_result())
+
+    def fake_resume_service(**kwargs: object) -> FakeResumeService:
         calls["resume_dependencies"] = kwargs
-        return "resume-service"
+        calls["resume_service"] = resume_service
+        return resume_service
 
     monkeypatch.setattr(cli, "FirstAdminBootstrapConfig", fake_bootstrap_config)
     monkeypatch.setattr(cli, "FirstAdminBootstrapService", fake_bootstrap_service)

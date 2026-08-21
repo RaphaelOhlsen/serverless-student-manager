@@ -1,5 +1,5 @@
 import pytest
-from botocore.exceptions import (
+from botocore.exceptions import (  # type: ignore[import-untyped]
     ConnectionClosedError,
     ConnectTimeoutError,
     EndpointConnectionError,
@@ -85,9 +85,7 @@ def test_unknown_dynamodb_5xx_error_is_ambiguous(http_status: int) -> None:
 
 
 def test_unknown_dynamodb_4xx_error_is_not_ambiguous() -> None:
-    assert not is_ambiguous_dynamodb_write_error(
-        _aws_error("UnknownServiceError", http_status=400)
-    )
+    assert not is_ambiguous_dynamodb_write_error(_aws_error("UnknownServiceError", http_status=400))
 
 
 @pytest.mark.parametrize(

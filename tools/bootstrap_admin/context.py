@@ -94,9 +94,7 @@ def parse_bootstrap_context(
     if state_value not in _BOOTSTRAP_STATES:
         raise InvalidBootstrapRecordError("bootstrap record state is unknown")
 
-    expected_record_id = (
-        f"NONHTTP#{environment}#bootstrap-admin#first-admin#{operation_id}"
-    )
+    expected_record_id = f"NONHTTP#{environment}#bootstrap-admin#first-admin#{operation_id}"
     if record_id != expected_record_id:
         raise InvalidBootstrapRecordError("bootstrap record id is incompatible")
 
@@ -139,9 +137,7 @@ def _required_string(record: dict[str, object], field: str) -> str:
 def _required_integer(record: dict[str, object], field: str) -> int:
     value = record.get(field)
     if type(value) is not int:
-        raise InvalidBootstrapRecordError(
-            f"bootstrap record field {field} must be an integer"
-        )
+        raise InvalidBootstrapRecordError(f"bootstrap record field {field} must be an integer")
     return value
 
 

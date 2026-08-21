@@ -12,9 +12,7 @@ from tools.bootstrap_admin.resume_idempotency import (
 
 _OPERATION_ID = "123e4567-e89b-42d3-a456-426614174000"
 _CORRELATION_ID = "223e4567-e89b-42d3-a456-426614174001"
-_EXPECTED_PAYLOAD_HASH = (
-    "1e79147440f3071256d852615a858fa0b107398317c8a739f5f4d386ed2b135a"
-)
+_EXPECTED_PAYLOAD_HASH = "1e79147440f3071256d852615a858fa0b107398317c8a739f5f4d386ed2b135a"
 
 
 def _build_started_record() -> dict[str, object]:
@@ -40,10 +38,7 @@ def test_resume_invitation_started_record_matches_exact_schema() -> None:
     record = _build_started_record()
 
     assert record == {
-        "id": (
-            "NONHTTP#dev#resume-first-admin-invitation#first-admin#"
-            f"{_OPERATION_ID}"
-        ),
+        "id": (f"NONHTTP#dev#resume-first-admin-invitation#first-admin#{_OPERATION_ID}"),
         "environment": "dev",
         "operation": "resume-first-admin-invitation",
         "target": "first-admin",

@@ -157,10 +157,7 @@ class FirstAdminBootstrapService:
 
         normalize_name(full_name)
         normalized_email = normalize_email(email)
-        record_id = (
-            f"NONHTTP#{self._config.environment}#bootstrap-admin#first-admin#"
-            f"{operation_id}"
-        )
+        record_id = f"NONHTTP#{self._config.environment}#bootstrap-admin#first-admin#{operation_id}"
 
         existing = self._idempotency_repository.get(record_id)
         if existing is not None:
@@ -388,9 +385,10 @@ class FirstAdminBootstrapService:
             try:
                 self._persist_replay_items(context, expected_items)
             except Exception as write_error:
-                if (
-                    get_aws_error_code(write_error) != "TransactionCanceledException"
-                    and not is_ambiguous_dynamodb_write_error(write_error)
+                if get_aws_error_code(
+                    write_error
+                ) != "TransactionCanceledException" and not is_ambiguous_dynamodb_write_error(
+                    write_error
                 ):
                     raise
                 actual_items = self._read_provisioning_items(
@@ -782,10 +780,11 @@ class FirstAdminBootstrapService:
         except Exception as create_error:
             create_error_code = get_aws_error_code(create_error)
             if (
-                create_error_code not in {
-                "UsernameExistsException",
-                "AliasExistsException",
-                "InternalErrorException",
+                create_error_code
+                not in {
+                    "UsernameExistsException",
+                    "AliasExistsException",
+                    "InternalErrorException",
                 }
                 and not isinstance(create_error, CognitoCreateResultError)
                 and not is_ambiguous_aws_transport_error(create_error)
@@ -940,10 +939,10 @@ class FirstAdminBootstrapService:
                 cognito_sub=cognito_sub,
             )
         except Exception as transition_error:
-            if (
-                get_aws_error_code(transition_error)
-                != "ConditionalCheckFailedException"
-                and not is_ambiguous_dynamodb_write_error(transition_error)
+            if get_aws_error_code(
+                transition_error
+            ) != "ConditionalCheckFailedException" and not is_ambiguous_dynamodb_write_error(
+                transition_error
             ):
                 raise
             self._reconcile_transition_error(

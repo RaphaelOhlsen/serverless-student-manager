@@ -296,9 +296,7 @@ def test_optional_sub_is_written_when_explicitly_provided() -> None:
 
     assert table.last_update is not None
     assert "cognitoSub = :cognito_sub" in table.last_update["UpdateExpression"]
-    assert table.last_update["ExpressionAttributeValues"][":cognito_sub"] == (
-        "reconciled-sub-123"
-    )
+    assert table.last_update["ExpressionAttributeValues"][":cognito_sub"] == ("reconciled-sub-123")
 
 
 class UpdateFailure(RuntimeError):

@@ -66,26 +66,19 @@ def parse_resume_invitation_context(
             "resume invitation record operation is incompatible"
         )
     if target != "first-admin":
-        raise InvalidResumeInvitationRecordError(
-            "resume invitation record target is incompatible"
-        )
+        raise InvalidResumeInvitationRecordError("resume invitation record target is incompatible")
     if operation_id != expected_operation_id:
         raise InvalidResumeInvitationRecordError(
             "resume invitation record operationId is incompatible"
         )
     if state_value not in _RESUME_INVITATION_STATES:
-        raise InvalidResumeInvitationRecordError(
-            "resume invitation record state is unknown"
-        )
+        raise InvalidResumeInvitationRecordError("resume invitation record state is unknown")
 
     expected_record_id = (
-        f"NONHTTP#{environment}#resume-first-admin-invitation#first-admin#"
-        f"{operation_id}"
+        f"NONHTTP#{environment}#resume-first-admin-invitation#first-admin#{operation_id}"
     )
     if record_id != expected_record_id:
-        raise InvalidResumeInvitationRecordError(
-            "resume invitation record id is incompatible"
-        )
+        raise InvalidResumeInvitationRecordError("resume invitation record id is incompatible")
 
     return ResumeInvitationContext(
         record_id=record_id,

@@ -278,10 +278,9 @@ class ResumeInvitationService:
 
     @staticmethod
     def _should_reconcile_write_error(error: BaseException) -> bool:
-        return (
-            get_aws_error_code(error) == "ConditionalCheckFailedException"
-            or is_ambiguous_dynamodb_write_error(error)
-        )
+        return get_aws_error_code(
+            error
+        ) == "ConditionalCheckFailedException" or is_ambiguous_dynamodb_write_error(error)
 
     @staticmethod
     def _result(

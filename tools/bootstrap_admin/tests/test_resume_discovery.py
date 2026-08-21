@@ -5,6 +5,7 @@ import pytest
 from tools.bootstrap_admin.cognito_repository import CognitoIdentityValidationError
 from tools.bootstrap_admin.resume_discovery import (
     FirstAdminInvitationTarget,
+    ResumeDiscoveryResult,
     ResumeInvitationDiscovery,
     ResumeInvitationDiscoveryConfig,
     ResumeInvitationOperationIdConflictError,
@@ -30,12 +31,12 @@ class FakeProvisioningReader:
         user_profile: dict[str, object] | None = None,
         cognito_projection: dict[str, object] | None = None,
     ) -> None:
-        self.marker = _marker() if marker is None else marker
-        self.user_profile = _user_profile() if user_profile is None else user_profile
-        self.cognito_projection = (
-            _cognito_projection()
-            if cognito_projection is None
-            else cognito_projection
+        self.marker: dict[str, object] | None = _marker() if marker is None else marker
+        self.user_profile: dict[str, object] | None = (
+            _user_profile() if user_profile is None else user_profile
+        )
+        self.cognito_projection: dict[str, object] | None = (
+            _cognito_projection() if cognito_projection is None else cognito_projection
         )
         self.marker_error: BaseException | None = None
         self.user_error: BaseException | None = None
@@ -182,7 +183,7 @@ def _discovery(
     return discovery, provisioning, cognito
 
 
-def _discover(discovery: ResumeInvitationDiscovery):
+def _discover(discovery: ResumeInvitationDiscovery) -> ResumeDiscoveryResult:
     return discovery.discover(resume_operation_id=_RESUME_OPERATION_ID)
 
 
@@ -205,9 +206,7 @@ def test_invalid_marker_returns_reconciliation_and_stops_reads(
 ) -> None:
     marker = _marker()
     marker[field] = value
-    discovery, provisioning, cognito = _discovery(
-        FakeProvisioningReader(marker=marker)
-    )
+    discovery, provisioning, cognito = _discovery(FakeProvisioningReader(marker=marker))
 
     result = _discover(discovery)
 
@@ -232,9 +231,7 @@ def test_missing_marker_returns_reconciliation_and_stops_reads() -> None:
 def test_equal_resume_and_bootstrap_operation_ids_raise_before_user_read() -> None:
     marker = _marker()
     marker["operationId"] = _RESUME_OPERATION_ID
-    discovery, provisioning, cognito = _discovery(
-        FakeProvisioningReader(marker=marker)
-    )
+    discovery, provisioning, cognito = _discovery(FakeProvisioningReader(marker=marker))
 
     with pytest.raises(ResumeInvitationOperationIdConflictError):
         _discover(discovery)
@@ -264,9 +261,7 @@ def test_invalid_user_returns_reconciliation_before_projection_or_cognito(
 ) -> None:
     user = _user_profile()
     user[field] = value
-    discovery, provisioning, cognito = _discovery(
-        FakeProvisioningReader(user_profile=user)
-    )
+    discovery, provisioning, cognito = _discovery(FakeProvisioningReader(user_profile=user))
 
     result = _discover(discovery)
 
@@ -278,9 +273,7 @@ def test_invalid_user_returns_reconciliation_before_projection_or_cognito(
 def test_user_without_user_id_attribute_is_accepted() -> None:
     user = _user_profile()
     del user["userId"]
-    discovery, provisioning, cognito = _discovery(
-        FakeProvisioningReader(user_profile=user)
-    )
+    discovery, provisioning, cognito = _discovery(FakeProvisioningReader(user_profile=user))
 
     result = _discover(discovery)
 
@@ -383,9 +376,7 @@ def test_confirmed_cognito_inconsistency_returns_reconciliation(
 
 
 def test_different_cognito_sub_returns_reconciliation() -> None:
-    discovery, _, cognito = _discovery(
-        cognito=FakeCognitoReader(result="different-sub")
-    )
+    discovery, _, cognito = _discovery(cognito=FakeCognitoReader(result="different-sub"))
 
     result = _discover(discovery)
 

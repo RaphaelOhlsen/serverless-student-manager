@@ -7,7 +7,9 @@ from tools.bootstrap_admin.idempotency import IdempotencyConflictError
 from tools.bootstrap_admin.resume_context import InvalidResumeInvitationRecordError
 from tools.bootstrap_admin.resume_discovery import (
     FirstAdminInvitationTarget,
+    FirstAdminStatus,
     ResumeDiscoveryResult,
+    ResumeDiscoveryStatus,
     ResumeInvitationOperationIdConflictError,
 )
 from tools.bootstrap_admin.resume_idempotency import (
@@ -17,6 +19,7 @@ from tools.bootstrap_admin.resume_service import (
     ResumeInvitationService,
     ResumeInvitationServiceConfig,
 )
+from tools.bootstrap_admin.service_models import ResumeInvitationResult
 
 _OPERATION_ID = "123e4567-e89b-42d3-a456-426614174000"
 _CORRELATION_ID = "223e4567-e89b-42d3-a456-426614174001"
@@ -134,21 +137,23 @@ class FakeInvitationSender:
             raise outcome
 
 
-def _target(*, status: str = "INVITED") -> FirstAdminInvitationTarget:
+def _target(*, status: FirstAdminStatus = "INVITED") -> FirstAdminInvitationTarget:
     return FirstAdminInvitationTarget(
         user_id=_USER_ID,
         email="admin@example.com",
         cognito_sub="cognito-sub-123",
-        status=status,  # type: ignore[arg-type]
+        status=status,
     )
 
 
-def _discovery_result(status: str = "INVITED_CONSISTENT") -> ResumeDiscoveryResult:
+def _discovery_result(
+    status: ResumeDiscoveryStatus = "INVITED_CONSISTENT",
+) -> ResumeDiscoveryResult:
     if status == "RECONCILIATION_REQUIRED":
         return ResumeDiscoveryResult(status=status, target=None)
-    target_status = "ACTIVE" if status == "ACTIVE_CONSISTENT" else "INVITED"
+    target_status: FirstAdminStatus = "ACTIVE" if status == "ACTIVE_CONSISTENT" else "INVITED"
     return ResumeDiscoveryResult(
-        status=status,  # type: ignore[arg-type]
+        status=status,
         target=_target(status=target_status),
     )
 
@@ -210,7 +215,11 @@ def _service(
     return service, repository, discovery, sender, clock, ids
 
 
-def _resume(service: ResumeInvitationService, *, actor_id: str = "github:original"):
+def _resume(
+    service: ResumeInvitationService,
+    *,
+    actor_id: str = "github:original",
+) -> ResumeInvitationResult:
     return service.resume_first_admin_invitation(
         operation_id=_OPERATION_ID,
         actor_id=actor_id,
@@ -227,8 +236,7 @@ def test_new_invited_operation_creates_exact_started_and_completes() -> None:
     assert result.replayed is False
     assert repository.created_records == [_record()]
     assert repository.get_calls == [
-        "NONHTTP#dev#resume-first-admin-invitation#first-admin#"
-        f"{_OPERATION_ID}"
+        f"NONHTTP#dev#resume-first-admin-invitation#first-admin#{_OPERATION_ID}"
     ]
     assert discovery.calls == [_OPERATION_ID]
     assert sender.calls == [{"user_pool_id": "pool-123", "user_id": _USER_ID}]
@@ -280,9 +288,7 @@ def test_empty_actor_is_rejected_before_any_dependency() -> None:
 
 def test_new_active_operation_completes_without_resend() -> None:
     discovery = FakeDiscovery(_discovery_result("ACTIVE_CONSISTENT"))
-    service, repository, discovery, sender, clock, ids = _service(
-        discovery=discovery
-    )
+    service, repository, discovery, sender, clock, ids = _service(discovery=discovery)
 
     result = _resume(service)
 
@@ -303,18 +309,14 @@ def test_new_reconciliation_operation_transitions_without_resend() -> None:
     assert result.state == "RECONCILIATION_REQUIRED"
     assert result.replayed is False
     assert sender.calls == []
-    assert repository.transition_calls[0]["next_state"] == (
-        "RECONCILIATION_REQUIRED"
-    )
+    assert repository.transition_calls[0]["next_state"] == ("RECONCILIATION_REQUIRED")
     assert clock.calls == 2
 
 
 @pytest.mark.parametrize("state", ["COMPLETED", "RECONCILIATION_REQUIRED"])
 def test_terminal_replay_returns_immediately_without_effects(state: str) -> None:
     repository = FakeIdempotencyRepository([_record(state=state)])
-    service, repository, discovery, sender, clock, ids = _service(
-        repository=repository
-    )
+    service, repository, discovery, sender, clock, ids = _service(repository=repository)
 
     result = _resume(service, actor_id="github:different-executor")
 
@@ -363,9 +365,7 @@ def test_invalid_existing_record_fails_before_discovery(
     existing = _record()
     existing.update(mutation)
     repository = FakeIdempotencyRepository([existing])
-    service, repository, discovery, sender, clock, ids = _service(
-        repository=repository
-    )
+    service, repository, discovery, sender, clock, ids = _service(repository=repository)
 
     with pytest.raises(InvalidResumeInvitationRecordError):
         _resume(service)
@@ -381,9 +381,7 @@ def test_existing_payload_mismatch_fails_before_discovery() -> None:
     existing = _record()
     existing["payloadHash"] = "different"
     repository = FakeIdempotencyRepository([existing])
-    service, repository, discovery, sender, clock, ids = _service(
-        repository=repository
-    )
+    service, repository, discovery, sender, clock, ids = _service(repository=repository)
 
     with pytest.raises(IdempotencyConflictError):
         _resume(service)
@@ -467,17 +465,13 @@ def test_user_not_found_resend_transitions_to_reconciliation() -> None:
     assert result.state == "RECONCILIATION_REQUIRED"
     assert result.replayed is True
     assert len(sender.calls) == 1
-    assert repository.transition_calls[0]["next_state"] == (
-        "RECONCILIATION_REQUIRED"
-    )
+    assert repository.transition_calls[0]["next_state"] == ("RECONCILIATION_REQUIRED")
     assert clock.calls == 1
     assert ids.calls == 0
 
 
 def test_separate_invocations_can_retry_resend_once_each() -> None:
-    sender = FakeInvitationSender(
-        [AwsError("CodeDeliveryFailureException"), None]
-    )
+    sender = FakeInvitationSender([AwsError("CodeDeliveryFailureException"), None])
     first_repository = FakeIdempotencyRepository([_record()])
     first_service, _, _, sender, first_clock, _ = _service(
         repository=first_repository,
@@ -681,7 +675,7 @@ def test_cas_error_with_confirmed_next_state_is_successful(
     confirmed = _record(state=next_state)
     repository = FakeIdempotencyRepository([initial, confirmed])
     repository.transition_errors = [transition_error]
-    discovery_status = (
+    discovery_status: ResumeDiscoveryStatus = (
         "RECONCILIATION_REQUIRED"
         if next_state == "RECONCILIATION_REQUIRED"
         else "ACTIVE_CONSISTENT"
@@ -727,12 +721,8 @@ def test_cas_error_not_confirmed_propagates_original(
 
 
 def test_cas_reconciliation_read_failure_propagates_read_error() -> None:
-    repository = FakeIdempotencyRepository(
-        [_record(), RuntimeError("CAS read failed")]
-    )
-    repository.transition_errors = [
-        AwsError("ConditionalCheckFailedException")
-    ]
+    repository = FakeIdempotencyRepository([_record(), RuntimeError("CAS read failed")])
+    repository.transition_errors = [AwsError("ConditionalCheckFailedException")]
     service, repository, _, _, _, _ = _service(
         repository=repository,
         discovery=FakeDiscovery(_discovery_result("ACTIVE_CONSISTENT")),
@@ -760,9 +750,7 @@ def test_cas_reconciled_record_must_be_structural_and_payload_compatible(
     reconciled = _record(state="COMPLETED")
     reconciled.update(mutation)
     repository = FakeIdempotencyRepository([_record(), reconciled])
-    repository.transition_errors = [
-        AwsError("ConditionalCheckFailedException")
-    ]
+    repository.transition_errors = [AwsError("ConditionalCheckFailedException")]
     service, repository, _, _, _, _ = _service(
         repository=repository,
         discovery=FakeDiscovery(_discovery_result("ACTIVE_CONSISTENT")),
@@ -806,10 +794,7 @@ def test_transition_uses_resume_operation_and_never_writes_cognito_sub() -> None
 
     assert repository.transition_calls == [
         {
-            "record_id": (
-                "NONHTTP#dev#resume-first-admin-invitation#first-admin#"
-                f"{_OPERATION_ID}"
-            ),
+            "record_id": (f"NONHTTP#dev#resume-first-admin-invitation#first-admin#{_OPERATION_ID}"),
             "operation": "resume-first-admin-invitation",
             "current_state": "STARTED",
             "next_state": "COMPLETED",

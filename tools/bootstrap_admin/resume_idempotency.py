@@ -25,10 +25,7 @@ def build_resume_invitation_started_record(
     expiration: int,
 ) -> dict[str, object]:
     return {
-        "id": (
-            f"NONHTTP#{environment}#resume-first-admin-invitation#first-admin#"
-            f"{operation_id}"
-        ),
+        "id": (f"NONHTTP#{environment}#resume-first-admin-invitation#first-admin#{operation_id}"),
         "environment": environment,
         "operation": "resume-first-admin-invitation",
         "target": "first-admin",
@@ -47,6 +44,4 @@ def validate_resume_invitation_existing_record(
     existing: dict[str, object],
 ) -> None:
     if existing.get("payloadHash") != resume_invitation_payload_hash():
-        raise IdempotencyConflictError(
-            "operationId already exists with an incompatible payload"
-        )
+        raise IdempotencyConflictError("operationId already exists with an incompatible payload")

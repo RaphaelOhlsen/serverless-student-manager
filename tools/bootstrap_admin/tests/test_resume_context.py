@@ -15,10 +15,7 @@ _CORRELATION_ID = "223e4567-e89b-42d3-a456-426614174001"
 
 def _record(*, state: str = "STARTED") -> dict[str, object]:
     return {
-        "id": (
-            "NONHTTP#dev#resume-first-admin-invitation#first-admin#"
-            f"{_OPERATION_ID}"
-        ),
+        "id": (f"NONHTTP#dev#resume-first-admin-invitation#first-admin#{_OPERATION_ID}"),
         "environment": "dev",
         "operation": "resume-first-admin-invitation",
         "target": "first-admin",
@@ -49,10 +46,7 @@ def test_parse_resume_invitation_context_accepts_approved_states(state: str) -> 
     context = _parse(_record(state=state))
 
     assert context == ResumeInvitationContext(
-        record_id=(
-            "NONHTTP#dev#resume-first-admin-invitation#first-admin#"
-            f"{_OPERATION_ID}"
-        ),
+        record_id=(f"NONHTTP#dev#resume-first-admin-invitation#first-admin#{_OPERATION_ID}"),
         environment="dev",
         operation="resume-first-admin-invitation",
         target="first-admin",

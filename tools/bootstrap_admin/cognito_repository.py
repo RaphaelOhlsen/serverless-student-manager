@@ -48,16 +48,12 @@ class CognitoRepository:
         user = response.get("User")
 
         if not isinstance(user, dict):
-            raise CognitoCreateResultError(
-                "Cognito AdminCreateUser response is missing User"
-            )
+            raise CognitoCreateResultError("Cognito AdminCreateUser response is missing User")
 
         attributes = user.get("Attributes")
 
         if not isinstance(attributes, list):
-            raise CognitoCreateResultError(
-                "Cognito AdminCreateUser response is missing Attributes"
-            )
+            raise CognitoCreateResultError("Cognito AdminCreateUser response is missing Attributes")
 
         for attribute in attributes:
             if not isinstance(attribute, dict):
@@ -111,14 +107,10 @@ class CognitoRepository:
                 cognito_email = value
 
         if cognito_sub is None:
-            raise CognitoIdentityValidationError(
-                "Cognito AdminGetUser response is missing sub"
-            )
+            raise CognitoIdentityValidationError("Cognito AdminGetUser response is missing sub")
 
         if cognito_email is None:
-            raise CognitoIdentityValidationError(
-                "Cognito AdminGetUser response is missing email"
-            )
+            raise CognitoIdentityValidationError("Cognito AdminGetUser response is missing email")
 
         if normalize_email(cognito_email) != normalize_email(expected_email):
             raise CognitoIdentityValidationError(
