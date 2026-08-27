@@ -304,6 +304,8 @@ def test_get_user_profile_uses_exact_key_and_consistent_read() -> None:
         }
     ]
     assert item == _user_profile()
+    assert item is not None
+    assert type(item["authVersion"]) is int
 
 
 def test_get_unique_email_uses_exact_key_and_consistent_read() -> None:
