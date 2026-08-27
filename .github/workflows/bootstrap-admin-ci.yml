@@ -1,0 +1,56 @@
+name: Bootstrap Admin CI
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "tools/bootstrap_admin/**"
+      - "pyproject.toml"
+      - "requirements-dev.txt"
+      - ".github/workflows/bootstrap-admin-ci.yml"
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bootstrap-admin-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bootstrap-admin:
+    name: Bootstrap Admin
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            requirements-dev.txt
+            tools/bootstrap_admin/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+          python -m pip install -r tools/bootstrap_admin/requirements.txt
+
+      - name: Ruff lint
+        run: python -m ruff check tools/bootstrap_admin
+
+      - name: Ruff format
+        run: python -m ruff format --check tools/bootstrap_admin
+
+      - name: Mypy
+        run: python -m mypy tools/bootstrap_admin
+
+      - name: Tests
+        run: python -m pytest tools/bootstrap_admin/tests -q
