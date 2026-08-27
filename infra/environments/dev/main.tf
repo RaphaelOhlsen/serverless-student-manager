@@ -162,6 +162,19 @@ data "aws_iam_policy_document" "bootstrap_admin" {
   }
 
   statement {
+    sid    = "WriteUserProvisioningArtifacts"
+    effect = "Allow"
+
+    actions = [
+      "dynamodb:PutItem",
+    ]
+
+    resources = [
+      module.user_store.table_arn,
+    ]
+  }
+
+  statement {
     sid    = "AppendAuditEvents"
     effect = "Allow"
 

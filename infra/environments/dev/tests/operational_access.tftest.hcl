@@ -320,3 +320,49 @@ run "plans_resume_first_admin_invitation_access" {
     error_message = "The resume policy ARN output is incorrect."
   }
 }
+
+run "plans_bootstrap_admin_access" {
+  command = plan
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.bootstrap_admin.statement : statement.actions
+      if statement.sid == "ReadAndTransactUserProvisioning"
+      ])) == toset([
+      "dynamodb:GetItem",
+      "dynamodb:TransactWriteItems",
+    ])
+    error_message = "The bootstrap provisioning read/transaction statement must contain exactly GetItem and TransactWriteItems."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.bootstrap_admin.statement : statement.resources
+      if statement.sid == "ReadAndTransactUserProvisioning"
+      ])) == toset([
+      module.user_store.table_arn,
+      module.audit_store.table_arn,
+    ])
+    error_message = "The bootstrap provisioning statement must target only the users and audit tables."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.bootstrap_admin.statement : statement.actions
+      if statement.sid == "WriteUserProvisioningArtifacts"
+      ])) == toset([
+      "dynamodb:PutItem",
+    ])
+    error_message = "The bootstrap users write statement must contain exactly PutItem."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.bootstrap_admin.statement : statement.resources
+      if statement.sid == "WriteUserProvisioningArtifacts"
+      ])) == toset([
+      module.user_store.table_arn,
+    ])
+    error_message = "The bootstrap users write statement must target only the users table."
+  }
+}
