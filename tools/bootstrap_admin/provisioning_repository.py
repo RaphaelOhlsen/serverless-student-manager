@@ -5,6 +5,8 @@ from boto3.dynamodb.types import (  # type: ignore[import-untyped]
     TypeSerializer,
 )
 
+from tools.bootstrap_admin.dynamodb_values import normalize_dynamodb_value
+
 
 class DynamoDBClient(Protocol):
     def transact_write_items(self, **kwargs: object) -> dict[str, Any]: ...
@@ -140,4 +142,7 @@ class ProvisioningRepository:
         if not isinstance(item, dict):
             return None
 
-        return {name: self._deserializer.deserialize(value) for name, value in item.items()}
+        return {
+            name: normalize_dynamodb_value(self._deserializer.deserialize(value))
+            for name, value in item.items()
+        }

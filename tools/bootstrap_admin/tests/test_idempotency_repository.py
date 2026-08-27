@@ -1,3 +1,4 @@
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -113,6 +114,28 @@ def test_get_existing_record_uses_strongly_consistent_read() -> None:
         "ConsistentRead": True,
     }
     assert record == expected_record
+
+
+def test_get_normalizes_integral_dynamodb_numbers_to_int() -> None:
+    table = FakeReadableDynamoDBTable(
+        {
+            "Item": {
+                "id": "NONHTTP#dev#bootstrap-admin#first-admin#operation-123",
+                "state": "COGNITO_CREATED",
+                "auditExpiresAt": Decimal("1795009512"),
+                "expiration": Decimal("1787319912"),
+            }
+        }
+    )
+    repository = IdempotencyRepository(table)
+
+    record = repository.get("NONHTTP#dev#bootstrap-admin#first-admin#operation-123")
+
+    assert record is not None
+    assert type(record["auditExpiresAt"]) is int
+    assert type(record["expiration"]) is int
+    assert record["auditExpiresAt"] == 1_795_009_512
+    assert record["expiration"] == 1_787_319_912
 
 
 class FakeUpdatableDynamoDBTable:

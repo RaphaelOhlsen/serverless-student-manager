@@ -1,5 +1,6 @@
 from typing import Any, Protocol
 
+from tools.bootstrap_admin.dynamodb_values import normalize_dynamodb_value
 from tools.bootstrap_admin.idempotency import is_valid_state_transition
 
 
@@ -50,7 +51,7 @@ class IdempotencyRepository:
         if not isinstance(item, dict):
             return None
 
-        return item
+        return {name: normalize_dynamodb_value(value) for name, value in item.items()}
 
     def transition_state(
         self,
