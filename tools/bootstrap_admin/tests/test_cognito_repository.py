@@ -1,7 +1,7 @@
 from typing import Any
 
 import pytest
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 
 from tools.bootstrap_admin.cognito_repository import (
     CognitoCreateResultError,
@@ -38,6 +38,9 @@ class FakeCognitoClient:
 
     def admin_get_user(self, **kwargs: object) -> dict[str, Any]:
         raise AssertionError(f"unexpected AdminGetUser call: {kwargs}")
+
+    def admin_update_user_attributes(self, **kwargs: object) -> dict[str, Any]:
+        raise AssertionError(f"unexpected AdminUpdateUserAttributes call: {kwargs}")
 
     def admin_delete_user(self, **kwargs: object) -> dict[str, Any]:
         self.last_delete = dict(kwargs)
@@ -546,8 +549,9 @@ def test_resend_invitation_uses_only_required_cognito_arguments() -> None:
     }
 
 
-class FakeUpdateUserAttributesCognitoClient:
+class FakeUpdateUserAttributesCognitoClient(FakeCognitoClient):
     def __init__(self, error: Exception | None = None) -> None:
+        super().__init__()
         self.calls: list[tuple[str, dict[str, object]]] = []
         self.error = error
 
@@ -582,7 +586,12 @@ def test_set_email_verified_uses_only_authorized_cognito_mutation() -> None:
             },
         )
     ]
-    assert all(attribute["Name"] != "email" for attribute in client.calls[0][1]["UserAttributes"])
+    user_attributes = client.calls[0][1]["UserAttributes"]
+    assert isinstance(user_attributes, list)
+    assert all(
+        isinstance(attribute, dict) and attribute.get("Name") != "email"
+        for attribute in user_attributes
+    )
 
 
 def test_set_email_verified_propagates_client_error_unchanged() -> None:
