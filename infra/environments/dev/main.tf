@@ -284,6 +284,82 @@ module "resume_first_admin_invitation_operational_access" {
   tags = local.operational_tags
 }
 
+data "aws_iam_policy_document" "verify_first_admin_email" {
+  statement {
+    sid    = "VerifyFirstAdminEmailInCognito"
+    effect = "Allow"
+
+    actions = [
+      "cognito-idp:AdminGetUser",
+      "cognito-idp:AdminUpdateUserAttributes",
+    ]
+
+    resources = [
+      module.identity.user_pool_arn,
+    ]
+  }
+
+  statement {
+    sid    = "ReadFirstAdminIdentityState"
+    effect = "Allow"
+
+    actions = [
+      "dynamodb:GetItem",
+    ]
+
+    resources = [
+      module.user_store.table_arn,
+    ]
+  }
+
+  statement {
+    sid    = "ManageEmailVerificationIdempotency"
+    effect = "Allow"
+
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:PutItem",
+      "dynamodb:UpdateItem",
+    ]
+
+    resources = [
+      module.idempotency_store.table_arn,
+    ]
+  }
+
+  statement {
+    sid    = "AppendEmailVerificationAudit"
+    effect = "Allow"
+
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:PutItem",
+    ]
+
+    resources = [
+      module.audit_store.table_arn,
+    ]
+  }
+}
+
+module "verify_first_admin_email_operational_access" {
+  source = "../../modules/operational_access"
+
+  role_name        = "student-manager-github-dev-verify-first-admin-email"
+  role_description = "Temporary GitHub Actions operational role for first Administrator email verification."
+
+  oidc_provider_arn = local.github_oidc_provider_arn
+  oidc_subject      = local.github_verify_first_admin_email_subject
+
+  policy_name        = "student-manager-dev-verify-first-admin-email"
+  policy_description = "Least-privilege permissions for first Administrator email verification."
+  policy_json        = data.aws_iam_policy_document.verify_first_admin_email.json
+
+  data_classification = "restricted"
+
+  tags = local.operational_tags
+}
+
 data "aws_iam_policy_document" "admin_recovery" {
   statement {
     sid    = "ManageRecoveryCognitoIdentity"

@@ -6,9 +6,11 @@ on:
       - main
     paths:
       - "tools/bootstrap_admin/**"
+      - "tools/verify_first_admin_email/**"
       - "pyproject.toml"
       - "requirements-dev.txt"
       - ".github/workflows/bootstrap-admin-ci.yml"
+      - ".github/workflows/verify-first-admin-email.yml"
 
   workflow_dispatch:
 
@@ -44,13 +46,16 @@ jobs:
           python -m pip install -r tools/bootstrap_admin/requirements.txt
 
       - name: Ruff lint
-        run: python -m ruff check tools/bootstrap_admin
+        run: python -m ruff check tools/bootstrap_admin tools/verify_first_admin_email
 
       - name: Ruff format
-        run: python -m ruff format --check tools/bootstrap_admin
+        run: python -m ruff format --check tools/bootstrap_admin tools/verify_first_admin_email
 
       - name: Mypy
-        run: python -m mypy tools/bootstrap_admin
+        run: python -m mypy tools/bootstrap_admin tools/verify_first_admin_email
 
       - name: Tests
-        run: python -m pytest tools/bootstrap_admin/tests -q
+        run: >-
+          python -m pytest -q
+          tools/bootstrap_admin/tests
+          tools/verify_first_admin_email/tests

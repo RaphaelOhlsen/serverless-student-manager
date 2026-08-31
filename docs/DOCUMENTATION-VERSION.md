@@ -37,8 +37,16 @@ Esta versão consolida:
 4. A operação preserva `userId`, `Username`, Cognito `sub`, e-mail, senha temporária e fluxo de MFA.
 5. A única alteração Cognito permitida é definir `email_verified=true` na identidade existente após reconciliação completa.
 6. `verify-first-admin-email` utiliza idempotência própria com `STARTED`, `COMPLETED` e `RECONCILIATION_REQUIRED`.
-7. Foi aprovada uma capacidade OIDC dedicada em `dev`, com GitHub Environment e role IAM próprios, ainda pendentes de implementação e validação.
+7. A capacidade OIDC dedicada em `dev` possui CLI, workflow e Terraform declarativo implementados no repositório; role/policy, GitHub Environment e variables ainda dependem de provisionamento e configuração.
 8. O login exclusivo por e-mail no frontend permanece bloqueado até a reconciliação histórica e a validação read-only da prontidão do alias.
+
+## Estado de implementação desta baseline
+
+Em 2026-08-31, a implementação no repositório inclui a role/policy declarativa,
+o workflow manual e a cobertura de CI/testes de `verify-first-admin-email`.
+Nenhum desses registros documenta provisionamento em AWS, criação do GitHub
+Environment ou execução da correção histórica; essas etapas permanecem
+separadas e sujeitas a revisão e autorização explícitas.
 
 ## Regra de precedência
 

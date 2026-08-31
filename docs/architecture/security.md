@@ -92,7 +92,7 @@ Bootstrap, retomada e recuperação possuem trust policies e policies IAM própr
 
 A ADR-025 aprova uma quarta capacidade operacional distinta em `dev`, denominada `verify-first-admin-email`. Sua finalidade exclusiva é reconciliar o primeiro Administrador existente e, quando todos os invariantes forem confirmados, definir somente `email_verified=true` na mesma identidade Cognito por `AdminUpdateUserAttributes`.
 
-A capacidade aprovada utilizará:
+A capacidade declarada no repositório utilizará:
 
 ```text
 GitHub Environment:
@@ -100,13 +100,34 @@ dev-verify-first-admin-email
 
 IAM role:
 student-manager-github-dev-verify-first-admin-email
+
+IAM managed policy:
+student-manager-dev-verify-first-admin-email
 ```
 
 Essa capacidade preserva `userId`, `Username`, Cognito `sub`, e-mail, senha temporária e MFA. Ela não pode criar, substituir, excluir, desabilitar ou habilitar identidade, alterar senha, executar `RESEND`, transferir alias ou modificar USER, UNIQUE EMAIL, COGNITO projection, marker singleton ou contador de Administradores.
 
-A role terá somente as permissões Cognito necessárias ao contrato, incluindo `AdminGetUser` e `AdminUpdateUserAttributes`, além das leituras DynamoDB e escritas técnicas estritamente necessárias para idempotência e auditoria. Ela não reutilizará as roles de bootstrap ou recuperação MFA.
+A trust declarada usa o provider OIDC existente, audience
+`sts.amazonaws.com` e subject exato do Environment, sem wildcard. A role não
+reutiliza as roles de bootstrap ou recuperação MFA, não usa access keys e
+limita Cognito a `AdminGetUser` e `AdminUpdateUserAttributes` no User Pool
+correto. DynamoDB é separado por tabela e pelas ações mínimas de leitura,
+idempotência e append de auditoria.
 
-A ADR-025 está aprovada na baseline v2.8 e sua implementação Python possui CLI local. A role, o GitHub Environment e o workflow ainda dependem de implementação e validação; até lá, `verify-first-admin-email` não está disponível como capacidade operacional na AWS.
+O workflow recebe somente `operation_id`; a autoria é derivada de
+`github.actor` e `github.actor_id`. E-mail, `userId`, `cognitoSub`, nome, senha,
+token e MFA não são inputs. O IAM não permite restringir
+`AdminUpdateUserAttributes` somente ao atributo `email_verified`. Essa limitação
+é compensada pela role e Environment dedicados, workflow sem dados pessoais,
+service restrito, reconciliação e read-back obrigatórios, idempotência e
+auditoria.
+
+A ADR-025 está aprovada na baseline v2.8. A CLI, o workflow e o Terraform da
+role/policy estão implementados no repositório, mas a role/policy ainda não foi
+provisionada em `dev`; o Environment e suas variables ainda não foram criados.
+A correção histórica também não foi autorizada nem executada. Até essas etapas,
+`verify-first-admin-email` não está disponível como capacidade operacional na
+AWS.
 
 Reset de MFA é administrativo e auditado.  
 O único Administrador terá procedimento excepcional controlado de recuperação.
