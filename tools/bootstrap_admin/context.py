@@ -53,6 +53,7 @@ class BootstrapContext:
     created_at: str
     updated_at: str
     expiration: int
+    cognito_email_verified_required: bool
     cognito_sub: str | None
 
 
@@ -82,6 +83,15 @@ def parse_bootstrap_context(
     created_at = _required_string(record, "createdAt")
     updated_at = _required_string(record, "updatedAt")
     expiration = _required_integer(record, "expiration")
+
+    cognito_email_verified_required = record.get(
+        "cognitoEmailVerifiedRequired",
+        False,
+    )
+    if type(cognito_email_verified_required) is not bool:
+        raise InvalidBootstrapRecordError(
+            "bootstrap record field cognitoEmailVerifiedRequired must be a boolean when present"
+        )
 
     if environment != expected_environment:
         raise InvalidBootstrapRecordError("bootstrap record environment is incompatible")
@@ -121,6 +131,7 @@ def parse_bootstrap_context(
         created_at=created_at,
         updated_at=updated_at,
         expiration=expiration,
+        cognito_email_verified_required=cognito_email_verified_required,
         cognito_sub=cognito_sub,
     )
 

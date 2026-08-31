@@ -1,8 +1,8 @@
 # Serverless Student Manager — Documentação canônica
 
-**Versão:** 2.7 — Engineering Ready
-**Data:** 2026-08-20
-**Status:** Engenharia em andamento — ADR-001 a ADR-024 aprovadas
+**Versão:** 2.8 — Engineering Ready
+**Data:** 2026-08-28
+**Status:** Engenharia em andamento — ADR-001 a ADR-025 aprovadas
 
 ## Objetivo
 
@@ -44,17 +44,17 @@ Estão concluídos e aprovados:
 - retenção;
 - rollback em camadas;
 - organização dos módulos Terraform;
-- ADR-001 a ADR-024.
+- ADR-001 a ADR-025.
 
 A implementação está em andamento, com infraestrutura `dev`, autenticação Cognito, Students API inicial, HTTP API, idempotência e armazenamento de auditoria sendo materializados conforme as decisões arquiteturais aprovadas.
 
 ## Próximo marco
 
-1. concluir os controles de acesso operacional via OIDC;
-2. implementar o bootstrap seguro do primeiro Administrador;
-3. evoluir o backend para os demais fluxos de alunos e usuários;
-4. implementar o frontend React;
-5. concluir observabilidade, testes end-to-end, hardening e preparação de `prod`.
+1. implementar a ADR-025 para futuras criações do primeiro Administrador;
+2. implementar a operação operacional `verify-first-admin-email` e sua capacidade OIDC dedicada em `dev`;
+3. reconciliar o primeiro Administrador histórico e confirmar `email_verified=true`;
+4. validar de forma read-only a prontidão do alias de e-mail para autenticação;
+5. retomar a autenticação do frontend React e evoluir os demais fluxos da aplicação.
 
 ## Estrutura documental
 

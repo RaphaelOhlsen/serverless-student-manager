@@ -149,3 +149,11 @@ Para cada ferramenta de escrita não HTTP:
 ## Refinamento posterior — ADR-024
 
 A **ADR-024 — Protocolo determinístico e trava singleton do bootstrap do primeiro Admin**, aprovada em 2026-08-20, especializa esta decisão para `bootstrap-admin` e `resume-first-admin-invitation`. Ela define UUIDv4 canônico, metadados determinísticos, `ClientRequestToken = operationId` para a transação do bootstrap e transições de estado validadas por `operation`.
+
+## Refinamento posterior — ADR-025
+
+A **ADR-025 — Verificação administrativa do e-mail do primeiro Administrador**, aprovada em 2026-08-28, especializa esta decisão para a operação não HTTP `verify-first-admin-email`.
+
+A operação utiliza `operation=verify-first-admin-email`, `target=first-admin` e o payload canônico `{"target":"first-admin"}`.
+
+Ela preserva `operationId`, `payloadHash`, `eventId`, `correlationId`, `occurredAt`, `auditExpiresAt` e `actorId` durante retries e replays, e utiliza os estados `STARTED`, `COMPLETED` e `RECONCILIATION_REQUIRED`.

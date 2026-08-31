@@ -1,6 +1,6 @@
 # Modelo de dados
 
-**Versão:** 2.7
+**Versão:** 2.8
 **Status:** Approved
 
 ## 1. Estratégia
@@ -252,7 +252,8 @@ A tabela é compartilhada, mas suas máquinas de estado não são artificialment
 - fluxos HTTP podem utilizar `INPROGRESS` e `COMPLETE`, conforme ADR-012;
 - operações não HTTP utilizam máquinas de estados próprias, conforme ADR-018 e suas especializações;
 - `bootstrap-admin` utiliza os estados e as transições normais e excepcionais definidos pela ADR-024;
-- `resume-first-admin-invitation` utiliza `STARTED`, `COMPLETED` e `RECONCILIATION_REQUIRED`, conforme ADR-024.
+- `resume-first-admin-invitation` utiliza `STARTED`, `COMPLETED` e `RECONCILIATION_REQUIRED`, conforme ADR-024;
+- `verify-first-admin-email` utiliza `STARTED`, `COMPLETED` e `RECONCILIATION_REQUIRED`, conforme ADR-025.
 
 ### Bootstrap do primeiro Administrador
 
@@ -285,6 +286,74 @@ ClientRequestToken = operationId
 Os IDs técnicos são UUIDv4 canônicos e os timestamps de criação usam UTC RFC3339 com precisão de milissegundos e sufixo `Z`, conforme ADR-024.
 
 Após o TTL de 24 horas, o marker permanente continua protegendo contra um novo bootstrap. A operação `resume-first-admin-invitation` pode retomar somente o convite do mesmo `ADMIN` em estado `INVITED`, depois da reconciliação completa, sem criar ou alterar USER, UNIQUE EMAIL, COGNITO projection ou marker.
+
+### Verificação administrativa do e-mail do primeiro Admin
+
+A operação `verify-first-admin-email`, definida pela ADR-025, utiliza a mesma tabela técnica de idempotência, mas possui contrato próprio.
+
+Sua identidade lógica é:
+
+```text
+operation = verify-first-admin-email
+target = first-admin
+```
+
+O payload canônico é:
+
+```json
+{"target":"first-admin"}
+```
+
+O registro idempotente preserva, no mínimo:
+
+```text
+operation
+target
+operationId
+payloadHash
+eventId
+correlationId
+occurredAt
+auditExpiresAt
+actorId
+createdAt
+updatedAt
+expiration
+```
+
+`operationId`, `eventId` e `correlationId` são UUIDv4 e os metadados determinísticos são preservados durante retries e replays.
+
+Antes de qualquer leitura de negócio ou Cognito em replay, o `payloadHash` deve ser validado.
+
+A máquina de estados é:
+
+```text
+STARTED
+→ COMPLETED
+```
+
+ou, excepcionalmente:
+
+```text
+STARTED
+→ RECONCILIATION_REQUIRED
+```
+
+`COMPLETED` e `RECONCILIATION_REQUIRED` são terminais para a operação.
+
+A operação utiliza marker, USER e COGNITO projection somente para leitura e reconciliação. Ela não altera:
+
+```text
+USER#<userId>
+UNIQUE#EMAIL#<normalizedEmail>
+COGNITO#<cognitoSub>
+CONTROL#FIRST_ADMIN_BOOTSTRAP / CONTROL
+CONTROL#ACTIVE_ADMIN_COUNT
+```
+
+A única alteração de identidade permitida, após reconciliação completa, é definir `email_verified=true` na identidade Cognito já existente.
+
+O audit event da conclusão é determinístico e deve ser confirmado antes de `COMPLETED`. A ausência ou incompatibilidade da auditoria não impede o registro de `RECONCILIATION_REQUIRED` quando intervenção operacional for necessária.
 
 ## 6. Consistência
 

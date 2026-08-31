@@ -64,6 +64,15 @@ class CognitoRepository(Protocol):
         expected_email: str,
     ) -> str: ...
 
+    def get_verified_user_sub(
+        self,
+        *,
+        user_pool_id: str,
+        user_id: str,
+        expected_email: str,
+        expected_sub: str | None = None,
+    ) -> str: ...
+
     def create_suppressed_user(
         self,
         *,
@@ -220,6 +229,26 @@ class FirstAdminBootstrapService:
             user_id=user_id,
             email=normalized_email,
         )
+
+        try:
+            verified_sub = self._cognito_repository.get_verified_user_sub(
+                user_pool_id=self._config.user_pool_id,
+                user_id=user_id,
+                expected_email=normalized_email,
+                expected_sub=cognito_sub,
+            )
+        except CognitoIdentityValidationError:
+            return self._mark_reconciliation_required(
+                context,
+                current_state="STARTED",
+            )
+
+        if verified_sub != cognito_sub:
+            return self._mark_reconciliation_required(
+                context,
+                current_state="STARTED",
+            )
+
         self._transition(
             record_id=record_id,
             operation_id=operation_id,
@@ -288,10 +317,18 @@ class FirstAdminBootstrapService:
             raise AssertionError("COGNITO_CREATED context requires cognito_sub")
 
         try:
-            existing_sub = self._get_existing_user_sub(
-                context,
-                normalized_email=normalized_email,
-            )
+            if context.cognito_email_verified_required:
+                existing_sub = self._cognito_repository.get_verified_user_sub(
+                    user_pool_id=self._config.user_pool_id,
+                    user_id=context.user_id,
+                    expected_email=normalized_email,
+                    expected_sub=cognito_sub,
+                )
+            else:
+                existing_sub = self._get_existing_user_sub(
+                    context,
+                    normalized_email=normalized_email,
+                )
         except CognitoIdentityValidationError:
             return self._mark_reconciliation_required(
                 context,
@@ -731,10 +768,17 @@ class FirstAdminBootstrapService:
         normalized_email: str,
     ) -> BootstrapResult:
         try:
-            cognito_sub = self._get_existing_user_sub(
-                context,
-                normalized_email=normalized_email,
-            )
+            if context.cognito_email_verified_required:
+                cognito_sub = self._cognito_repository.get_verified_user_sub(
+                    user_pool_id=self._config.user_pool_id,
+                    user_id=context.user_id,
+                    expected_email=normalized_email,
+                )
+            else:
+                cognito_sub = self._get_existing_user_sub(
+                    context,
+                    normalized_email=normalized_email,
+                )
         except CognitoIdentityValidationError:
             return self._mark_reconciliation_required(
                 context,
@@ -777,6 +821,26 @@ class FirstAdminBootstrapService:
                 create_error=create_error,
             )
 
+        if context.cognito_email_verified_required:
+            try:
+                verified_sub = self._cognito_repository.get_verified_user_sub(
+                    user_pool_id=self._config.user_pool_id,
+                    user_id=context.user_id,
+                    expected_email=normalized_email,
+                    expected_sub=cognito_sub,
+                )
+            except CognitoIdentityValidationError:
+                return self._mark_reconciliation_required(
+                    context,
+                    current_state="STARTED",
+                )
+
+            if verified_sub != cognito_sub:
+                return self._mark_reconciliation_required(
+                    context,
+                    current_state="STARTED",
+                )
+
         return self._adopt_cognito_user(
             context,
             full_name=full_name,
@@ -793,10 +857,17 @@ class FirstAdminBootstrapService:
         create_error: Exception,
     ) -> BootstrapResult:
         try:
-            cognito_sub = self._get_existing_user_sub(
-                context,
-                normalized_email=normalized_email,
-            )
+            if context.cognito_email_verified_required:
+                cognito_sub = self._cognito_repository.get_verified_user_sub(
+                    user_pool_id=self._config.user_pool_id,
+                    user_id=context.user_id,
+                    expected_email=normalized_email,
+                )
+            else:
+                cognito_sub = self._get_existing_user_sub(
+                    context,
+                    normalized_email=normalized_email,
+                )
         except CognitoIdentityValidationError:
             return self._mark_reconciliation_required(
                 context,

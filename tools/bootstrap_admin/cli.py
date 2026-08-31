@@ -40,6 +40,16 @@ from tools.bootstrap_admin.service_models import (
     FirstAdminBootstrapConfig,
     ResumeInvitationResult,
 )
+from tools.verify_first_admin_email.audit_repository import AuditRepository
+from tools.verify_first_admin_email.discovery import (
+    VerifyFirstAdminEmailDiscovery,
+    VerifyFirstAdminEmailDiscoveryConfig,
+)
+from tools.verify_first_admin_email.service import (
+    VerifyFirstAdminEmailResult,
+    VerifyFirstAdminEmailService,
+    VerifyFirstAdminEmailServiceConfig,
+)
 
 
 class BootstrapService(Protocol):
@@ -60,6 +70,15 @@ class ResumeService(Protocol):
         operation_id: str,
         actor_id: str,
     ) -> ResumeInvitationResult: ...
+
+
+class VerifyEmailService(Protocol):
+    def verify_first_admin_email(
+        self,
+        *,
+        operation_id: str,
+        actor_id: str,
+    ) -> VerifyFirstAdminEmailResult: ...
 
 
 class CliUsageError(ValueError):
@@ -90,6 +109,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     resume.add_argument("--operation-id", required=True)
     resume.add_argument("--actor-id", required=True)
+
+    verify_email = commands.add_parser(
+        "verify-first-admin-email",
+        help="Verify the first Administrator email.",
+    )
+    verify_email.add_argument("--operation-id", required=True)
+    verify_email.add_argument("--actor-id", required=True)
 
     return parser
 
@@ -146,6 +172,34 @@ def _build_resume_service() -> ResumeService:
     )
 
 
+def _build_verify_email_service() -> VerifyEmailService:
+    cognito_client, dynamodb_client, idempotency_table = _aws_dependencies()
+    cognito_repository = CognitoRepository(cognito_client)
+    provisioning_repository = ProvisioningRepository(dynamodb_client)
+    discovery = VerifyFirstAdminEmailDiscovery(
+        config=VerifyFirstAdminEmailDiscoveryConfig(
+            users_table_name=get_users_table_name(),
+            user_pool_id=get_cognito_user_pool_id(),
+        ),
+        provisioning_reader=provisioning_repository,
+        cognito_reader=cognito_repository,
+    )
+    return VerifyFirstAdminEmailService(
+        config=VerifyFirstAdminEmailServiceConfig(
+            environment=get_app_environment(),
+            user_pool_id=get_cognito_user_pool_id(),
+            audit_table_name=get_audit_table_name(),
+            audit_retention_days=get_audit_retention_days(),
+        ),
+        clock=SystemClock(),
+        id_generator=Uuid4Generator(),
+        idempotency_repository=IdempotencyRepository(idempotency_table),
+        discovery=discovery,
+        cognito_repository=cognito_repository,
+        audit_repository=AuditRepository(dynamodb_client),
+    )
+
+
 def _bootstrap_output(result: BootstrapResult) -> dict[str, object]:
     return {
         "operationId": result.operation_id,
@@ -156,6 +210,16 @@ def _bootstrap_output(result: BootstrapResult) -> dict[str, object]:
 
 
 def _resume_output(result: ResumeInvitationResult) -> dict[str, object]:
+    return {
+        "operationId": result.operation_id,
+        "state": result.state,
+        "replayed": result.replayed,
+    }
+
+
+def _verify_email_output(
+    result: VerifyFirstAdminEmailResult,
+) -> dict[str, object]:
     return {
         "operationId": result.operation_id,
         "state": result.state,
@@ -180,6 +244,7 @@ def run(
     *,
     bootstrap_service_factory: Callable[[], BootstrapService] = _build_bootstrap_service,
     resume_service_factory: Callable[[], ResumeService] = _build_resume_service,
+    verify_email_service_factory: Callable[[], VerifyEmailService] = _build_verify_email_service,
 ) -> int:
     arguments: argparse.Namespace | None = None
     try:
@@ -195,12 +260,21 @@ def run(
             _write_result(_bootstrap_output(bootstrap_result))
             return exit_code
 
-        resume_result = resume_service_factory().resume_first_admin_invitation(
+        if arguments.command == "resume-first-admin-invitation":
+            resume_result = resume_service_factory().resume_first_admin_invitation(
+                operation_id=arguments.operation_id,
+                actor_id=arguments.actor_id,
+            )
+            exit_code = _exit_code(resume_result.state)
+            _write_result(_resume_output(resume_result))
+            return exit_code
+
+        verify_email_result = verify_email_service_factory().verify_first_admin_email(
             operation_id=arguments.operation_id,
             actor_id=arguments.actor_id,
         )
-        exit_code = _exit_code(resume_result.state)
-        _write_result(_resume_output(resume_result))
+        exit_code = _exit_code(verify_email_result.state)
+        _write_result(_verify_email_output(verify_email_result))
         return exit_code
     except CliUsageError:
         print("error: invalid command arguments", file=sys.stderr)

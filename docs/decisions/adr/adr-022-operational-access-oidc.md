@@ -165,3 +165,11 @@ Como o repositório possui atualmente um único colaborador com permissão admin
 Essa configuração mantém uma etapa explícita de aprovação manual, mas não fornece aprovação independente por segunda pessoa.
 
 Como hardening futuro, quando houver um segundo colaborador confiável, os environments de recovery deverão migrar para `prevent_self_review = true` com reviewer independente.
+
+## Refinamento posterior — ADR-025
+
+A **ADR-025 — Verificação administrativa do e-mail do primeiro Administrador**, aprovada em 2026-08-28, aplica a separação por capacidade desta ADR à operação `verify-first-admin-email`.
+
+Em `dev`, a capacidade aprovada utilizará o GitHub Environment `dev-verify-first-admin-email` e a role `student-manager-github-dev-verify-first-admin-email`.
+
+A role terá policy própria de menor privilégio e não reutilizará as roles de bootstrap ou de recuperação MFA. A capacidade permanece pendente de implementação e validação, e a ADR-025 não autoriza implicitamente sua criação em `prod`.

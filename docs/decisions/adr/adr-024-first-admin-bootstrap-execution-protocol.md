@@ -483,7 +483,7 @@ Sua aprovação promove a documentação arquitetural para a baseline v2.7, com 
 - o registro idempotente recebe novos metadados técnicos;
 - repositories e testes existentes precisarão evoluir;
 - o marker permanente exigirá procedimento operacional explícito para situações excepcionais;
-- a implementação completa deverá seguir a baseline documental v2.7;
+- a implementação completa deverá seguir a baseline documental canônica vigente;
 - a taxonomia de eventos operacionais ainda precisa ser detalhada.
 
 ## Testes obrigatórios
@@ -526,3 +526,11 @@ A implementação deverá cobrir, no mínimo:
 A taxonomia completa dos eventos operacionais e de auditoria para falhas, compensações, falhas de compensação, reconciliação e alertas será detalhada durante a implementação e no runbook correspondente.
 
 Esse detalhamento não poderá alterar silenciosamente os estados ou as garantias definidos nesta proposta.
+
+## Refinamento posterior — ADR-025
+
+A **ADR-025 — Verificação administrativa do e-mail do primeiro Administrador**, aprovada em 2026-08-28, complementa esta decisão sem alterar a máquina de estados do bootstrap nem de `resume-first-admin-invitation`.
+
+Futuras criações do primeiro Admin passam a exigir `email_verified=true`, mas identidades históricas não verificadas não serão reparadas implicitamente pelo bootstrap, por seus replays ou pela retomada do convite.
+
+A correção histórica pertence exclusivamente à operação separada `verify-first-admin-email`, preservando `userId`, `Username` e Cognito `sub`, sem `AdminCreateUser`, `RESEND` ou alteração dos itens de domínio do bootstrap.
