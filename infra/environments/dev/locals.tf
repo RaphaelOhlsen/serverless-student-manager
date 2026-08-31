@@ -15,6 +15,7 @@ locals {
   github_bootstrap_admin_subject               = "repo:${local.github_immutable_repository}:environment:dev-bootstrap-admin"
   github_admin_recovery_subject                = "repo:${local.github_immutable_repository}:environment:dev-admin-recovery"
   github_resume_first_admin_invitation_subject = "repo:${local.github_immutable_repository}:environment:dev-resume-first-admin-invitation"
+  github_verify_first_admin_email_subject      = "repo:${local.github_immutable_repository}:environment:dev-verify-first-admin-email"
 
   common_tags = {
     Project     = local.project_name

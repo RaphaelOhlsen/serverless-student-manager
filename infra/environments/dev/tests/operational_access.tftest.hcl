@@ -131,6 +131,41 @@ override_data {
 }
 
 override_data {
+  target = data.aws_iam_policy_document.verify_first_admin_email
+  values = {
+    json = jsonencode({
+      Version = "2012-10-17"
+      Statement = [
+        {
+          Sid      = "VerifyFirstAdminEmailInCognito"
+          Effect   = "Allow"
+          Action   = ["cognito-idp:AdminGetUser", "cognito-idp:AdminUpdateUserAttributes"]
+          Resource = "arn:aws:cognito-idp:us-east-1:123456789012:userpool/us-east-1_example"
+        },
+        {
+          Sid      = "ReadFirstAdminIdentityState"
+          Effect   = "Allow"
+          Action   = "dynamodb:GetItem"
+          Resource = "arn:aws:dynamodb:us-east-1:123456789012:table/serverless-student-manager-dev-users"
+        },
+        {
+          Sid      = "ManageEmailVerificationIdempotency"
+          Effect   = "Allow"
+          Action   = ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem"]
+          Resource = "arn:aws:dynamodb:us-east-1:123456789012:table/serverless-student-manager-dev-idempotency"
+        },
+        {
+          Sid      = "AppendEmailVerificationAudit"
+          Effect   = "Allow"
+          Action   = ["dynamodb:GetItem", "dynamodb:PutItem"]
+          Resource = "arn:aws:dynamodb:us-east-1:123456789012:table/serverless-student-manager-dev-audit-events"
+        },
+      ]
+    })
+  }
+}
+
+override_data {
   target          = module.resume_first_admin_invitation_operational_access.data.aws_iam_policy_document.trust
   override_during = plan
   values = {
@@ -167,6 +202,46 @@ override_resource {
   override_during = plan
   values = {
     arn = "arn:aws:iam::123456789012:policy/student-manager-dev-resume-first-admin-invitation"
+  }
+}
+
+override_data {
+  target          = module.verify_first_admin_email_operational_access.data.aws_iam_policy_document.trust
+  override_during = plan
+  values = {
+    json = jsonencode({
+      Version = "2012-10-17"
+      Statement = [{
+        Sid    = "GitHubActionsOidc"
+        Effect = "Allow"
+        Action = "sts:AssumeRoleWithWebIdentity"
+        Principal = {
+          Federated = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+        }
+        Condition = {
+          StringEquals = {
+            "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
+            "token.actions.githubusercontent.com:sub" = "repo:example@12345678/serverless-student-manager@87654321:environment:dev-verify-first-admin-email"
+          }
+        }
+      }]
+    })
+  }
+}
+
+override_resource {
+  target          = module.verify_first_admin_email_operational_access.aws_iam_role.this
+  override_during = plan
+  values = {
+    arn = "arn:aws:iam::123456789012:role/student-manager-github-dev-verify-first-admin-email"
+  }
+}
+
+override_resource {
+  target          = module.verify_first_admin_email_operational_access.aws_iam_policy.this
+  override_during = plan
+  values = {
+    arn = "arn:aws:iam::123456789012:policy/student-manager-dev-verify-first-admin-email"
   }
 }
 
@@ -318,6 +393,234 @@ run "plans_resume_first_admin_invitation_access" {
   assert {
     condition     = output.resume_first_admin_invitation_policy_arn == "arn:aws:iam::123456789012:policy/student-manager-dev-resume-first-admin-invitation"
     error_message = "The resume policy ARN output is incorrect."
+  }
+}
+
+run "plans_verify_first_admin_email_access" {
+  command = plan
+
+  assert {
+    condition     = module.verify_first_admin_email_operational_access.role_name == "student-manager-github-dev-verify-first-admin-email"
+    error_message = "The email verification operational role name is incorrect."
+  }
+
+  assert {
+    condition     = module.verify_first_admin_email_operational_access.policy_name == "student-manager-dev-verify-first-admin-email"
+    error_message = "The email verification managed policy name is incorrect."
+  }
+
+  assert {
+    condition     = local.github_oidc_provider_arn == "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+    error_message = "The email verification role must reuse the GitHub Actions OIDC provider."
+  }
+
+  assert {
+    condition     = local.github_verify_first_admin_email_subject == "repo:example@12345678/serverless-student-manager@87654321:environment:dev-verify-first-admin-email"
+    error_message = "The email verification OIDC subject must use the exact dedicated GitHub Environment."
+  }
+
+  assert {
+    condition     = !strcontains(local.github_verify_first_admin_email_subject, "*")
+    error_message = "The email verification OIDC subject must not contain wildcards."
+  }
+
+  assert {
+    condition     = local.github_bootstrap_admin_subject == "repo:example@12345678/serverless-student-manager@87654321:environment:dev-bootstrap-admin"
+    error_message = "The bootstrap OIDC subject must remain unchanged."
+  }
+
+  assert {
+    condition     = local.github_admin_recovery_subject == "repo:example@12345678/serverless-student-manager@87654321:environment:dev-admin-recovery"
+    error_message = "The admin recovery OIDC subject must remain unchanged."
+  }
+
+  assert {
+    condition     = length(data.aws_iam_policy_document.verify_first_admin_email.statement) == 4
+    error_message = "The email verification policy must contain exactly four semantic statements."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.verify_first_admin_email.statement : statement.actions
+      if statement.sid == "VerifyFirstAdminEmailInCognito"
+      ])) == toset([
+      "cognito-idp:AdminGetUser",
+      "cognito-idp:AdminUpdateUserAttributes",
+    ])
+    error_message = "The Cognito statement must contain only AdminGetUser and AdminUpdateUserAttributes."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.verify_first_admin_email.statement : statement.resources
+      if statement.sid == "VerifyFirstAdminEmailInCognito"
+    ])) == toset([module.identity.user_pool_arn])
+    error_message = "The Cognito statement must target only the dev user pool."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.verify_first_admin_email.statement : statement.actions
+      if statement.sid == "ReadFirstAdminIdentityState"
+    ])) == toset(["dynamodb:GetItem"])
+    error_message = "The users statement must contain only GetItem."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.verify_first_admin_email.statement : statement.resources
+      if statement.sid == "ReadFirstAdminIdentityState"
+    ])) == toset([module.user_store.table_arn])
+    error_message = "The users statement must target only the users table."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.verify_first_admin_email.statement : statement.actions
+      if statement.sid == "ManageEmailVerificationIdempotency"
+      ])) == toset([
+      "dynamodb:GetItem",
+      "dynamodb:PutItem",
+      "dynamodb:UpdateItem",
+    ])
+    error_message = "The idempotency statement must contain only GetItem, PutItem and UpdateItem."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.verify_first_admin_email.statement : statement.resources
+      if statement.sid == "ManageEmailVerificationIdempotency"
+    ])) == toset([module.idempotency_store.table_arn])
+    error_message = "The idempotency statement must target only the idempotency table."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.verify_first_admin_email.statement : statement.actions
+      if statement.sid == "AppendEmailVerificationAudit"
+      ])) == toset([
+      "dynamodb:GetItem",
+      "dynamodb:PutItem",
+    ])
+    error_message = "The audit statement must contain only GetItem and PutItem."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.verify_first_admin_email.statement : statement.resources
+      if statement.sid == "AppendEmailVerificationAudit"
+    ])) == toset([module.audit_store.table_arn])
+    error_message = "The audit statement must target only the audit table."
+  }
+
+  assert {
+    condition = alltrue(flatten([
+      for statement in data.aws_iam_policy_document.verify_first_admin_email.statement : [
+        for action in statement.actions : !strcontains(action, "*")
+      ]
+    ]))
+    error_message = "The email verification policy must not contain wildcard actions."
+  }
+
+  assert {
+    condition = alltrue(flatten([
+      for statement in data.aws_iam_policy_document.verify_first_admin_email.statement : [
+        for resource in statement.resources : resource != "*"
+      ]
+    ]))
+    error_message = "The email verification policy must not contain wildcard resources."
+  }
+
+  assert {
+    condition = length(setintersection(
+      toset(flatten([
+        for statement in data.aws_iam_policy_document.verify_first_admin_email.statement : statement.actions
+      ])),
+      toset([
+        "cognito-idp:*",
+        "cognito-idp:AdminCreateUser",
+        "cognito-idp:AdminDeleteUser",
+        "cognito-idp:AdminDisableUser",
+        "cognito-idp:AdminEnableUser",
+        "cognito-idp:AdminSetUserPassword",
+        "cognito-idp:AdminUserGlobalSignOut",
+        "dynamodb:*",
+        "dynamodb:DeleteItem",
+        "dynamodb:Query",
+        "dynamodb:Scan",
+        "dynamodb:TransactWriteItems",
+      ])
+    )) == 0
+    error_message = "The email verification policy contains a forbidden action."
+  }
+
+  assert {
+    condition = length(setintersection(
+      toset(one([
+        for statement in data.aws_iam_policy_document.verify_first_admin_email.statement : statement.actions
+        if statement.sid == "ReadFirstAdminIdentityState"
+      ])),
+      toset([
+        "dynamodb:PutItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:DeleteItem",
+        "dynamodb:Query",
+        "dynamodb:Scan",
+        "dynamodb:TransactWriteItems",
+      ])
+    )) == 0
+    error_message = "The users statement contains a forbidden write or collection action."
+  }
+
+  assert {
+    condition = length(setintersection(
+      toset(one([
+        for statement in data.aws_iam_policy_document.verify_first_admin_email.statement : statement.actions
+        if statement.sid == "ManageEmailVerificationIdempotency"
+      ])),
+      toset([
+        "dynamodb:DeleteItem",
+        "dynamodb:Query",
+        "dynamodb:Scan",
+        "dynamodb:TransactWriteItems",
+      ])
+    )) == 0
+    error_message = "The idempotency statement contains a forbidden action."
+  }
+
+  assert {
+    condition = length(setintersection(
+      toset(one([
+        for statement in data.aws_iam_policy_document.verify_first_admin_email.statement : statement.actions
+        if statement.sid == "AppendEmailVerificationAudit"
+      ])),
+      toset([
+        "dynamodb:UpdateItem",
+        "dynamodb:DeleteItem",
+        "dynamodb:Query",
+        "dynamodb:Scan",
+        "dynamodb:TransactWriteItems",
+      ])
+    )) == 0
+    error_message = "The audit statement contains a forbidden mutation or collection action."
+  }
+
+  assert {
+    condition = (
+      local.operational_tags["Environment"] == "dev" &&
+      local.operational_tags["Workload"] == "deployment-automation"
+    )
+    error_message = "The email verification role must receive the approved operational tags."
+  }
+
+  assert {
+    condition     = output.verify_first_admin_email_role_arn == "arn:aws:iam::123456789012:role/student-manager-github-dev-verify-first-admin-email"
+    error_message = "The email verification role ARN output is incorrect."
+  }
+
+  assert {
+    condition     = output.verify_first_admin_email_policy_arn == "arn:aws:iam::123456789012:policy/student-manager-dev-verify-first-admin-email"
+    error_message = "The email verification policy ARN output is incorrect."
   }
 }
 

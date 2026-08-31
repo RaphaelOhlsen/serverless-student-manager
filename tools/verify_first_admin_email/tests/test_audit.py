@@ -1,6 +1,7 @@
 import pytest
 
 from tools.verify_first_admin_email.audit import (
+    VerifyFirstAdminEmailAuditResult,
     audit_event_matches,
     build_first_admin_email_verification_audit_event,
 )
@@ -13,7 +14,7 @@ _OCCURRED_AT = "2026-08-31T14:25:40.123Z"
 _EXPIRES_AT = 1_793_400_340
 
 
-def _event(*, result: str = "SUCCESS") -> dict[str, object]:
+def _event(*, result: VerifyFirstAdminEmailAuditResult = "SUCCESS") -> dict[str, object]:
     return build_first_admin_email_verification_audit_event(
         user_id=_USER_ID,
         actor_id="github:raphael",
@@ -27,7 +28,9 @@ def _event(*, result: str = "SUCCESS") -> dict[str, object]:
 
 
 @pytest.mark.parametrize("result", ["SUCCESS", "FAILURE"])
-def test_build_audit_event_matches_approved_schema(result: str) -> None:
+def test_build_audit_event_matches_approved_schema(
+    result: VerifyFirstAdminEmailAuditResult,
+) -> None:
     event = _event(result=result)
     sort_key = f"TS#{_OCCURRED_AT}#EVENT#{_EVENT_ID}"
 

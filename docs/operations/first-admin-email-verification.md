@@ -449,22 +449,74 @@ projection, marker singleton ou contador de Administradores. As únicas escritas
 permitidas são `email_verified=true`, o registro técnico de idempotência e o
 audit event imutável da própria operação.
 
-## 23. Requisitos futuros de execução e IAM
+## 23. Execução operacional e IAM
 
-A implementação Python possui o subcomando local `verify-first-admin-email` no
-entrypoint operacional compartilhado. Sua execução futura na AWS terá workflow
-manual separado, protegido pelo GitHub Environment
-`dev-verify-first-admin-email`, usando OIDC e role dedicada.
+O repositório implementa o subcomando `verify-first-admin-email`, o workflow
+manual `.github/workflows/verify-first-admin-email.yml` e o Terraform
+declarativo da capacidade dedicada em `dev`. O workflow usa exclusivamente
+`workflow_dispatch` e recebe um único input livre:
 
-As permissões deverão ser limitadas a:
+```text
+operation_id = <UUIDv4 canônico>
+```
 
-- `cognito-idp:AdminGetUser` e `cognito-idp:AdminUpdateUserAttributes` no User
-  Pool correto;
-- leituras consistentes necessárias na tabela `users`;
-- leitura e escrita condicional do registro na tabela `idempotency`;
-- `PutItem` condicional e `GetItem` consistente na tabela `audit-events`.
+O `actor_id` não é input e não admite override manual. Ele é derivado pelo
+workflow da identidade autenticada no GitHub:
 
-Este runbook não provisiona nem autoriza essas capacidades em `prod`.
+```text
+github:<github.actor>@<github.actor_id>
+```
+
+O job usa credenciais temporárias OIDC, `aud=sts.amazonaws.com`, subject exato
+do Environment `dev-verify-first-admin-email` e a role esperada
+`student-manager-github-dev-verify-first-admin-email`. A managed policy esperada
+é `student-manager-dev-verify-first-admin-email`.
+
+As permissões declaradas são exatamente:
+
+- Cognito User Pool: `cognito-idp:AdminGetUser` e
+  `cognito-idp:AdminUpdateUserAttributes`;
+- tabela `users`: `dynamodb:GetItem`;
+- tabela `idempotency`: `dynamodb:GetItem`, `dynamodb:PutItem` e
+  `dynamodb:UpdateItem`;
+- tabela `audit-events`: `dynamodb:GetItem` e `dynamodb:PutItem`.
+
+A role não concede wildcards nem `AdminCreateUser`, `AdminDeleteUser`,
+`AdminDisableUser`, `AdminEnableUser`, `AdminSetUserPassword` ou
+`AdminUserGlobalSignOut`. O IAM não consegue limitar
+`AdminUpdateUserAttributes` ao atributo `email_verified`; os controles
+compensatórios são role e Environment dedicados, workflow sem dados de
+identidade livres, service restrito ao atributo permitido, reconciliação
+obrigatória, read-back, idempotência e auditoria.
+
+O workflow não recebe e-mail, `userId`, `cognitoSub`, nome, senha, token ou MFA.
+Ele invoca a CLI uma única vez, sem retry automático, e interpreta:
+
+```text
+0       = COMPLETED; workflow bem-sucedido
+2       = RECONCILIATION_REQUIRED; workflow em failure e investigação manual
+demais  = erro operacional; workflow em failure
+```
+
+Um replay manual da mesma operação deve reutilizar o mesmo `operation_id`.
+
+### Estado de disponibilização
+
+A role, a policy e o workflow estão somente implementados declarativamente no
+repositório. Eles ainda não estão provisionados ou configurados em `dev`; o
+Environment e suas variables também ainda não existem. Nenhuma execução real da
+operação foi autorizada.
+
+Antes de qualquer execução real são obrigatórios:
+
+1. merge da implementação;
+2. provisionamento Terraform revisado;
+3. criação e proteção do Environment;
+4. configuração das Environment variables;
+5. validações read-only da capacidade;
+6. autorização explícita para corrigir a identidade histórica.
+
+Este runbook não provisiona nem autoriza capacidade equivalente em `prod`.
 
 ## 24. Matriz mínima de testes do service
 

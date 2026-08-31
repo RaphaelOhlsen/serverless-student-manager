@@ -71,6 +71,7 @@ jobs:
 
           test_roots=(
             "infra/bootstrap"
+            "infra/environments/dev"
             "infra/modules/http_api"
             "infra/modules/idempotency_store"
             "infra/modules/audit_store"

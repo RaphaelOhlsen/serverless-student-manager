@@ -90,18 +90,30 @@ dev-admin-recovery
 prod-admin-recovery
 ```
 
-`dev-verify-first-admin-email` foi aprovado arquiteturalmente pela ADR-025 para a capacidade operacional `verify-first-admin-email`, mas ainda não deve ser considerado provisionado ou disponível até sua implementação e validação.
+`dev-verify-first-admin-email` foi aprovado arquiteturalmente pela ADR-025. O
+workflow e a infraestrutura declarativa correspondentes estão implementados no
+repositório, mas o Environment, suas variables e os recursos IAM ainda não
+foram provisionados ou configurados.
 
 Cada capacidade operacional usa trust policy e policy IAM próprias, com `sub` OIDC exato e sem wildcards.
 
-O bootstrap inicial e a retomada do convite possuem workflows privilegiados manuais, distintos dos pipelines normais de CI e deploy:
+O bootstrap inicial, a retomada do convite e a verificação do e-mail possuem
+workflows privilegiados manuais, distintos dos pipelines normais de CI e
+deploy:
 
 ```text
 .github/workflows/bootstrap-first-admin.yml
 .github/workflows/resume-first-admin-invitation.yml
+.github/workflows/verify-first-admin-email.yml
 ```
 
-Ambos usam somente `workflow_dispatch`. Seus jobs estão associados, respectivamente, a `dev-bootstrap-admin` e `dev-resume-first-admin-invitation`. Os dois Environments exigem `RaphaelOhlsen` como reviewer, usam `prevent_self_review=false`, não permitem bypass administrativo e não possuem wait timer ou política customizada de branches/tags.
+Os dois primeiros usam somente `workflow_dispatch`. Seus jobs estão associados,
+respectivamente, a `dev-bootstrap-admin` e
+`dev-resume-first-admin-invitation`. Esses dois Environments exigem
+`RaphaelOhlsen` como reviewer, usam `prevent_self_review=false`, não permitem
+bypass administrativo e não possuem wait timer ou política customizada de
+branches/tags. O terceiro workflow também usa somente `workflow_dispatch`, mas
+seu Environment ainda não foi criado ou protegido.
 
 Os workflows estão versionados, os Environments estão protegidos e suas Environment variables estão completas e verificadas: `8/8` para o bootstrap e `6/6` para a retomada, sem Environment secrets. A role e a policy dedicadas à retomada foram aplicadas e verificadas na AWS; o apply criou três recursos sem alterar ou destruir infraestrutura existente, e o plan pós-apply confirmou convergência sem drift.
 
@@ -111,9 +123,22 @@ No bootstrap, nome e e-mail são lidos em runtime do payload indicado por `GITHU
 
 O provider OIDC existente é reutilizado pelas roles operacionais; nenhum segundo provider OIDC é criado.
 
-A implementação da ADR-025 deverá adicionar uma capacidade manual independente para `verify-first-admin-email`, associada exclusivamente ao GitHub Environment `dev-verify-first-admin-email` e à role `student-manager-github-dev-verify-first-admin-email`.
+O workflow `verify-first-admin-email.yml` usa exclusivamente
+`workflow_dispatch`, recebe somente `operation_id`, deriva o ator da identidade
+GitHub e referencia a role por Environment variable. Ele requer o Environment
+`dev-verify-first-admin-email`, ainda não criado, e a role
+`student-manager-github-dev-verify-first-admin-email`, ainda não provisionada.
+O merge do workflow e do Terraform não disponibiliza por si só a operação.
 
-Essa capacidade usará subject OIDC exato, sem wildcard, e não reutilizará as roles `student-manager-github-dev-bootstrap-admin` ou `student-manager-github-dev-admin-recovery`. Sua policy deverá limitar Cognito a `AdminGetUser` e `AdminUpdateUserAttributes` no User Pool correto, além das permissões DynamoDB mínimas para reconciliação, idempotência e auditoria.
+A capacidade usa subject OIDC exato, sem wildcard, e não reutiliza as roles de
+bootstrap ou recuperação. Sua policy declarada limita Cognito a `AdminGetUser`
+e `AdminUpdateUserAttributes` no User Pool correto, além das permissões
+DynamoDB mínimas para reconciliação, idempotência e auditoria.
+
+O CI Python de bootstrap administrativo cobre conjuntamente
+`tools/bootstrap_admin` e `tools/verify_first_admin_email` com Ruff, mypy e
+pytest. O Terraform CI executa também os testes mockados do root
+`infra/environments/dev`, além de fmt, validate e TFLint, sem credenciais AWS.
 
 A ADR-025 não autoriza implicitamente capacidade equivalente em `prod`.
 

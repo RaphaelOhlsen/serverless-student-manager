@@ -46,15 +46,19 @@ Estão concluídos e aprovados:
 - organização dos módulos Terraform;
 - ADR-001 a ADR-025.
 
-A implementação está em andamento, com infraestrutura `dev`, autenticação Cognito, Students API inicial, HTTP API, idempotência e armazenamento de auditoria sendo materializados conforme as decisões arquiteturais aprovadas.
+A implementação está em andamento. A ADR-025 possui implementação Python, CLI,
+workflow e Terraform declarativo da capacidade operacional em `dev`; os
+recursos IAM, o GitHub Environment e suas variables ainda não foram
+provisionados ou configurados, e a correção histórica não foi autorizada.
 
 ## Próximo marco
 
-1. implementar a ADR-025 para futuras criações do primeiro Administrador;
-2. implementar a operação operacional `verify-first-admin-email` e sua capacidade OIDC dedicada em `dev`;
-3. reconciliar o primeiro Administrador histórico e confirmar `email_verified=true`;
-4. validar de forma read-only a prontidão do alias de e-mail para autenticação;
-5. retomar a autenticação do frontend React e evoluir os demais fluxos da aplicação.
+1. revisar e integrar a capacidade operacional `verify-first-admin-email`;
+2. provisionar a role/policy e configurar o Environment dedicado em `dev`;
+3. executar validações read-only e obter autorização explícita para a correção;
+4. reconciliar o primeiro Administrador histórico e confirmar `email_verified=true`;
+5. validar de forma read-only a prontidão do alias de e-mail para autenticação;
+6. retomar a autenticação do frontend React e evoluir os demais fluxos da aplicação.
 
 ## Estrutura documental
 

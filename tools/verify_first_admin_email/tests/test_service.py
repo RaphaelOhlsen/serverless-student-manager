@@ -18,6 +18,7 @@ from tools.verify_first_admin_email.service import (
     VerifyFirstAdminEmailResult,
     VerifyFirstAdminEmailService,
     VerifyFirstAdminEmailServiceConfig,
+    VerifyFirstAdminEmailTerminalState,
 )
 
 _OPERATION_ID = "123e4567-e89b-42d3-a456-426614174000"
@@ -359,7 +360,9 @@ def test_new_operation_creates_started_with_deterministic_metadata_and_no_pii() 
 
 
 @pytest.mark.parametrize("state", ["COMPLETED", "RECONCILIATION_REQUIRED"])
-def test_terminal_replay_returns_without_effects(state: str) -> None:
+def test_terminal_replay_returns_without_effects(
+    state: VerifyFirstAdminEmailTerminalState,
+) -> None:
     events: list[str] = []
     idempotency = FakeIdempotencyRepository(existing=_started_record(state=state), events=events)
     discovery = FakeDiscovery(events=events)
@@ -868,7 +871,9 @@ def test_inconclusive_cognito_read_back_converges_to_reconciliation(
 
     assert result.state == "RECONCILIATION_REQUIRED"
     assert len(cognito.calls) == 1
-    assert audit.puts[0]["event"]["result"] == "FAILURE"
+    event = audit.puts[0]["event"]
+    assert isinstance(event, dict)
+    assert event["result"] == "FAILURE"
 
 
 def test_alias_exists_converges_to_reconciliation_without_read_back() -> None:
@@ -885,7 +890,9 @@ def test_alias_exists_converges_to_reconciliation_without_read_back() -> None:
     assert _verify(service).state == "RECONCILIATION_REQUIRED"
     assert discovery.calls == 1
     assert len(cognito.calls) == 1
-    assert audit.puts[0]["event"]["result"] == "FAILURE"
+    event = audit.puts[0]["event"]
+    assert isinstance(event, dict)
+    assert event["result"] == "FAILURE"
 
 
 @pytest.mark.parametrize(
