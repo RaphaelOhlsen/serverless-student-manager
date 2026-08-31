@@ -1,6 +1,6 @@
 # Arquitetura de segurança
 
-**Versão:** 2.7
+**Versão:** 2.8
 **Status:** Approved
 
 ## 1. Autenticação
@@ -89,6 +89,24 @@ A recuperação excepcional do único Administrador usa roles operacionais indep
 - `prod-admin-recovery`.
 
 Bootstrap, retomada e recuperação possuem trust policies e policies IAM próprias, com menor privilégio e sem reutilização das roles de deploy.
+
+A ADR-025 aprova uma quarta capacidade operacional distinta em `dev`, denominada `verify-first-admin-email`. Sua finalidade exclusiva é reconciliar o primeiro Administrador existente e, quando todos os invariantes forem confirmados, definir somente `email_verified=true` na mesma identidade Cognito por `AdminUpdateUserAttributes`.
+
+A capacidade aprovada utilizará:
+
+```text
+GitHub Environment:
+dev-verify-first-admin-email
+
+IAM role:
+student-manager-github-dev-verify-first-admin-email
+```
+
+Essa capacidade preserva `userId`, `Username`, Cognito `sub`, e-mail, senha temporária e MFA. Ela não pode criar, substituir, excluir, desabilitar ou habilitar identidade, alterar senha, executar `RESEND`, transferir alias ou modificar USER, UNIQUE EMAIL, COGNITO projection, marker singleton ou contador de Administradores.
+
+A role terá somente as permissões Cognito necessárias ao contrato, incluindo `AdminGetUser` e `AdminUpdateUserAttributes`, além das leituras DynamoDB e escritas técnicas estritamente necessárias para idempotência e auditoria. Ela não reutilizará as roles de bootstrap ou recuperação MFA.
+
+A ADR-025 está aprovada na baseline v2.8 e sua implementação Python possui CLI local. A role, o GitHub Environment e o workflow ainda dependem de implementação e validação; até lá, `verify-first-admin-email` não está disponível como capacidade operacional na AWS.
 
 Reset de MFA é administrativo e auditado.  
 O único Administrador terá procedimento excepcional controlado de recuperação.

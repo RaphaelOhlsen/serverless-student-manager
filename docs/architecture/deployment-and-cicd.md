@@ -1,6 +1,6 @@
 # Infraestrutura, ambientes e CI/CD
 
-**Versão:** 2.7
+**Versão:** 2.8
 **Status:** Approved
 
 ## 1. Ambientes
@@ -85,9 +85,12 @@ GitHub Environments operacionais:
 ```text
 dev-bootstrap-admin
 dev-resume-first-admin-invitation
+dev-verify-first-admin-email
 dev-admin-recovery
 prod-admin-recovery
 ```
+
+`dev-verify-first-admin-email` foi aprovado arquiteturalmente pela ADR-025 para a capacidade operacional `verify-first-admin-email`, mas ainda não deve ser considerado provisionado ou disponível até sua implementação e validação.
 
 Cada capacidade operacional usa trust policy e policy IAM próprias, com `sub` OIDC exato e sem wildcards.
 
@@ -107,6 +110,12 @@ Os workflows estão disponíveis para `workflow_dispatch` na default branch `mai
 No bootstrap, nome e e-mail são lidos em runtime do payload indicado por `GITHUB_EVENT_PATH`, recebem `add-mask` antes do uso e não são declarados no bloco `env`. O masking protege a saída do runner, mas não transforma inputs de `workflow_dispatch` em secrets nem elimina sua exposição potencial na metadata ou UI do GitHub.
 
 O provider OIDC existente é reutilizado pelas roles operacionais; nenhum segundo provider OIDC é criado.
+
+A implementação da ADR-025 deverá adicionar uma capacidade manual independente para `verify-first-admin-email`, associada exclusivamente ao GitHub Environment `dev-verify-first-admin-email` e à role `student-manager-github-dev-verify-first-admin-email`.
+
+Essa capacidade usará subject OIDC exato, sem wildcard, e não reutilizará as roles `student-manager-github-dev-bootstrap-admin` ou `student-manager-github-dev-admin-recovery`. Sua policy deverá limitar Cognito a `AdminGetUser` e `AdminUpdateUserAttributes` no User Pool correto, além das permissões DynamoDB mínimas para reconciliação, idempotência e auditoria.
+
+A ADR-025 não autoriza implicitamente capacidade equivalente em `prod`.
 
 Actions externas devem ser fixadas por SHA completo.
 

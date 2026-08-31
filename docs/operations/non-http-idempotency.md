@@ -69,6 +69,23 @@ Ela se aplica somente ao primeiro Admin `INVITED` com marker, USER, projeção e
 
 O contrato operacional completo está em [Retomada do convite do primeiro Administrador](first-admin-invitation-resume.md).
 
+### Verificação do e-mail do primeiro Administrador
+
+```text
+environment = dev
+operation   = verify-first-admin-email
+target      = first-admin
+operationId = <uuid-v4>
+```
+
+A operação preserva `eventId`, `correlationId`, `occurredAt`,
+`auditExpiresAt` e `actorId` no registro `STARTED`. `COMPLETED` exige audit
+event `SUCCESS` confirmado; `RECONCILIATION_REQUIRED` permanece terminal mesmo
+quando sua auditoria `FAILURE` estiver ausente, incompatível ou indisponível,
+conforme a exceção explícita da ADR-025.
+
+O contrato completo está em [Verificação do e-mail do primeiro Administrador](first-admin-email-verification.md).
+
 ### Reset administrativo de MFA
 
 ```text

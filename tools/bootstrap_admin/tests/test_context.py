@@ -70,6 +70,7 @@ def test_parse_started_record_without_cognito_sub_maps_all_fields() -> None:
         created_at="2026-08-20T13:45:12.347Z",
         updated_at="2026-08-20T13:45:12.347Z",
         expiration=1_777_258_712,
+        cognito_email_verified_required=False,
         cognito_sub=None,
     )
 
@@ -183,4 +184,24 @@ def test_parse_rejects_empty_cognito_sub_when_present() -> None:
     record["cognitoSub"] = ""
 
     with pytest.raises(InvalidBootstrapRecordError, match="cognitoSub"):
+        _parse(record)
+
+
+def test_parse_maps_new_cognito_contract_marker() -> None:
+    record = _record()
+    record["cognitoEmailVerifiedRequired"] = True
+
+    context = _parse(record)
+
+    assert context.cognito_email_verified_required is True
+
+
+def test_parse_rejects_invalid_cognito_contract_marker_type() -> None:
+    record = _record()
+    record["cognitoEmailVerifiedRequired"] = "true"
+
+    with pytest.raises(
+        InvalidBootstrapRecordError,
+        match="cognitoEmailVerifiedRequired",
+    ):
         _parse(record)

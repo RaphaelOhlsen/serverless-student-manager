@@ -49,6 +49,7 @@ def build_started_record(
             normalized_email=normalized_email,
         ),
         "state": "STARTED",
+        "cognitoEmailVerifiedRequired": True,
         "userId": user_id,
         "eventId": event_id,
         "correlationId": correlation_id,
@@ -104,6 +105,14 @@ _VALID_STATE_TRANSITIONS_BY_OPERATION: dict[str, dict[str, set[str]]] = {
         "RECONCILIATION_REQUIRED": set(),
     },
     "resume-first-admin-invitation": {
+        "STARTED": {
+            "COMPLETED",
+            "RECONCILIATION_REQUIRED",
+        },
+        "COMPLETED": set(),
+        "RECONCILIATION_REQUIRED": set(),
+    },
+    "verify-first-admin-email": {
         "STARTED": {
             "COMPLETED",
             "RECONCILIATION_REQUIRED",

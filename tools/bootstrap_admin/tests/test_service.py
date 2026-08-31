@@ -140,6 +140,7 @@ class FakeCognitoRepository:
         events: list[str],
         *,
         get_outcomes: list[object] | None = None,
+        verified_get_outcomes: list[object] | None = None,
         create_outcomes: list[object] | None = None,
         delete_outcomes: list[object] | None = None,
         disable_outcomes: list[object] | None = None,
@@ -147,11 +148,15 @@ class FakeCognitoRepository:
     ) -> None:
         self._events = events
         self._get_outcomes = get_outcomes or []
+        self._verified_get_outcomes = (
+            verified_get_outcomes if verified_get_outcomes is not None else ["cognito-sub-123"]
+        )
         self._create_outcomes = create_outcomes or ["cognito-sub-123"]
         self._delete_outcomes = delete_outcomes if delete_outcomes is not None else [None]
         self._disable_outcomes = disable_outcomes if disable_outcomes is not None else [None]
         self._resend_outcomes = resend_outcomes if resend_outcomes is not None else []
         self.get_calls: list[dict[str, str]] = []
+        self.verified_get_calls: list[dict[str, str | None]] = []
         self.create_calls: list[dict[str, str]] = []
         self.delete_calls: list[dict[str, str]] = []
         self.disable_calls: list[dict[str, str]] = []
@@ -175,6 +180,31 @@ class FakeCognitoRepository:
         if not self._get_outcomes:
             raise AssertionError("unexpected get_existing_user_sub call")
         outcome = self._get_outcomes.pop(0)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        assert isinstance(outcome, str)
+        return outcome
+
+    def get_verified_user_sub(
+        self,
+        *,
+        user_pool_id: str,
+        user_id: str,
+        expected_email: str,
+        expected_sub: str | None = None,
+    ) -> str:
+        self._events.append("cognito:get_verified")
+        self.verified_get_calls.append(
+            {
+                "user_pool_id": user_pool_id,
+                "user_id": user_id,
+                "expected_email": expected_email,
+                "expected_sub": expected_sub,
+            }
+        )
+        if not self._verified_get_outcomes:
+            raise AssertionError("unexpected get_verified_user_sub call")
+        outcome = self._verified_get_outcomes.pop(0)
         if isinstance(outcome, BaseException):
             raise outcome
         assert isinstance(outcome, str)
@@ -364,7 +394,11 @@ def _config() -> FirstAdminBootstrapConfig:
     )
 
 
-def _existing_record(state: str) -> dict[str, object]:
+def _existing_record(
+    state: str,
+    *,
+    adr_025_contract: bool = False,
+) -> dict[str, object]:
     record = build_started_record(
         environment="dev",
         operation_id=_OPERATION_ID,
@@ -379,6 +413,9 @@ def _existing_record(state: str) -> dict[str, object]:
         actor_id="github:original",
         expiration=1_787_319_912,
     )
+    if not adr_025_contract:
+        record.pop("cognitoEmailVerifiedRequired")
+
     record["state"] = state
     if state in {
         "COGNITO_CREATED",
@@ -480,6 +517,7 @@ def _build_service(
     idempotency_get_outcomes: list[object] | None = None,
     transition_outcomes: list[object] | None = None,
     cognito_get_outcomes: list[object] | None = None,
+    cognito_verified_get_outcomes: list[object] | None = None,
     cognito_create_outcomes: list[object] | None = None,
     cognito_delete_outcomes: list[object] | None = None,
     cognito_disable_outcomes: list[object] | None = None,
@@ -512,6 +550,7 @@ def _build_service(
     cognito = FakeCognitoRepository(
         events,
         get_outcomes=cognito_get_outcomes,
+        verified_get_outcomes=cognito_verified_get_outcomes,
         create_outcomes=cognito_create_outcomes,
         delete_outcomes=cognito_delete_outcomes,
         disable_outcomes=cognito_disable_outcomes,
@@ -579,6 +618,44 @@ def _assert_started_replay_completed(
     ]
 
 
+def test_started_replay_adr_025_adopts_verified_existing_user() -> None:
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record(
+            "STARTED",
+            adr_025_contract=True,
+        ),
+        cognito_verified_get_outcomes=["reconciled-sub"],
+    )
+
+    result = service.bootstrap_first_admin(
+        full_name="Maria da Silva",
+        email="admin@example.com",
+        operation_id=_OPERATION_ID,
+        actor_id="github:other-executor",
+    )
+
+    assert cognito.get_calls == []
+    assert cognito.verified_get_calls == [
+        {
+            "user_pool_id": "pool-123",
+            "user_id": _USER_ID,
+            "expected_email": "admin@example.com",
+            "expected_sub": None,
+        }
+    ]
+    assert cognito.create_calls == []
+    assert idempotency.transitions[0]["cognito_sub"] == "reconciled-sub"
+
+    _assert_started_replay_completed(
+        result=result,
+        clock=clock,
+        ids=ids,
+        idempotency=idempotency,
+        cognito=cognito,
+        provisioning=provisioning,
+    )
+
+
 def test_started_replay_adopts_existing_compatible_cognito_user() -> None:
     service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
         existing=_existing_record("STARTED"),
@@ -602,6 +679,60 @@ def test_started_replay_adopts_existing_compatible_cognito_user() -> None:
     assert cognito.create_calls == []
     assert idempotency.transitions[0]["next_state"] == "COGNITO_CREATED"
     assert idempotency.transitions[0]["cognito_sub"] == "reconciled-sub"
+    _assert_started_replay_completed(
+        result=result,
+        clock=clock,
+        ids=ids,
+        idempotency=idempotency,
+        cognito=cognito,
+        provisioning=provisioning,
+    )
+
+
+def test_started_replay_adr_025_verifies_new_user_before_adoption() -> None:
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record(
+            "STARTED",
+            adr_025_contract=True,
+        ),
+        cognito_verified_get_outcomes=[
+            AwsStyleError("UserNotFoundException"),
+            "created-sub",
+        ],
+        cognito_create_outcomes=["created-sub"],
+    )
+
+    result = service.bootstrap_first_admin(
+        full_name="Maria da Silva",
+        email=" Admin@Example.COM ",
+        operation_id=_OPERATION_ID,
+        actor_id="github:other-executor",
+    )
+
+    assert cognito.get_calls == []
+    assert cognito.create_calls == [
+        {
+            "user_pool_id": "pool-123",
+            "user_id": _USER_ID,
+            "email": "admin@example.com",
+        }
+    ]
+    assert cognito.verified_get_calls == [
+        {
+            "user_pool_id": "pool-123",
+            "user_id": _USER_ID,
+            "expected_email": "admin@example.com",
+            "expected_sub": None,
+        },
+        {
+            "user_pool_id": "pool-123",
+            "user_id": _USER_ID,
+            "expected_email": "admin@example.com",
+            "expected_sub": "created-sub",
+        },
+    ]
+    assert idempotency.transitions[0]["cognito_sub"] == "created-sub"
+
     _assert_started_replay_completed(
         result=result,
         clock=clock,
@@ -835,6 +966,56 @@ def test_started_replay_propagates_unexpected_runtime_error_from_initial_read() 
     )
 
 
+def test_started_replay_adr_025_reconciles_verified_user_after_ambiguous_create() -> None:
+    create_error = ConnectionClosedError(endpoint_url="https://cognito.example")
+
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record(
+            "STARTED",
+            adr_025_contract=True,
+        ),
+        cognito_verified_get_outcomes=[
+            AwsStyleError("UserNotFoundException"),
+            "reconciled-sub",
+        ],
+        cognito_create_outcomes=[create_error],
+    )
+
+    result = service.bootstrap_first_admin(
+        full_name="Maria da Silva",
+        email="admin@example.com",
+        operation_id=_OPERATION_ID,
+        actor_id="github:other-executor",
+    )
+
+    assert cognito.get_calls == []
+    assert len(cognito.create_calls) == 1
+    assert cognito.verified_get_calls == [
+        {
+            "user_pool_id": "pool-123",
+            "user_id": _USER_ID,
+            "expected_email": "admin@example.com",
+            "expected_sub": None,
+        },
+        {
+            "user_pool_id": "pool-123",
+            "user_id": _USER_ID,
+            "expected_email": "admin@example.com",
+            "expected_sub": None,
+        },
+    ]
+    assert idempotency.transitions[0]["cognito_sub"] == "reconciled-sub"
+
+    _assert_started_replay_completed(
+        result=result,
+        clock=clock,
+        ids=ids,
+        idempotency=idempotency,
+        cognito=cognito,
+        provisioning=provisioning,
+    )
+
+
 @pytest.mark.parametrize(
     "create_error",
     [
@@ -869,6 +1050,42 @@ def test_started_replay_reconciles_compatible_user_after_ambiguous_create(
         clock=clock,
         ids=ids,
         idempotency=idempotency,
+        cognito=cognito,
+        provisioning=provisioning,
+    )
+
+
+def test_adr_025_ambiguous_create_reconciles_incompatible_user() -> None:
+    create_error = ConnectionClosedError(endpoint_url="https://cognito.example")
+
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record(
+            "STARTED",
+            adr_025_contract=True,
+        ),
+        cognito_verified_get_outcomes=[
+            AwsStyleError("UserNotFoundException"),
+            CognitoIdentityValidationError("existing Cognito user is incompatible"),
+        ],
+        cognito_create_outcomes=[create_error],
+    )
+
+    result = service.bootstrap_first_admin(
+        full_name="Maria da Silva",
+        email="admin@example.com",
+        operation_id=_OPERATION_ID,
+        actor_id="github:other-executor",
+    )
+
+    assert result.state == "RECONCILIATION_REQUIRED"
+    assert result.replayed is True
+    assert cognito.get_calls == []
+    assert len(cognito.create_calls) == 1
+    assert len(cognito.verified_get_calls) == 2
+    assert clock.calls == 1
+    assert idempotency.transitions[0]["next_state"] == "RECONCILIATION_REQUIRED"
+    _assert_started_replay_has_no_downstream_effects(
+        ids=ids,
         cognito=cognito,
         provisioning=provisioning,
     )
@@ -1024,6 +1241,7 @@ def test_bootstrap_first_admin_executes_deterministic_happy_path() -> None:
         "operationId": _OPERATION_ID,
         "payloadHash": "4cabbbd2f7ce477bb5d60430ca49752a89836f7d54a174836b87085aa420a3e8",
         "state": "STARTED",
+        "cognitoEmailVerifiedRequired": True,
         "userId": _USER_ID,
         "eventId": _EVENT_ID,
         "correlationId": _CORRELATION_ID,
@@ -1042,6 +1260,14 @@ def test_bootstrap_first_admin_executes_deterministic_happy_path() -> None:
             "user_pool_id": "pool-123",
             "user_id": _USER_ID,
             "email": "admin@example.com",
+        }
+    ]
+    assert cognito.verified_get_calls == [
+        {
+            "user_pool_id": "pool-123",
+            "user_id": _USER_ID,
+            "expected_email": "admin@example.com",
+            "expected_sub": "cognito-sub-123",
         }
     ]
     assert cognito.resend_calls == [
@@ -1146,6 +1372,7 @@ def test_bootstrap_first_admin_executes_deterministic_happy_path() -> None:
         "clock:1",
         "idempotency:create_started",
         "cognito:create_suppressed",
+        "cognito:get_verified",
         "clock:2",
         "idempotency:transition:COGNITO_CREATED",
         "provisioning:get:user_profile",
@@ -1308,6 +1535,69 @@ def test_persistence_completed_replay_resends_and_completes_operation() -> None:
         "clock:2",
         "idempotency:transition:COMPLETED",
     ]
+
+
+def test_cognito_created_replay_adr_025_requires_verified_matching_identity() -> None:
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record(
+            "COGNITO_CREATED",
+            adr_025_contract=True,
+        ),
+        cognito_verified_get_outcomes=["cognito-sub-123"],
+    )
+
+    result = service.bootstrap_first_admin(
+        full_name="Maria da Silva",
+        email="admin@example.com",
+        operation_id=_OPERATION_ID,
+        actor_id="github:other-executor",
+    )
+
+    assert result.state == "COMPLETED"
+    assert result.replayed is True
+    assert cognito.get_calls == []
+    assert cognito.verified_get_calls == [
+        {
+            "user_pool_id": "pool-123",
+            "user_id": _USER_ID,
+            "expected_email": "admin@example.com",
+            "expected_sub": "cognito-sub-123",
+        }
+    ]
+    assert cognito.create_calls == []
+    assert idempotency.transitions[0]["current_state"] == "COGNITO_CREATED"
+    assert idempotency.transitions[0]["next_state"] == "PERSISTENCE_COMPLETED"
+
+
+def test_cognito_created_replay_adr_025_marks_incompatible_identity_for_reconciliation() -> None:
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record(
+            "COGNITO_CREATED",
+            adr_025_contract=True,
+        ),
+        cognito_verified_get_outcomes=[
+            CognitoIdentityValidationError("existing Cognito user is incompatible")
+        ],
+    )
+
+    result = service.bootstrap_first_admin(
+        full_name="Maria da Silva",
+        email="admin@example.com",
+        operation_id=_OPERATION_ID,
+        actor_id="github:other-executor",
+    )
+
+    assert result.state == "RECONCILIATION_REQUIRED"
+    assert result.replayed is True
+    assert cognito.get_calls == []
+    assert len(cognito.verified_get_calls) == 1
+    assert cognito.verified_get_calls[0]["expected_sub"] == "cognito-sub-123"
+    assert provisioning.read_calls == []
+    assert provisioning.calls == []
+    assert cognito.resend_calls == []
+    assert clock.calls == 1
+    assert idempotency.transitions[0]["current_state"] == "COGNITO_CREATED"
+    assert idempotency.transitions[0]["next_state"] == "RECONCILIATION_REQUIRED"
 
 
 def test_cognito_created_replay_persists_when_all_five_items_are_absent() -> None:
@@ -1512,6 +1802,43 @@ def test_cognito_created_replay_marks_cognito_inconsistency_before_dynamo(
     assert cognito.resend_calls == []
     assert idempotency.transitions[0]["current_state"] == "COGNITO_CREATED"
     assert idempotency.transitions[0]["next_state"] == "RECONCILIATION_REQUIRED"
+
+
+def test_cognito_created_replay_adr_025_propagates_inconclusive_verified_read() -> None:
+    read_error = AwsStyleError("InternalErrorException")
+
+    service, _, clock, ids, idempotency, cognito, provisioning = _build_service(
+        existing=_existing_record(
+            "COGNITO_CREATED",
+            adr_025_contract=True,
+        ),
+        cognito_verified_get_outcomes=[read_error],
+    )
+
+    with pytest.raises(AwsStyleError) as raised:
+        service.bootstrap_first_admin(
+            full_name="Maria da Silva",
+            email="admin@example.com",
+            operation_id=_OPERATION_ID,
+            actor_id="github:other-executor",
+        )
+
+    assert raised.value is read_error
+    assert ids.calls == 0
+    assert clock.calls == 0
+    assert cognito.get_calls == []
+    assert cognito.verified_get_calls == [
+        {
+            "user_pool_id": "pool-123",
+            "user_id": _USER_ID,
+            "expected_email": "admin@example.com",
+            "expected_sub": "cognito-sub-123",
+        }
+    ]
+    assert provisioning.read_calls == []
+    assert provisioning.calls == []
+    assert cognito.resend_calls == []
+    assert idempotency.transitions == []
 
 
 def test_cognito_created_replay_propagates_inconclusive_cognito_read() -> None:

@@ -1,6 +1,6 @@
 # Observabilidade
 
-**Versão:** 2.7
+**Versão:** 2.8
 **Status:** Approved
 
 ## 1. Base
@@ -28,6 +28,8 @@ O request ID do API Gateway será propagado como `correlationId` para:
 `awsRequestId` permanece separado.
 
 CLIs operacionais emitem diagnóstico sanitizado e determinístico. Os campos permitidos são `stage`, `service`, `operation`, `exceptionClass`, `awsErrorCode`, `awsRequestId` e `operationId`; na persistência inicial, o estágio é `PERSIST_FIRST_ADMIN_TRANSACTION`. Códigos de cancellation reasons podem ser registrados sem mensagens ou itens associados. A exceção original permanece encadeada internamente, mas traceback, mensagem bruta da AWS e payloads não são enviados ao log normal do operador.
+
+A implementação Python de `verify-first-admin-email`, aprovada pela ADR-025, segue a mesma disciplina de diagnóstico sem PII. Seus `operationId`, `eventId`, `correlationId`, `occurredAt`, `auditExpiresAt` e `actorId` são preservados entre retries e replays para manter correlação determinística entre idempotência, execução operacional e audit event. A capacidade permanece indisponível na AWS até a implementação e validação de workflow e IAM próprios.
 
 ## 3. Retenção
 

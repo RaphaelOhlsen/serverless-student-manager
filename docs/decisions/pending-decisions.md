@@ -1,10 +1,10 @@
 # Pendências após a arquitetura
 
-**Versão:** 2.7
-**Data:** 2026-08-20
+**Versão:** 2.8
+**Data:** 2026-08-28
 **Status:** Engenharia em andamento
 
-As ADR-001 a ADR-024 estão aprovadas. Não há ADR proposta pendente nesta baseline.
+As ADR-001 a ADR-025 estão aprovadas. Não há ADR proposta pendente nesta baseline.
 
 ## Detalhamento operacional pendente
 

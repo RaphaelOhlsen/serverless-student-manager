@@ -13,6 +13,7 @@ from tools.bootstrap_admin.service_models import (
     BootstrapResult,
     ResumeInvitationResult,
 )
+from tools.verify_first_admin_email.service import VerifyFirstAdminEmailResult
 
 _OPERATION_ID = "17d7d774-b5b0-4c6a-9f73-16f0ff14a129"
 _USER_ID = "c1220bf7-a509-4e10-b58d-d6c910445792"
@@ -66,6 +67,23 @@ class FakeResumeService:
         return self._outcome
 
 
+class FakeVerifyEmailService:
+    def __init__(self, outcome: VerifyFirstAdminEmailResult | BaseException) -> None:
+        self._outcome = outcome
+        self.calls: list[dict[str, str]] = []
+
+    def verify_first_admin_email(
+        self,
+        *,
+        operation_id: str,
+        actor_id: str,
+    ) -> VerifyFirstAdminEmailResult:
+        self.calls.append({"operation_id": operation_id, "actor_id": actor_id})
+        if isinstance(self._outcome, BaseException):
+            raise self._outcome
+        return self._outcome
+
+
 def _bootstrap_result(state: str = "COMPLETED") -> BootstrapResult:
     return BootstrapResult(
         operation_id=_OPERATION_ID,
@@ -80,6 +98,18 @@ def _resume_result(state: str = "COMPLETED") -> ResumeInvitationResult:
         operation_id=_OPERATION_ID,
         state=state,  # type: ignore[arg-type]
         replayed=False,
+    )
+
+
+def _verify_email_result(
+    state: str = "COMPLETED",
+    *,
+    replayed: bool = False,
+) -> VerifyFirstAdminEmailResult:
+    return VerifyFirstAdminEmailResult(
+        operation_id=_OPERATION_ID,
+        state=state,  # type: ignore[arg-type]
+        replayed=replayed,
     )
 
 
@@ -100,6 +130,16 @@ def _bootstrap_args() -> list[str]:
 def _resume_args() -> list[str]:
     return [
         "resume-first-admin-invitation",
+        "--operation-id",
+        _OPERATION_ID,
+        "--actor-id",
+        "github:actor@123",
+    ]
+
+
+def _verify_email_args() -> list[str]:
+    return [
+        "verify-first-admin-email",
         "--operation-id",
         _OPERATION_ID,
         "--actor-id",
@@ -392,6 +432,154 @@ def test_parser_error_is_sanitized_and_returns_one(
     assert output.err == "error: invalid command arguments\n"
 
 
+@pytest.mark.parametrize("missing_option", ["--operation-id", "--actor-id"])
+def test_verify_email_parser_requires_operational_arguments(
+    missing_option: str,
+) -> None:
+    from tools.bootstrap_admin.cli import CliUsageError, build_parser
+
+    args = _verify_email_args()
+    index = args.index(missing_option)
+    del args[index : index + 2]
+
+    with pytest.raises(CliUsageError):
+        build_parser().parse_args(args)
+
+
+@pytest.mark.parametrize(
+    "forbidden_option",
+    ["--email", "--full-name", "--user-id", "--cognito-sub"],
+)
+def test_verify_email_parser_rejects_business_identity_arguments(
+    forbidden_option: str,
+) -> None:
+    from tools.bootstrap_admin.cli import CliUsageError, build_parser
+
+    with pytest.raises(CliUsageError):
+        build_parser().parse_args(
+            [*_verify_email_args(), forbidden_option, "sensitive@example.com"]
+        )
+
+
+@pytest.mark.parametrize(
+    ("state", "replayed", "expected_exit_code"),
+    [
+        ("COMPLETED", False, 0),
+        ("COMPLETED", True, 0),
+        ("RECONCILIATION_REQUIRED", False, 2),
+    ],
+)
+def test_verify_email_dispatches_once_and_emits_safe_json(
+    state: str,
+    replayed: bool,
+    expected_exit_code: int,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from tools.bootstrap_admin.cli import run
+
+    service = FakeVerifyEmailService(_verify_email_result(state, replayed=replayed))
+
+    exit_code = run(
+        _verify_email_args(),
+        bootstrap_service_factory=_unexpected_factory,
+        resume_service_factory=_unexpected_factory,
+        verify_email_service_factory=lambda: service,
+    )
+
+    assert exit_code == expected_exit_code
+    assert service.calls == [{"operation_id": _OPERATION_ID, "actor_id": "github:actor@123"}]
+    output = capsys.readouterr()
+    assert json.loads(output.out) == {
+        "operationId": _OPERATION_ID,
+        "replayed": replayed,
+        "state": state,
+    }
+    assert "email" not in output.out.lower()
+    assert _USER_ID not in output.out
+    assert output.err == ""
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        ValueError("admin@example.com is invalid"),
+        RuntimeError("AWS request contained admin@example.com"),
+        ClientError(
+            {
+                "Error": {
+                    "Code": "AccessDeniedException",
+                    "Message": "admin@example.com",
+                }
+            },
+            "AdminUpdateUserAttributes",
+        ),
+    ],
+)
+def test_verify_email_errors_are_sanitized_and_called_once(
+    error: BaseException,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from tools.bootstrap_admin.cli import run
+
+    service = FakeVerifyEmailService(error)
+
+    assert (
+        run(
+            _verify_email_args(),
+            bootstrap_service_factory=_unexpected_factory,
+            resume_service_factory=_unexpected_factory,
+            verify_email_service_factory=lambda: service,
+        )
+        == 1
+    )
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert "admin@example.com" not in output.err
+    assert "Traceback" not in output.err
+    assert len(service.calls) == 1
+
+
+def test_verify_email_composition_root_wires_readers_repositories_and_service(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import tools.bootstrap_admin.cli as cli
+
+    calls = _patch_composition_dependencies(monkeypatch, cli)
+
+    service = cli._build_verify_email_service()
+
+    assert service is calls["verify_email_service"]
+    assert calls["clients"] == [
+        ("cognito-idp", "sa-east-1"),
+        ("dynamodb", "sa-east-1"),
+    ]
+    assert calls["tables"] == ["idempotency-table"]
+    assert calls["verify_email_discovery_config"] == {
+        "users_table_name": "users-table",
+        "user_pool_id": "pool-id",
+    }
+    assert calls["verify_email_discovery"] == {
+        "config": "verify-email-discovery-config",
+        "provisioning_reader": ("provisioning", "dynamodb-client"),
+        "cognito_reader": ("cognito", "cognito-idp-client"),
+    }
+    assert calls["verify_email_config"] == {
+        "environment": "dev",
+        "user_pool_id": "pool-id",
+        "audit_table_name": "audit-table",
+        "audit_retention_days": 90,
+    }
+    assert calls["verify_email_dependencies"] == {
+        "config": "verify-email-config",
+        "clock": "clock",
+        "id_generator": "ids",
+        "idempotency_repository": ("idempotency", "table"),
+        "discovery": "verify-email-discovery",
+        "cognito_repository": ("cognito", "cognito-idp-client"),
+        "audit_repository": ("audit", "dynamodb-client"),
+    }
+
+
 def test_bootstrap_composition_root_wires_only_bootstrap_dependencies(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -516,6 +704,11 @@ def _patch_composition_dependencies(
         "IdempotencyRepository",
         lambda table: ("idempotency", table),
     )
+    monkeypatch.setattr(
+        cli,
+        "AuditRepository",
+        lambda client: ("audit", client),
+    )
 
     def fake_bootstrap_config(**kwargs: object) -> str:
         calls["bootstrap_config"] = kwargs
@@ -555,4 +748,44 @@ def _patch_composition_dependencies(
     monkeypatch.setattr(cli, "ResumeInvitationDiscovery", fake_discovery)
     monkeypatch.setattr(cli, "ResumeInvitationServiceConfig", fake_resume_config)
     monkeypatch.setattr(cli, "ResumeInvitationService", fake_resume_service)
+
+    def fake_verify_email_discovery_config(**kwargs: object) -> str:
+        calls["verify_email_discovery_config"] = kwargs
+        return "verify-email-discovery-config"
+
+    def fake_verify_email_discovery(**kwargs: object) -> str:
+        calls["verify_email_discovery"] = kwargs
+        return "verify-email-discovery"
+
+    def fake_verify_email_config(**kwargs: object) -> str:
+        calls["verify_email_config"] = kwargs
+        return "verify-email-config"
+
+    verify_email_service = FakeVerifyEmailService(_verify_email_result())
+
+    def fake_verify_email_service(**kwargs: object) -> FakeVerifyEmailService:
+        calls["verify_email_dependencies"] = kwargs
+        calls["verify_email_service"] = verify_email_service
+        return verify_email_service
+
+    monkeypatch.setattr(
+        cli,
+        "VerifyFirstAdminEmailDiscoveryConfig",
+        fake_verify_email_discovery_config,
+    )
+    monkeypatch.setattr(
+        cli,
+        "VerifyFirstAdminEmailDiscovery",
+        fake_verify_email_discovery,
+    )
+    monkeypatch.setattr(
+        cli,
+        "VerifyFirstAdminEmailServiceConfig",
+        fake_verify_email_config,
+    )
+    monkeypatch.setattr(
+        cli,
+        "VerifyFirstAdminEmailService",
+        fake_verify_email_service,
+    )
     return calls

@@ -1,8 +1,8 @@
 # Versão documental canônica
 
 **Projeto:** Serverless Student Manager  
-**Versão:** 2.7 — Engineering Ready
-**Data:** 2026-08-20
+**Versão:** 2.8 — Engineering Ready
+**Data:** 2026-08-28
 **Status:** Canônica — engenharia em andamento
 
 ## Escopo desta versão
@@ -10,7 +10,7 @@
 Esta versão consolida:
 
 - SRS v1.2 com MFA e rastreabilidade atualizados;
-- ADR-001 a ADR-024 aprovadas;
+- ADR-001 a ADR-025 aprovadas;
 - modelos físicos de dados;
 - autenticação, autorização e MFA;
 - bootstrap do primeiro Administrador;
@@ -29,19 +29,17 @@ Esta versão consolida:
 - guia canônico de leitura;
 - manifesto com SHA-256.
 
-## Mudanças principais em relação à v2.6
+## Mudanças principais em relação à v2.7
 
-1. ADR-024 aprovada — protocolo determinístico e trava singleton do bootstrap do primeiro Admin.
-2. `operationId`, `userId`, `eventId` e `correlationId` do bootstrap definidos como UUIDv4 canônicos.
-3. `ClientRequestToken = operationId`, sem transformação e sem persistência duplicada do token.
-4. Marker permanente `CONTROL#FIRST_ADMIN_BOOTSTRAP / CONTROL` incorporado ao modelo físico de `users`.
-5. Transação do bootstrap ampliada para cinco itens e reconciliação obrigatória dos cinco itens.
-6. Registro idempotente do bootstrap ampliado com metadados determinísticos de evento, auditoria e ator.
-7. `createdBy` e `updatedBy` alinhados ao `actorId` original.
-8. Timestamps do bootstrap padronizados em UTC RFC3339 com precisão de milissegundos e sufixo `Z`.
-9. Operação `resume-first-admin-invitation` definida para retomar o convite do primeiro Admin `INVITED` reconciliado.
-10. Marker singleton mantém a proteção mesmo após o TTL de 24 horas do registro idempotente.
+1. ADR-025 aprovada — verificação administrativa do e-mail do primeiro Administrador.
+2. Futuras criações do primeiro Admin passam a definir `email_verified=true`, preservando `MessageAction=SUPPRESS` e `ForceAliasCreation=false`.
+3. A identidade histórica não verificada será reconciliada pela operação separada `verify-first-admin-email`, sem reutilizar o replay do bootstrap.
+4. A operação preserva `userId`, `Username`, Cognito `sub`, e-mail, senha temporária e fluxo de MFA.
+5. A única alteração Cognito permitida é definir `email_verified=true` na identidade existente após reconciliação completa.
+6. `verify-first-admin-email` utiliza idempotência própria com `STARTED`, `COMPLETED` e `RECONCILIATION_REQUIRED`.
+7. Foi aprovada uma capacidade OIDC dedicada em `dev`, com GitHub Environment e role IAM próprios, ainda pendentes de implementação e validação.
+8. O login exclusivo por e-mail no frontend permanece bloqueado até a reconciliação histórica e a validação read-only da prontidão do alias.
 
 ## Regra de precedência
 
-Esta versão substitui documentalmente a v2.6 como fonte de verdade para a engenharia.
+Esta versão substitui documentalmente a v2.7 como fonte de verdade para a engenharia.

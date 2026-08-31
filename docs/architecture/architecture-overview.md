@@ -1,6 +1,6 @@
 # Visão geral da arquitetura
 
-**Versão:** 2.7
+**Versão:** 2.8
 **Status:** Approved
 
 ## Componentes
@@ -59,3 +59,4 @@
 - ADR-021: auditoria usa modelagem física com GSIs específicos e bucket mensal para consultas por período.
 - ADR-022: acesso operacional usa GitHub Actions OIDC com roles separadas por capacidade e ambiente, independentes das roles de deploy.
 - ADR-024: o bootstrap inicial usa protocolo determinístico, marker singleton permanente e transação de cinco itens; `resume-first-admin-invitation` retoma somente o onboarding do mesmo Admin `INVITED` reconciliado.
+- ADR-025: futuras criações do primeiro Admin definem `email_verified=true` com `ForceAliasCreation=false`; a identidade histórica é corrigida somente pela operação separada `verify-first-admin-email`, preservando `userId`, `Username`, `sub`, senha temporária e MFA.

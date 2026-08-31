@@ -34,6 +34,7 @@ def test_build_started_record_uses_approved_physical_model() -> None:
         "operationId": "operation-123",
         "payloadHash": "94247984b89d9b898a0412c244823eb75387cba8187ebab790e5526297b301df",
         "state": "STARTED",
+        "cognitoEmailVerifiedRequired": True,
         "userId": "user-123",
         "eventId": "event-123",
         "correlationId": "correlation-123",
@@ -148,6 +149,42 @@ def test_resume_first_admin_invitation_terminal_states_have_no_outgoing_transiti
     for current_state in ("COMPLETED", "RECONCILIATION_REQUIRED"):
         assert not is_valid_state_transition(
             operation="resume-first-admin-invitation",
+            current_state=current_state,
+            next_state="STARTED",
+        )
+
+
+def test_verify_first_admin_email_accepts_approved_transitions() -> None:
+    assert is_valid_state_transition(
+        operation="verify-first-admin-email",
+        current_state="STARTED",
+        next_state="COMPLETED",
+    )
+    assert is_valid_state_transition(
+        operation="verify-first-admin-email",
+        current_state="STARTED",
+        next_state="RECONCILIATION_REQUIRED",
+    )
+
+
+def test_verify_first_admin_email_rejects_bootstrap_only_states() -> None:
+    for next_state in (
+        "COGNITO_CREATED",
+        "PERSISTENCE_COMPLETED",
+        "INVITATION_SENT",
+        "COMPENSATED",
+    ):
+        assert not is_valid_state_transition(
+            operation="verify-first-admin-email",
+            current_state="STARTED",
+            next_state=next_state,
+        )
+
+
+def test_verify_first_admin_email_terminal_states_have_no_outgoing_transitions() -> None:
+    for current_state in ("COMPLETED", "RECONCILIATION_REQUIRED"):
+        assert not is_valid_state_transition(
+            operation="verify-first-admin-email",
             current_state=current_state,
             next_state="STARTED",
         )

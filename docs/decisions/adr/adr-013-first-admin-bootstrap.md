@@ -44,3 +44,9 @@ O processo aprovado passa a criar a identidade no Cognito com envio de mensagem 
 ## Refinamento posterior — ADR-024
 
 A **ADR-024 — Protocolo determinístico e trava singleton do bootstrap do primeiro Admin**, aprovada em 2026-08-20, refina este bootstrap com IDs e timestamps determinísticos, trava singleton permanente, transação de cinco itens, reconciliação completa e protocolo específico de replay.
+
+## Refinamento posterior — ADR-025
+
+A **ADR-025 — Verificação administrativa do e-mail do primeiro Administrador**, aprovada em 2026-08-28, refina o contrato de criação do primeiro Admin para exigir `email_verified=true` junto ao e-mail normalizado, preservando `MessageAction=SUPPRESS` e `ForceAliasCreation=false`.
+
+A identidade histórica criada antes desse refinamento não será reparada por replay do bootstrap. Sua correção ocorre exclusivamente pela operação separada `verify-first-admin-email`.
