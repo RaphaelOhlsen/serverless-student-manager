@@ -1,7 +1,9 @@
-import { type FormEvent, useState } from 'react'
+import { type FormEvent, useEffect, useState } from 'react'
 import {
   confirmSignIn,
+  getCurrentUser,
   signIn,
+  signOut,
   type SignInOutput,
 } from 'aws-amplify/auth'
 
@@ -10,6 +12,7 @@ import { Button } from '@/components/ui/button'
 import './App.css'
 
 type AuthView =
+  | 'auth-check'
   | 'sign-in'
   | 'new-password-required'
   | 'mfa-setup-selection'
@@ -24,6 +27,10 @@ const GENERIC_NEW_PASSWORD_ERROR =
   'Não foi possível definir a nova senha. Revise os dados e tente novamente.'
 const GENERIC_TOTP_ERROR =
   'Não foi possível confirmar o código. Verifique-o e tente novamente.'
+const GENERIC_SESSION_ERROR =
+  'Não foi possível verificar sua sessão. Entre novamente.'
+const GENERIC_SIGN_OUT_ERROR =
+  'Não foi possível sair. Tente novamente.'
 const UNSUPPORTED_STEP_ERROR =
   'Não foi possível concluir o acesso nesta etapa. Tente novamente mais tarde.'
 const AUTHENTICATOR_APP_NAME = 'Serverless Student Manager'
@@ -31,6 +38,11 @@ const AUTHENTICATOR_APP_NAME = 'Serverless Student Manager'
 const nextStageContent: Partial<
   Record<AuthView, { eyebrow: string; title: string; description: string }>
 > = {
+  'auth-check': {
+    eyebrow: 'Serverless Student Manager',
+    title: 'Verificando sua sessão',
+    description: 'Aguarde um instante.',
+  },
   'mfa-setup-selection': {
     eyebrow: 'Verificação em duas etapas',
     title: 'Preparando o autenticador',
@@ -49,7 +61,7 @@ const nextStageContent: Partial<
 }
 
 function App() {
-  const [authView, setAuthView] = useState<AuthView>('sign-in')
+  const [authView, setAuthView] = useState<AuthView>('auth-check')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
@@ -60,6 +72,37 @@ function App() {
   const [copyConfirmation, setCopyConfirmation] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+
+  useEffect(() => {
+    let isActive = true
+
+    async function restoreSession() {
+      try {
+        await getCurrentUser()
+
+        if (isActive) {
+          setAuthView('authenticated')
+        }
+      } catch (error) {
+        if (!isActive) {
+          return
+        }
+
+        const isUnauthenticated =
+          error instanceof Error &&
+          error.name === 'UserUnAuthenticatedException'
+
+        setErrorMessage(isUnauthenticated ? null : GENERIC_SESSION_ERROR)
+        setAuthView('sign-in')
+      }
+    }
+
+    void restoreSession()
+
+    return () => {
+      isActive = false
+    }
+  }, [])
 
   function clearPasswords() {
     setPassword('')
@@ -224,6 +267,23 @@ function App() {
     }
   }
 
+  async function handleSignOut() {
+    setErrorMessage(null)
+    setIsLoading(true)
+
+    try {
+      await signOut()
+      clearPasswords()
+      clearTotpData()
+      setEmail('')
+      setAuthView('sign-in')
+    } catch {
+      setErrorMessage(GENERIC_SIGN_OUT_ERROR)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
   if (authView === 'new-password-required') {
     return (
       <main className="auth-page">
@@ -355,6 +415,32 @@ function App() {
               {isLoading ? 'Confirmando…' : 'Confirmar código'}
             </Button>
           </form>
+        </section>
+      </main>
+    )
+  }
+
+  if (authView === 'authenticated') {
+    return (
+      <main className="auth-page">
+        <section className="auth-card" aria-labelledby="authenticated-title">
+          <div className="auth-heading">
+            <p className="auth-eyebrow">Acesso confirmado</p>
+            <h1 id="authenticated-title">Autenticação concluída</h1>
+            <p className="auth-description">
+              Sua identidade foi autenticada com sucesso.
+            </p>
+          </div>
+
+          {errorMessage ? (
+            <p className="auth-error" role="alert">
+              {errorMessage}
+            </p>
+          ) : null}
+
+          <Button type="button" onClick={handleSignOut} disabled={isLoading}>
+            {isLoading ? 'Saindo…' : 'Sair'}
+          </Button>
         </section>
       </main>
     )
