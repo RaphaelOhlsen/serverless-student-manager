@@ -79,6 +79,18 @@ module "http_api" {
     module.identity.user_pool_client_id,
   ]
 
+  cors_allow_origins = [
+    "http://localhost:5173",
+  ]
+
+  cors_allow_methods = [
+    "GET",
+  ]
+
+  cors_allow_headers = [
+    "Authorization",
+  ]
+
   integrations = {
     students = {
       invoke_arn    = module.students_api.alias_invoke_arn
