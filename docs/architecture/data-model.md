@@ -43,8 +43,28 @@ A convenção de `SK` dos itens técnicos de unicidade será definida junto ao f
 
 ```text
 gsi-status-name
+GSI1PK = STATUS#<status>
+GSI1SK = NAME#<normalizedName>#STUDENT#<studentId>
+
 gsi-all-name
+GSI2PK = ALL
+GSI2SK = NAME#<normalizedName>#STUDENT#<studentId>
 ```
+
+Somente itens `STUDENT#<studentId> / PROFILE` participam desses índices.
+`ACTIVE` e `INACTIVE` utilizam `gsi-status-name`; `ALL` utiliza
+`gsi-all-name`. O sufixo `STUDENT#<studentId>` garante desempate e ordenação
+determinística para nomes iguais.
+
+Listagem e pesquisa por prefixo usam DynamoDB `Query`, nunca `Scan`. A pesquisa
+aplica `begins_with(NAME#<normalizedPrefix>)` à sort key. O backend escolhe
+tabela, índice e partition key.
+
+O cursor v1 contém somente versão, `status`, `namePrefix` normalizado e a
+posição lógica `studentId`/`normalizedName`, codificados como JSON UTF-8 em
+Base64 URL-safe sem padding. Não contém chaves físicas ou dados sensíveis. O
+cursor é validado e vinculado aos filtros da consulta; não constitui fronteira
+de autorização. A definição normativa completa está na ADR-026.
 
 ### Regras
 

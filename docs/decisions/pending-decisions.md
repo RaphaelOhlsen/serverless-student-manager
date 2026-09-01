@@ -1,10 +1,11 @@
 # Pendências após a arquitetura
 
 **Versão:** 2.8
-**Data:** 2026-08-28
+**Data:** 2026-09-01
 **Status:** Engenharia em andamento
 
-As ADR-001 a ADR-025 estão aprovadas. Não há ADR proposta pendente nesta baseline.
+As ADR-001 a ADR-026 estão aprovadas. Não há ADR proposta pendente nesta
+baseline.
 
 ## Detalhamento operacional pendente
 
@@ -13,7 +14,7 @@ A taxonomia completa dos eventos operacionais e de auditoria para falhas, compen
 ## Próximas atividades de engenharia
 
 1. implementar o bootstrap seguro do primeiro Administrador;
-2. evoluir os endpoints restantes da Students API;
+2. implementar `GET /students` conforme a ADR-026;
 3. implementar o domínio de usuários;
 4. implementar os fluxos de auditoria da aplicação;
 5. desenvolver o frontend React;

@@ -10,7 +10,7 @@
 Esta versão consolida:
 
 - SRS v1.2 com MFA e rastreabilidade atualizados;
-- ADR-001 a ADR-025 aprovadas;
+- ADR-001 a ADR-026 aprovadas;
 - modelos físicos de dados;
 - autenticação, autorização e MFA;
 - bootstrap do primeiro Administrador;
@@ -39,6 +39,7 @@ Esta versão consolida:
 6. `verify-first-admin-email` utiliza idempotência própria com `STARTED`, `COMPLETED` e `RECONCILIATION_REQUIRED`.
 7. A capacidade OIDC dedicada em `dev` possui CLI, workflow e Terraform declarativo implementados no repositório; role/policy, GitHub Environment e variables ainda dependem de provisionamento e configuração.
 8. O login exclusivo por e-mail no frontend permanece bloqueado até a reconciliação histórica e a validação read-only da prontidão do alias.
+9. ADR-026 aprovada — contrato HTTP, autorização funcional, índices e cursor v1 para `GET /students`.
 
 ## Estado de implementação desta baseline
 

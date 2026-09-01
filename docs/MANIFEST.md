@@ -3,7 +3,7 @@
 **Projeto:** Serverless Student Manager
 **Versão:** 2.8
 **Data:** 2026-08-28
-**Arquivos listados:** 50
+**Arquivos listados:** 51
 
 O próprio `MANIFEST.md` não é listado para evitar hash autorreferencial.
 
@@ -14,11 +14,11 @@ O próprio `MANIFEST.md` não é listado para evitar hash autorreferencial.
 | `AGENTS.md` | `beafa571941a98ccd89f087f21939be4c6d0d44b660c4e7623f15260f5844448` |
 | `RESTORE-INSTRUCTIONS.md` | `9f7d55d96f112e2bb50f73995f2ca42fbb5a4bbb5ba4b32fb54ba2beb6438e8d` |
 | `docs/AUDIT-REPORT.md` | `60eb194a127c553fcf6b9ebe991ab8ba403deebeead4bd49c284b00794e7e13f` |
-| `docs/DOCUMENTATION-VERSION.md` | `273a73720ac6239f5b2c17ee9fdd395d4023442b6aff0c9e38046f6a0f055a0a` |
+| `docs/DOCUMENTATION-VERSION.md` | `7c942ee219d170092866584f4da2ecf6f288cef071f62e411bbe0fa28a750432` |
 | `docs/ENGINEERING-READINESS.md` | `1a890640dbd850a116d57311e9afc5b2197b0b3c1bd6b6f8e30bfab90ebac36a` |
-| `docs/README.md` | `c2bcfe4eecbad9987fb2e6f079fad8f7c0e569f162ba75a5bff18981647c07ad` |
+| `docs/README.md` | `d4c5190ff6915603f7153846fed972a49f6e46d6fc98c43ef79204714642ce4a` |
 | `docs/architecture/architecture-overview.md` | `28b7a573a9ad98ee91aedc2f2b784fbfd5e2b58c76da1e3e3a1987981197778d` |
-| `docs/architecture/data-model.md` | `fc393199d5c1e4a7f5ddbe3ca82c3d60a3eacad347a16ba2ece264f47adc254f` |
+| `docs/architecture/data-model.md` | `8bee3e40778aceca8fa45976d6e296cdfce049cb88a8f4a09fc31c91d4141459` |
 | `docs/architecture/deployment-and-cicd.md` | `5a34bde2310a274fb62557a007695bddb8f73fe9a65b9ad6681fde6df3358b21` |
 | `docs/architecture/diagrams.md` | `c6d18b9af0cb28f495bb1e86fb785b73da81a63cf508a13716dd9d706b1965cc` |
 | `docs/architecture/observability.md` | `164ea0d7a1c1a0e4005f58c6cb7d68e175b39d3b0f1d7bb65ad5c94f6f143f0b` |
@@ -48,8 +48,9 @@ O próprio `MANIFEST.md` não é listado para evitar hash autorreferencial.
 | `docs/decisions/adr/adr-023-users-physical-modeling.md` | `da25a5288557267c4f18760d4519aa72d5c52fe295083c127c1b14e6d1ff9717` |
 | `docs/decisions/adr/adr-024-first-admin-bootstrap-execution-protocol.md` | `f165561261adbf0501450e45140f81382bc73376c6687e233ccac9cf5a7eb39e` |
 | `docs/decisions/adr/adr-025-first-admin-email-verification.md` | `6b2ac96d0b24bf103504e73e28f17b81e19d6d5a8725c428ee67679816d768a4` |
-| `docs/decisions/decision-register.md` | `670764d6f5fa543cac9910b2d51e5b49650c7b006cd69b94ce7772f1730d7b4e` |
-| `docs/decisions/pending-decisions.md` | `e6283819fadaa58be3d4afa76dd39afc46db48070d90e5ad814abb9efd7a2572` |
+| `docs/decisions/adr/adr-026-students-list-contract-and-physical-modeling.md` | `ec51197743072479a22948c16ca8c79c2e24d06302abb2cf691d6067c338ba3d` |
+| `docs/decisions/decision-register.md` | `8bec1ee419c90ec42470107daa711eb971d88dcac7d9a43ed579e734f96cfa19` |
+| `docs/decisions/pending-decisions.md` | `d2c729d64e7d0211dcce502d52a90298caf2e52a61c2036eb8a6672ef79b797d` |
 | `docs/operations/cognito-dynamodb-compensation.md` | `d2914292047679b7858e6b130f4baf04440913f9fb0809b243df22323d448807` |
 | `docs/operations/first-admin-email-verification.md` | `f067eb2b1bbea6d453d542b67fbf6d9d8a86504c2c293f5e035786518480150d` |
 | `docs/operations/first-admin-invitation-resume.md` | `33213a038e5f7400b09cb88cba7f19c75be248ac860b1bccd6af762153f6679a` |
@@ -58,6 +59,6 @@ O próprio `MANIFEST.md` não é listado para evitar hash autorreferencial.
 | `docs/operations/sole-admin-mfa-recovery.md` | `30dce5d37c002be252e16509fd43afa0e26f38ad2e05453eb0656cee0ff24797` |
 | `docs/overview.md` | `99c0311d0a7f4993b3bf5e715e3da7e455b20959dc33d0e1d8f6968ca7e29e97` |
 | `docs/references.md` | `f86b0ea29df69ea0ba5e6bad78e6dc661cad6ee24dc45bcc63222fd6735ff236` |
-| `docs/requirements/srs.md` | `01613134925ef8f3d584b612c7bb4b3a5746ca8992d9af0adfea7ba925eadb91` |
-| `docs/serverless-student-manager-ordem-de-leitura.md` | `de9c54bc56486f6388bff63f745fc1edab9fd17a71eae6fdf1211a1f76f4c77a` |
+| `docs/requirements/srs.md` | `b44677aca71acc578c75554dd9e636801ec0f280c1b9b640493445eab2bbcc36` |
+| `docs/serverless-student-manager-ordem-de-leitura.md` | `9b246ff364314153c0367e49ca11da62335270f05a48fd0686d0b9f6fd3c8490` |
 | `docs/serverless-student-manager-ordem-de-leitura.png` | `0243000a218ca8860a10c45b0eeb21a02195664f9c4da1eacb1f8abf9ceed611` |
