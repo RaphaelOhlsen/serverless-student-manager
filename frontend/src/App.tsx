@@ -8,6 +8,10 @@ import {
 } from 'aws-amplify/auth'
 
 import { Button } from '@/components/ui/button'
+import {
+  authenticatedGet,
+  AuthSessionUnavailableError,
+} from '@/lib/api'
 
 import './App.css'
 
@@ -31,6 +35,14 @@ const GENERIC_SESSION_ERROR =
   'Não foi possível verificar sua sessão. Entre novamente.'
 const GENERIC_SIGN_OUT_ERROR =
   'Não foi possível sair. Tente novamente.'
+const API_TEST_SUCCESS =
+  'Integração autenticada confirmada: o aluno de teste não existe.'
+const API_TEST_AUTH_ERROR =
+  'Não foi possível autorizar a chamada à API protegida.'
+const API_TEST_TRANSPORT_ERROR =
+  'Não foi possível alcançar a API. Verifique a conexão e tente novamente.'
+const API_TEST_UNEXPECTED_STATUS =
+  'A API retornou um resultado inesperado para este teste.'
 const UNSUPPORTED_STEP_ERROR =
   'Não foi possível concluir o acesso nesta etapa. Tente novamente mais tarde.'
 const AUTHENTICATOR_APP_NAME = 'Serverless Student Manager'
@@ -72,6 +84,9 @@ function App() {
   const [copyConfirmation, setCopyConfirmation] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [isApiTestLoading, setIsApiTestLoading] = useState(false)
+  const [apiTestMessage, setApiTestMessage] = useState<string | null>(null)
+  const [isApiTestError, setIsApiTestError] = useState(false)
 
   useEffect(() => {
     let isActive = true
@@ -276,11 +291,45 @@ function App() {
       clearPasswords()
       clearTotpData()
       setEmail('')
+      setApiTestMessage(null)
+      setIsApiTestError(false)
       setAuthView('sign-in')
     } catch {
       setErrorMessage(GENERIC_SIGN_OUT_ERROR)
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  async function handleProtectedApiTest() {
+    setApiTestMessage(null)
+    setIsApiTestError(false)
+    setIsApiTestLoading(true)
+
+    try {
+      const studentId = crypto.randomUUID()
+      const response = await authenticatedGet(`/students/${studentId}`)
+
+      if (response.status === 404) {
+        setApiTestMessage(API_TEST_SUCCESS)
+        return
+      }
+
+      setIsApiTestError(true)
+      setApiTestMessage(
+        response.status === 401 || response.status === 403
+          ? API_TEST_AUTH_ERROR
+          : API_TEST_UNEXPECTED_STATUS,
+      )
+    } catch (error) {
+      setIsApiTestError(true)
+      setApiTestMessage(
+        error instanceof AuthSessionUnavailableError
+          ? API_TEST_AUTH_ERROR
+          : API_TEST_TRANSPORT_ERROR,
+      )
+    } finally {
+      setIsApiTestLoading(false)
     }
   }
 
@@ -438,7 +487,29 @@ function App() {
             </p>
           ) : null}
 
-          <Button type="button" onClick={handleSignOut} disabled={isLoading}>
+          {apiTestMessage ? (
+            <p
+              className={isApiTestError ? 'auth-error' : 'auth-notice'}
+              role={isApiTestError ? 'alert' : 'status'}
+            >
+              {apiTestMessage}
+            </p>
+          ) : null}
+
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleProtectedApiTest}
+            disabled={isLoading || isApiTestLoading}
+          >
+            {isApiTestLoading ? 'Testando…' : 'Testar API protegida'}
+          </Button>
+
+          <Button
+            type="button"
+            onClick={handleSignOut}
+            disabled={isLoading || isApiTestLoading}
+          >
             {isLoading ? 'Saindo…' : 'Sair'}
           </Button>
         </section>

@@ -17,4 +17,8 @@ export const env = {
     'VITE_COGNITO_USER_POOL_CLIENT_ID',
     import.meta.env.VITE_COGNITO_USER_POOL_CLIENT_ID,
   ),
+  apiBaseUrl: requireEnv(
+    'VITE_API_BASE_URL',
+    import.meta.env.VITE_API_BASE_URL,
+  ),
 } as const
