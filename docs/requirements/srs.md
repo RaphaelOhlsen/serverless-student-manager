@@ -283,6 +283,20 @@ The system shall provide a cursor-based paginated list.
 - Maximum page size: 100.
 - Default order: student name in ascending alphabetical order.
 
+The HTTP contract is `GET /students` and accepts only:
+
+- `limit`: optional integer from 1 to 100, default 20;
+- `cursor`: optional opaque pagination cursor;
+- `status`: optional `ACTIVE`, `INACTIVE` or `ALL`, default `ACTIVE`;
+- `namePrefix`: optional case-insensitive name prefix normalized by the backend.
+
+The response contains `items`, `nextCursor` and `hasMore`. Each summarized item
+contains only `studentId`, `registrationNumber`, `fullName` and `status`.
+`hasMore` is true exactly when `nextCursor` is not null. Invalid parameters or
+an invalid or incompatible cursor return HTTP `400 Bad Request`.
+
+Exact lookup by registration number is not part of `GET /students`.
+
 ### RF-ALU-005 — Search student by name
 
 The system shall support case-insensitive prefix search by normalized name.
