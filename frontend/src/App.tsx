@@ -1,5 +1,9 @@
 import { type FormEvent, useState } from 'react'
-import { confirmSignIn, signIn } from 'aws-amplify/auth'
+import {
+  confirmSignIn,
+  signIn,
+  type SignInOutput,
+} from 'aws-amplify/auth'
 
 import { Button } from '@/components/ui/button'
 
@@ -18,29 +22,19 @@ const GENERIC_SIGN_IN_ERROR =
   'Não foi possível entrar. Verifique seus dados e tente novamente.'
 const GENERIC_NEW_PASSWORD_ERROR =
   'Não foi possível definir a nova senha. Revise os dados e tente novamente.'
+const GENERIC_TOTP_ERROR =
+  'Não foi possível confirmar o código. Verifique-o e tente novamente.'
 const UNSUPPORTED_STEP_ERROR =
   'Não foi possível concluir o acesso nesta etapa. Tente novamente mais tarde.'
+const AUTHENTICATOR_APP_NAME = 'Serverless Student Manager'
 
 const nextStageContent: Partial<
   Record<AuthView, { eyebrow: string; title: string; description: string }>
 > = {
   'mfa-setup-selection': {
     eyebrow: 'Verificação em duas etapas',
-    title: 'Escolha do método de segurança necessária',
-    description:
-      'A próxima etapa será selecionar o método de autenticação adicional.',
-  },
-  'totp-setup': {
-    eyebrow: 'Verificação em duas etapas',
-    title: 'Configuração do autenticador necessária',
-    description:
-      'A próxima etapa será associar um aplicativo autenticador à sua conta.',
-  },
-  'totp-challenge': {
-    eyebrow: 'Verificação em duas etapas',
-    title: 'Código do autenticador necessário',
-    description:
-      'A próxima etapa será informar o código gerado pelo seu autenticador.',
+    title: 'Preparando o autenticador',
+    description: 'Aguarde enquanto o método de segurança é preparado.',
   },
   authenticated: {
     eyebrow: 'Acesso confirmado',
@@ -60,32 +54,83 @@ function App() {
   const [password, setPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [newPasswordConfirmation, setNewPasswordConfirmation] = useState('')
+  const [totpSetupUri, setTotpSetupUri] = useState<string | null>(null)
+  const [totpSharedSecret, setTotpSharedSecret] = useState<string | null>(null)
+  const [totpCode, setTotpCode] = useState('')
+  const [copyConfirmation, setCopyConfirmation] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
-  function transitionFromSignInStep(signInStep: string) {
+  function clearPasswords() {
+    setPassword('')
+    setNewPassword('')
+    setNewPasswordConfirmation('')
+  }
+
+  function clearTotpData() {
+    setTotpSetupUri(null)
+    setTotpSharedSecret(null)
+    setTotpCode('')
+    setCopyConfirmation(null)
+  }
+
+  function transitionToUnsupportedStep() {
+    clearPasswords()
+    clearTotpData()
+    setEmail('')
+    setAuthView('unsupported-step')
+  }
+
+  async function transitionFromSignInStep(
+    nextStep: SignInOutput['nextStep'],
+  ) {
     setErrorMessage(null)
 
-    switch (signInStep) {
+    switch (nextStep.signInStep) {
       case 'CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED':
         setAuthView('new-password-required')
         break
-      case 'CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTION':
+      case 'CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTION': {
         setAuthView('mfa-setup-selection')
+        if (!nextStep.allowedMFATypes?.includes('TOTP')) {
+          transitionToUnsupportedStep()
+          break
+        }
+
+        try {
+          const result = await confirmSignIn({ challengeResponse: 'TOTP' })
+          await transitionFromSignInStep(result.nextStep)
+        } catch {
+          transitionToUnsupportedStep()
+        }
         break
-      case 'CONTINUE_SIGN_IN_WITH_TOTP_SETUP':
+      }
+      case 'CONTINUE_SIGN_IN_WITH_TOTP_SETUP': {
+        const setupDetails = nextStep.totpSetupDetails
+        const setupUri = setupDetails.getSetupUri(AUTHENTICATOR_APP_NAME)
+
+        setTotpSetupUri(setupUri.toString())
+        setTotpSharedSecret(setupDetails.sharedSecret)
+        setTotpCode('')
+        setCopyConfirmation(null)
         setAuthView('totp-setup')
         break
+      }
       case 'CONFIRM_SIGN_IN_WITH_TOTP_CODE':
+        setTotpSetupUri(null)
+        setTotpSharedSecret(null)
+        setTotpCode('')
+        setCopyConfirmation(null)
         setAuthView('totp-challenge')
         break
       case 'DONE':
+        clearPasswords()
+        clearTotpData()
         setEmail('')
         setAuthView('authenticated')
         break
       default:
-        setEmail('')
-        setAuthView('unsupported-step')
+        transitionToUnsupportedStep()
     }
   }
 
@@ -101,7 +146,7 @@ function App() {
       })
 
       setPassword('')
-      transitionFromSignInStep(result.nextStep.signInStep)
+      await transitionFromSignInStep(result.nextStep)
     } catch {
       setErrorMessage(GENERIC_SIGN_IN_ERROR)
     } finally {
@@ -132,11 +177,50 @@ function App() {
 
       setNewPassword('')
       setNewPasswordConfirmation('')
-      transitionFromSignInStep(result.nextStep.signInStep)
+      await transitionFromSignInStep(result.nextStep)
     } catch {
       setErrorMessage(GENERIC_NEW_PASSWORD_ERROR)
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  async function handleConfirmTotp(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setErrorMessage(null)
+
+    const normalizedCode = totpCode.trim()
+    if (!/^\d{6}$/.test(normalizedCode)) {
+      setErrorMessage('Informe um código de 6 dígitos.')
+      return
+    }
+
+    setTotpCode('')
+    setIsLoading(true)
+
+    try {
+      const result = await confirmSignIn({
+        challengeResponse: normalizedCode,
+      })
+
+      await transitionFromSignInStep(result.nextStep)
+    } catch {
+      setErrorMessage(GENERIC_TOTP_ERROR)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  async function handleCopySharedSecret() {
+    if (!totpSharedSecret) {
+      return
+    }
+
+    try {
+      await navigator.clipboard.writeText(totpSharedSecret)
+      setCopyConfirmation('Chave copiada.')
+    } catch {
+      setCopyConfirmation('Não foi possível copiar. Selecione a chave manualmente.')
     }
   }
 
@@ -193,6 +277,82 @@ function App() {
 
             <Button className="auth-submit" type="submit" disabled={isLoading}>
               {isLoading ? 'Continuando…' : 'Continuar'}
+            </Button>
+          </form>
+        </section>
+      </main>
+    )
+  }
+
+  if (authView === 'totp-setup' || authView === 'totp-challenge') {
+    const isSetup = authView === 'totp-setup'
+
+    return (
+      <main className="auth-page">
+        <section className="auth-card" aria-labelledby="totp-title">
+          <div className="auth-heading">
+            <p className="auth-eyebrow">Verificação em duas etapas</p>
+            <h1 id="totp-title">
+              {isSetup ? 'Configure seu autenticador' : 'Informe o código'}
+            </h1>
+            <p className="auth-description">
+              {isSetup
+                ? 'Associe um aplicativo autenticador e informe o código gerado para concluir.'
+                : 'Informe o código atual gerado pelo aplicativo autenticador.'}
+            </p>
+          </div>
+
+          {isSetup && totpSetupUri && totpSharedSecret ? (
+            <div className="totp-setup-details">
+              <a className="totp-setup-link" href={totpSetupUri}>
+                Abrir no aplicativo autenticador
+              </a>
+
+              <div className="manual-secret">
+                <p>Ou use esta chave de configuração manual:</p>
+                <code>{totpSharedSecret}</code>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleCopySharedSecret}
+                >
+                  Copiar chave
+                </Button>
+                {copyConfirmation ? (
+                  <p className="auth-notice" role="status">
+                    {copyConfirmation}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
+          <form className="auth-form" onSubmit={handleConfirmTotp}>
+            <div className="form-field">
+              <label htmlFor="totp-code">Código do autenticador</label>
+              <input
+                id="totp-code"
+                name="totp-code"
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                pattern="[0-9]{6}"
+                maxLength={6}
+                value={totpCode}
+                onChange={(event) => setTotpCode(event.target.value)}
+                disabled={isLoading}
+                required
+              />
+            </div>
+
+            {errorMessage ? (
+              <p className="auth-error" role="alert">
+                {errorMessage}
+              </p>
+            ) : null}
+
+            <Button className="auth-submit" type="submit" disabled={isLoading}>
+              {isLoading ? 'Confirmando…' : 'Confirmar código'}
             </Button>
           </form>
         </section>

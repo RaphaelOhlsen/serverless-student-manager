@@ -116,6 +116,32 @@
   color: var(--muted-foreground);
 }
 
+.totp-setup-details,
+.manual-secret {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.totp-setup-link {
+  color: var(--primary);
+  font-weight: 600;
+  text-underline-offset: 0.2em;
+}
+
+.manual-secret {
+  border-radius: var(--radius-md);
+  background: var(--muted);
+  padding: 1rem;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+}
+
+.manual-secret code {
+  overflow-wrap: anywhere;
+  color: var(--foreground);
+  font-family: var(--font-mono);
+}
+
 @media (max-width: 30rem) {
   .auth-page {
     padding: 1rem;
