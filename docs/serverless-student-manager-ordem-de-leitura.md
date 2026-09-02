@@ -46,7 +46,7 @@ Antes de qualquer implementação, o Codex deve ler `../AGENTS.md`.
 32. `decisions/adr/adr-025-first-admin-email-verification.md` — Approved
 33. `decisions/adr/adr-026-students-list-contract-and-physical-modeling.md` — Approved
 34. `decisions/adr/adr-027-user-activation-after-first-sign-in.md` — Approved
-35. `decisions/adr/adr-028-lambda-application-release-via-github-actions.md` — Proposed
+35. `decisions/adr/adr-028-lambda-application-release-via-github-actions.md` — Approved
 
 ## 4. Arquitetura consolidada
 

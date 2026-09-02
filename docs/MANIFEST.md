@@ -50,9 +50,9 @@ O próprio `MANIFEST.md` não é listado para evitar hash autorreferencial.
 | `docs/decisions/adr/adr-025-first-admin-email-verification.md` | `6b2ac96d0b24bf103504e73e28f17b81e19d6d5a8725c428ee67679816d768a4` |
 | `docs/decisions/adr/adr-026-students-list-contract-and-physical-modeling.md` | `ec51197743072479a22948c16ca8c79c2e24d06302abb2cf691d6067c338ba3d` |
 | `docs/decisions/adr/adr-027-user-activation-after-first-sign-in.md` | `19096d119afc6d4258aab6941ea1b14c7dece26a55c18428480eadb99973d4f5` |
-| `docs/decisions/adr/adr-028-lambda-application-release-via-github-actions.md` | `ec4939a15aad209631879d6a50322f14f8a2f658dd112b9843f116298ac5afba` |
-| `docs/decisions/decision-register.md` | `9a887ced999815ea75f6700a85debde1fa0d5aa3fb97265b827c8f9a379c270a` |
-| `docs/decisions/pending-decisions.md` | `7886da6c5bd48d77b6b834e596e7456b9b95616be7dab5444be17f37e24896cb` |
+| `docs/decisions/adr/adr-028-lambda-application-release-via-github-actions.md` | `dec580a6979c144ee660af14e33a182e75431f386931dea5682a12a5cabd0924` |
+| `docs/decisions/decision-register.md` | `24c895700277eeb67038fff2ccdab5f3a8effc92dd91a4682e4e9de3101c279a` |
+| `docs/decisions/pending-decisions.md` | `85e7eb0bb98a0c5ca323dd2279fa70e187d52ed1c5575ce6287bf9c62f66c400` |
 | `docs/operations/cognito-dynamodb-compensation.md` | `d2914292047679b7858e6b130f4baf04440913f9fb0809b243df22323d448807` |
 | `docs/operations/first-admin-email-verification.md` | `f067eb2b1bbea6d453d542b67fbf6d9d8a86504c2c293f5e035786518480150d` |
 | `docs/operations/first-admin-invitation-resume.md` | `33213a038e5f7400b09cb88cba7f19c75be248ac860b1bccd6af762153f6679a` |
@@ -62,5 +62,5 @@ O próprio `MANIFEST.md` não é listado para evitar hash autorreferencial.
 | `docs/overview.md` | `99c0311d0a7f4993b3bf5e715e3da7e455b20959dc33d0e1d8f6968ca7e29e97` |
 | `docs/references.md` | `f86b0ea29df69ea0ba5e6bad78e6dc661cad6ee24dc45bcc63222fd6735ff236` |
 | `docs/requirements/srs.md` | `006fa638b6c2efb37bf596323138d09b19e57599efb96cbab026ecc1e6d830bc` |
-| `docs/serverless-student-manager-ordem-de-leitura.md` | `fd19b73a6553889207f2a3bf9a1fc8e15336d340c6e926bc48dc1bc7bc617055` |
+| `docs/serverless-student-manager-ordem-de-leitura.md` | `c349052857a9e32ec9f7c9dbd3b4ce34777fc78b60713355d6f47664583f9828` |
 | `docs/serverless-student-manager-ordem-de-leitura.png` | `0243000a218ca8860a10c45b0eeb21a02195664f9c4da1eacb1f8abf9ceed611` |

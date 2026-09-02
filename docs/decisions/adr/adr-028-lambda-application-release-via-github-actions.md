@@ -1,6 +1,6 @@
 # ADR-028 — Lambda Application Release via GitHub Actions
 
-**Status:** Proposed
+**Status:** Approved
 **Data:** 2026-09-02
 
 ## Contexto
@@ -124,6 +124,7 @@ alias:
 - falha antes de `UpdateAlias` preserva `live` na versão anterior;
 - falha após `UpdateFunctionCode` e antes da promoção deixa `$LATEST` sem tráfego;
 - o workflow registra a versão anterior antes de qualquer alteração;
+- nenhuma versão publicada é excluída durante o release;
 - falha no smoke após promoção reponta `live` para a versão anterior conhecida como boa e repete o
   smoke, conforme ADR-020;
 - rollback não reconstrói artifact, não usa Terraform e não altera dados.

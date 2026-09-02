@@ -61,7 +61,7 @@
 | ADR-025 | Verificação administrativa do e-mail do primeiro Administrador | Approved |
 | ADR-026 | Contrato de listagem e modelagem física de Students | Approved |
 | ADR-027 | Ativação do usuário após o primeiro login | Approved |
-| ADR-028 | Release de código Lambda via GitHub Actions | Proposed |
+| ADR-028 | Release de código Lambda via GitHub Actions | Approved |
 
 ## 3. Modelos de dados aprovados
 
@@ -89,7 +89,7 @@
 
 ## 5. Situação arquitetural
 
-As ADR-001 a ADR-027 estão aprovadas. A ADR-028 está proposta.
+As ADR-001 a ADR-028 estão aprovadas.
 
 Novas decisões relevantes surgidas durante a engenharia devem ser registradas em ADR-029 ou posterior.
 
