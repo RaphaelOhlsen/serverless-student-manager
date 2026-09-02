@@ -4,8 +4,8 @@
 **Data:** 2026-09-01
 **Status:** Engenharia em andamento
 
-As ADR-001 a ADR-027 estão aprovadas. Não há ADR proposta pendente nesta
-baseline.
+As ADR-001 a ADR-027 estão aprovadas. A ADR-028, sobre o mecanismo canônico
+de release de código Lambda via GitHub Actions, está `Proposed` e aguarda revisão.
 
 ## Detalhamento operacional pendente
 
@@ -16,12 +16,13 @@ somente o evento transacional de sucesso `USER_ACTIVATED`.
 
 ## Próximas atividades de engenharia
 
-1. implementar `POST /users/me/activation` conforme a ADR-027;
-2. implementar o domínio de usuários;
-3. implementar os fluxos de auditoria da aplicação;
+1. revisar e aprovar a ADR-028;
+2. implementar o mecanismo canônico de release Lambda após aprovação;
+3. publicar pelo mecanismo canônico a correção pendente da `users-api`;
 4. desenvolver o frontend React;
-5. ampliar observabilidade e testes integrados/end-to-end;
-6. realizar hardening e preparar o ambiente `prod`.
+5. implementar os fluxos de auditoria da aplicação;
+6. ampliar observabilidade e testes integrados/end-to-end;
+7. realizar hardening e preparar o ambiente `prod`.
 
 ## Itens que podem gerar novas ADRs
 
