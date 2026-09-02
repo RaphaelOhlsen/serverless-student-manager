@@ -34,6 +34,11 @@ variables {
       function_name = "students-api"
       alias_name    = "live"
     }
+    users = {
+      invoke_arn    = "arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/arn:aws:lambda:us-east-1:123456789012:function:users-api:live/invocations"
+      function_name = "users-api"
+      alias_name    = "live"
+    }
   }
 
   routes = {
@@ -54,6 +59,11 @@ variables {
       integration_key    = "students"
       authorization_type = "JWT"
     }
+    activate_current_user = {
+      route_key          = "POST /users/me/activation"
+      integration_key    = "users"
+      authorization_type = "JWT"
+    }
   }
 
   cors_allow_origins = [
@@ -71,6 +81,7 @@ variables {
   cors_allow_headers = [
     "Authorization",
     "Content-Type",
+    "Idempotency-Key",
   ]
 
   cors_allow_credentials = false
@@ -99,6 +110,14 @@ run "plans_http_api" {
   }
 
   assert {
+    condition = contains(
+      one(aws_apigatewayv2_api.this.cors_configuration).allow_headers,
+      "Idempotency-Key"
+    )
+    error_message = "CORS must allow the Idempotency-Key header."
+  }
+
+  assert {
     condition     = aws_apigatewayv2_api.this.protocol_type == "HTTP"
     error_message = "The API Gateway protocol type must be HTTP."
   }
@@ -117,6 +136,14 @@ run "plans_http_api" {
       "GET"
     )
     error_message = "The HTTP API CORS configuration must allow GET."
+  }
+
+  assert {
+    condition = contains(
+      one(aws_apigatewayv2_api.this.cors_configuration).allow_methods,
+      "POST"
+    )
+    error_message = "The HTTP API CORS configuration must allow POST."
   }
 
   assert {
@@ -206,6 +233,11 @@ run "plans_http_api" {
   }
 
   assert {
+    condition     = aws_apigatewayv2_integration.lambda["users"].integration_type == "AWS_PROXY"
+    error_message = "The users integration must use AWS_PROXY."
+  }
+
+  assert {
     condition     = aws_apigatewayv2_route.this["health"].route_key == "GET /health"
     error_message = "The public health route is incorrect."
   }
@@ -233,6 +265,16 @@ run "plans_http_api" {
   assert {
     condition     = aws_apigatewayv2_route.this["list_students"].authorization_type == "JWT"
     error_message = "The list-students route must use JWT authorization."
+  }
+
+  assert {
+    condition     = aws_apigatewayv2_route.this["activate_current_user"].route_key == "POST /users/me/activation"
+    error_message = "The activation route key is incorrect."
+  }
+
+  assert {
+    condition     = aws_apigatewayv2_route.this["activate_current_user"].authorization_type == "JWT"
+    error_message = "The activation route must use JWT authorization."
   }
 
   assert {
