@@ -240,6 +240,34 @@ The system shall support a controlled and audited administrative procedure to re
 - TOTP secrets and recovery material are not exposed in logs or versioned files.
 - Recovery of the sole active Administrator follows the separately documented exceptional operational procedure.
 
+### RF-AUTH-015 — Activate user after first sign-in
+
+After Cognito completes the first-access challenges, an invited Administrator
+or Operator shall activate only their own application identity through:
+
+```http
+POST /users/me/activation
+```
+
+**Acceptance criteria:**
+
+- A valid JWT access token and `Idempotency-Key` UUID are required.
+- The authenticated `sub` is obtained only from the validated token.
+- The backend confirms with `AdminGetUser` that the Cognito identity is enabled,
+  `CONFIRMED`, has the expected `sub` and has `email_verified=true`.
+- The backend confirms with `AdminGetUserAuthFactors` that
+  `ConfiguredUserAuthFactors` contains `SOFTWARE_TOKEN`.
+- `PreferredMfaSetting` is not required and an absent or empty
+  `UserMFASettingList` is not treated as evidence that TOTP is missing.
+- USER and AUTHORIZATION transition atomically from `INVITED` to `ACTIVE`.
+- Activation increments the active Administrator counter exactly once for an
+  ADMIN and never for an OPERATOR.
+- Success appends one immutable `USER_ACTIVATED` audit event.
+- Replay or an already `ACTIVE` reconciled user returns `200` without duplicate
+  counter or audit effects.
+- An `INACTIVE` user is never promoted by this operation.
+- Cognito is read only during activation.
+
 ---
 
 ## 5. Functional Requirements — Student Management
@@ -661,6 +689,10 @@ Allowed states:
 - `INVITED`
 - `ACTIVE`
 - `INACTIVE`
+
+The only normal first-access transition is `INVITED → ACTIVE`, through the
+server-side reconciliation and atomic transaction defined by ADR-027.
+`INACTIVE` cannot use this transition.
 
 #### RN-USR-004 — Passwords
 
@@ -1132,8 +1164,13 @@ Main flow:
 5. The user associates a TOTP authenticator.
 6. The user proves possession with a valid TOTP code.
 7. Cognito completes authentication.
-8. The application resolves current `role` and `status`.
-9. The user enters the protected area.
+8. The client calls `POST /users/me/activation` with the JWT access token and a
+   stable `Idempotency-Key`.
+9. The backend reconciles Cognito, USER and AUTHORIZATION server-side.
+10. The backend atomically activates the application identity and records the
+    successful activation, or returns the already-active idempotent result.
+11. The application resolves current `role` and `status`.
+12. The user enters the protected area.
 
 The application never stores the password, TOTP shared secret or TOTP code in its business database or logs.
 
@@ -1160,7 +1197,7 @@ The detailed exceptional recovery sequence for the sole active Administrator is 
 
 | Domain | Main requirements | Main use cases |
 |---|---|---|
-| Authentication | RF-AUTH-001 to RF-AUTH-014 | UC-001, UC-009, UC-014, UC-016 to UC-018 |
+| Authentication | RF-AUTH-001 to RF-AUTH-015 | UC-001, UC-009, UC-014, UC-016 to UC-018 |
 | Students | RF-ALU-001 to RF-ALU-013 | UC-002 to UC-006 |
 | Users | RF-USR-001 to RF-USR-013 | UC-007, UC-008, UC-010 to UC-012, UC-015, UC-017 |
 | Audit | RF-AUD-001 to RF-AUD-004 | UC-013 and all data-changing or security-sensitive flows |
@@ -1191,6 +1228,7 @@ The detailed exceptional recovery sequence for the sole active Administrator is 
 | ADR-018 — Non-HTTP idempotency | RF-USR-013, RF-AUTH-014, RNF-REL-002, RNF-REL-003 |
 | ADR-019 — Sole Administrator MFA recovery | RF-AUTH-014, RN-USR-002, UC-018, RNF-SEC-012, RNF-REL-002, RNF-REL-003 |
 | ADR-020 — Layered rollback and deployment recovery | RNF-REL-001, RNF-TEST-003, RNF-COMP-003 and deployment recovery procedures |
+| ADR-027 — User activation after first sign-in | RF-AUTH-001, RF-AUTH-012, RF-AUTH-015, RN-USR-003, UC-017, RNF-SEC-012, RNF-REL-002, RNF-REL-003 |
 
 ---
 

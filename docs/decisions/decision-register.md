@@ -60,6 +60,7 @@
 | ADR-024 | Protocolo determinístico e trava singleton do bootstrap do primeiro Admin | Approved |
 | ADR-025 | Verificação administrativa do e-mail do primeiro Administrador | Approved |
 | ADR-026 | Contrato de listagem e modelagem física de Students | Approved |
+| ADR-027 | Ativação do usuário após o primeiro login | Approved |
 
 ## 3. Modelos de dados aprovados
 
@@ -87,9 +88,9 @@
 
 ## 5. Situação arquitetural
 
-As ADR-001 a ADR-026 estão aprovadas.
+As ADR-001 a ADR-027 estão aprovadas.
 
-Novas decisões relevantes surgidas durante a engenharia devem ser registradas em ADR-027 ou posterior.
+Novas decisões relevantes surgidas durante a engenharia devem ser registradas em ADR-028 ou posterior.
 
 ## 6. Regra de manutenção
 
