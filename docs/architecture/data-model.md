@@ -146,6 +146,25 @@ O contador é protegido transacionalmente.
 
 Usuários com status `INVITED` não participam do contador.
 
+### Ativação após o primeiro login
+
+`POST /users/me/activation` executa uma única `TransactWriteItems`:
+
+1. atualiza `USER#<userId> / PROFILE` de `INVITED` para `ACTIVE`;
+2. atualiza `COGNITO#<sub> / AUTHORIZATION` de `INVITED` para `ACTIVE`;
+3. para `ADMIN`, inicializa ou incrementa
+   `CONTROL#ACTIVE_ADMIN_COUNT / CONTROL` exatamente uma vez;
+4. insere o evento imutável `USER_ACTIVATED / SUCCESS` em `audit-events`.
+
+Para `OPERATOR`, o contador não participa. USER e projeção devem manter o mesmo
+`userId`, `cognitoSub`, `role` e `authVersion`. Conditions exigem o estado
+`INVITED` e os valores esperados no momento da escrita; `INACTIVE` nunca é
+promovido. A atomicidade da transação impede estado DynamoDB parcial, contador
+duplicado e auditoria de sucesso sem ativação.
+
+Replay ou usuário já `ACTIVE` integralmente reconciliado retorna sucesso sem
+nova transação, incremento ou evento. A idempotência HTTP segue a ADR-012.
+
 ### Trava singleton do primeiro Administrador
 
 ```text

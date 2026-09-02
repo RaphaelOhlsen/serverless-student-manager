@@ -129,10 +129,29 @@ A correção histórica também não foi autorizada nem executada. Até essas et
 `verify-first-admin-email` não está disponível como capacidade operacional na
 AWS.
 
+## 8. Ativação após o primeiro login
+
+A ADR-027 aprova `POST /users/me/activation` com JWT access token e
+`Idempotency-Key`. A rota permite somente autoativação: o `sub` vem do contexto
+validado e nenhum identificador ou estado MFA é aceito do frontend.
+
+Antes de escrever, a `users-api` consulta `AdminGetUser` para confirmar
+identidade habilitada, `CONFIRMED`, `sub` reconciliado e `email_verified=true`.
+Também consulta `AdminGetUserAuthFactors` e exige
+`ConfiguredUserAuthFactors` contendo `SOFTWARE_TOKEN`. Não exige
+`PreferredMfaSetting`; `UserMFASettingList` ausente ou vazio não é evidência de
+TOTP ausente.
+
+As permissões Cognito da ativação são somente
+`cognito-idp:AdminGetUser` e `cognito-idp:AdminGetUserAuthFactors`, restritas ao
+user pool aplicável. A operação não modifica Cognito. Não há atomicidade
+distribuída entre essas leituras e DynamoDB; a transação revalida o estado de
+USER e AUTHORIZATION com conditions no momento da escrita.
+
 Reset de MFA é administrativo e auditado.  
 O único Administrador terá procedimento excepcional controlado de recuperação.
 
-## 8. Proteção de dados
+## 9. Proteção de dados
 
 Não registrar:
 
@@ -150,7 +169,7 @@ Tags AWS não podem conter PII ou segredos.
 Erros operacionais podem registrar somente estágio, serviço/operação AWS, classe da exceção, AWS error code, AWS request ID e `operationId`. Mensagens brutas de serviços, payloads e cancellation reason items são proibidos.
 
 
-## 9. Recuperação excepcional
+## 10. Recuperação excepcional
 
 Quando o único Administrador perde o TOTP e não há recuperação normal possível,
 a ADR-019 define workflow manual protegido, OIDC, `operationId`, invalidacão da identidade
