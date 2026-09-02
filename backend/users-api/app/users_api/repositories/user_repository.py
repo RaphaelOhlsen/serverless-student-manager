@@ -1,3 +1,4 @@
+from decimal import Decimal
 from typing import Any, Protocol
 
 from boto3.dynamodb.types import TypeDeserializer, TypeSerializer  # type: ignore[import-untyped]
@@ -143,7 +144,10 @@ class UserRepository:
         item = response.get("Item")
         if not isinstance(item, dict):
             return None
-        return {name: self._deserializer.deserialize(value) for name, value in item.items()}
+        return {
+            name: _normalize_dynamodb_value(self._deserializer.deserialize(value))
+            for name, value in item.items()
+        }
 
     def _serialize_item(self, item: dict[str, object]) -> dict[str, object]:
         return {name: self._serializer.serialize(value) for name, value in item.items()}
@@ -181,3 +185,9 @@ class UserRepository:
             "GSI3SK": sort_key,
             "expiresAt": expires_at,
         }
+
+
+def _normalize_dynamodb_value(value: object) -> object:
+    if isinstance(value, Decimal) and value.is_finite() and value == value.to_integral_value():
+        return int(value)
+    return value

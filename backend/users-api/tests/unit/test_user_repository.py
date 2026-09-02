@@ -1,5 +1,7 @@
+from decimal import Decimal
 from typing import Any
 
+import pytest
 from boto3.dynamodb.types import (  # type: ignore[import-untyped]
     TypeDeserializer,
     TypeSerializer,
@@ -56,6 +58,46 @@ def test_reads_projection_and_profile_consistently() -> None:
     }
     assert repository.get_profile("user-1") is not None
     assert all(call["ConsistentRead"] is True for call in client.get_calls)
+
+
+def test_normalizes_integral_dynamodb_auth_versions_for_both_user_items() -> None:
+    client = FakeClient()
+    client.responses = [
+        {"Item": serialized({"authVersion": Decimal("1")})},
+        {"Item": serialized({"authVersion": Decimal("1")})},
+    ]
+    repository = UserRepository(client, "users", "audit")
+
+    authorization = repository.get_authorization("sub-1")
+    profile = repository.get_profile("user-1")
+
+    assert authorization == {"authVersion": 1}
+    assert profile == {"authVersion": 1}
+    assert type(authorization["authVersion"]) is int
+    assert type(profile["authVersion"]) is int
+
+
+@pytest.mark.parametrize(
+    "invalid_value",
+    [Decimal("1.5"), Decimal("NaN"), Decimal("Infinity"), "1", True],
+)
+def test_does_not_normalize_invalid_auth_version_types(invalid_value: object) -> None:
+    client = FakeClient()
+    attribute = (
+        {"N": str(invalid_value)}
+        if isinstance(invalid_value, Decimal) and not invalid_value.is_finite()
+        else TypeSerializer().serialize(invalid_value)
+    )
+    client.responses = [{"Item": {"authVersion": attribute}}]
+
+    item = UserRepository(client, "users", "audit").get_authorization("sub-1")
+
+    assert item is not None
+    value = item["authVersion"]
+    if isinstance(invalid_value, Decimal) and invalid_value.is_nan():
+        assert isinstance(value, Decimal) and value.is_nan()
+    else:
+        assert value == invalid_value
 
 
 def test_missing_item_returns_none() -> None:
