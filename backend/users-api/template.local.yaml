@@ -1,0 +1,29 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Local SAM adapter for users-api
+
+Resources:
+  UsersApi:
+    Type: AWS::Serverless::Function
+    Properties:
+      Runtime: python3.13
+      Architectures:
+        - x86_64
+      CodeUri: app/
+      Handler: users_api.app.lambda_handler
+      Timeout: 10
+      MemorySize: 512
+
+      Environment:
+        Variables:
+          POWERTOOLS_SERVICE_NAME: users-api
+          POWERTOOLS_METRICS_NAMESPACE: ServerlessStudentManager
+          POWERTOOLS_LOG_LEVEL: DEBUG
+
+      Events:
+        Activation:
+          Type: HttpApi
+          Properties:
+            Path: /users/me/activation
+            Method: POST
+            PayloadFormatVersion: "2.0"

@@ -5,6 +5,7 @@ variables {
   aws_account_id = "123456789012"
 
   students_api_bootstrap_package_filename = "bootstrap.zip"
+  users_api_bootstrap_package_filename    = "users-bootstrap.zip"
 
   github_repository    = "example/serverless-student-manager"
   github_owner_id      = "12345678"
@@ -49,6 +50,19 @@ override_module {
     alias_name         = "live"
     alias_arn          = "arn:aws:lambda:us-east-1:123456789012:function:serverless-student-manager-dev-students-api:live"
     alias_invoke_arn   = "arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/example/invocations"
+  }
+}
+
+override_module {
+  target = module.users_api
+  outputs = {
+    function_name      = "serverless-student-manager-dev-users-api"
+    function_arn       = "arn:aws:lambda:us-east-1:123456789012:function:serverless-student-manager-dev-users-api"
+    execution_role_arn = "arn:aws:iam::123456789012:role/serverless-student-manager-dev-users-api-execution"
+    log_group_name     = "/aws/lambda/serverless-student-manager-dev-users-api"
+    alias_name         = "live"
+    alias_arn          = "arn:aws:lambda:us-east-1:123456789012:function:serverless-student-manager-dev-users-api:live"
+    alias_invoke_arn   = "arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/users-example/invocations"
   }
 }
 
@@ -717,5 +731,106 @@ run "plans_students_list_api_access" {
       ]
     ]))
     error_message = "The students API policy must not allow DynamoDB Scan."
+  }
+}
+
+run "plans_user_activation_api_access" {
+  command = plan
+
+  assert {
+    condition     = length(data.aws_iam_policy_document.users_api.statement) == 4
+    error_message = "The users-api policy must contain exactly four semantic statements."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.users_api.statement : statement.actions
+      if statement.sid == "ReadActivationIdentity"
+      ])) == toset([
+      "cognito-idp:AdminGetUser",
+      "cognito-idp:AdminGetUserAuthFactors",
+    ])
+    error_message = "The activation Cognito statement contains unexpected actions."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.users_api.statement : statement.resources
+      if statement.sid == "ReadActivationIdentity"
+    ])) == toset([module.identity.user_pool_arn])
+    error_message = "The activation Cognito statement must target only the dev user pool."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.users_api.statement : statement.actions
+      if statement.sid == "ReadAndTransactActivationState"
+      ])) == toset([
+      "dynamodb:GetItem",
+      "dynamodb:TransactWriteItems",
+    ])
+    error_message = "The users statement contains unexpected actions."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.users_api.statement : statement.resources
+      if statement.sid == "ReadAndTransactActivationState"
+    ])) == toset([module.user_store.table_arn])
+    error_message = "The activation state statement must target only users."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.users_api.statement : statement.actions
+      if statement.sid == "AppendActivationAudit"
+    ])) == toset(["dynamodb:TransactWriteItems"])
+    error_message = "The audit statement must contain only TransactWriteItems."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.users_api.statement : statement.resources
+      if statement.sid == "AppendActivationAudit"
+    ])) == toset([module.audit_store.table_arn])
+    error_message = "The activation audit statement must target only audit-events."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.users_api.statement : statement.actions
+      if statement.sid == "ManageActivationIdempotency"
+      ])) == toset([
+      "dynamodb:GetItem",
+      "dynamodb:PutItem",
+      "dynamodb:UpdateItem",
+    ])
+    error_message = "The idempotency statement contains unexpected actions."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.users_api.statement : statement.resources
+      if statement.sid == "ManageActivationIdempotency"
+    ])) == toset([module.idempotency_store.table_arn])
+    error_message = "The activation idempotency statement targets an unexpected resource."
+  }
+
+  assert {
+    condition = alltrue(flatten([
+      for statement in data.aws_iam_policy_document.users_api.statement : [
+        for action in statement.actions : !strcontains(action, "*")
+      ]
+    ]))
+    error_message = "The users-api policy must not contain wildcard actions."
+  }
+
+  assert {
+    condition = alltrue(flatten([
+      for statement in data.aws_iam_policy_document.users_api.statement : [
+        for resource in statement.resources : resource != "*"
+      ]
+    ]))
+    error_message = "The users-api policy must not contain wildcard resources."
   }
 }

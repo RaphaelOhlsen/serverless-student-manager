@@ -96,6 +96,99 @@ module "students_api" {
   additional_iam_policy_json = data.aws_iam_policy_document.students_api.json
 }
 
+data "aws_iam_policy_document" "users_api" {
+  statement {
+    sid    = "ReadActivationIdentity"
+    effect = "Allow"
+
+    actions = [
+      "cognito-idp:AdminGetUser",
+      "cognito-idp:AdminGetUserAuthFactors",
+    ]
+
+    resources = [
+      module.identity.user_pool_arn,
+    ]
+  }
+
+  statement {
+    sid    = "ReadAndTransactActivationState"
+    effect = "Allow"
+
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:TransactWriteItems",
+    ]
+
+    resources = [
+      module.user_store.table_arn,
+    ]
+  }
+
+  statement {
+    sid    = "AppendActivationAudit"
+    effect = "Allow"
+
+    actions = [
+      "dynamodb:TransactWriteItems",
+    ]
+
+    resources = [
+      module.audit_store.table_arn,
+    ]
+  }
+
+  statement {
+    sid    = "ManageActivationIdempotency"
+    effect = "Allow"
+
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:PutItem",
+      "dynamodb:UpdateItem",
+    ]
+
+    resources = [
+      module.idempotency_store.table_arn,
+    ]
+  }
+}
+
+module "users_api" {
+  source = "../../modules/lambda_service"
+
+  function_name = "serverless-student-manager-dev-users-api"
+  description   = "Users API Lambda function."
+
+  runtime       = "python3.13"
+  handler       = "users_api.app.lambda_handler"
+  architectures = ["x86_64"]
+
+  memory_size = 512
+  timeout     = 10
+
+  bootstrap_package_filename = var.users_api_bootstrap_package_filename
+
+  log_retention_in_days = 14
+
+  component           = "users-api"
+  data_classification = "confidential"
+
+  environment_variables = {
+    POWERTOOLS_SERVICE_NAME      = "users-api"
+    POWERTOOLS_METRICS_NAMESPACE = "ServerlessStudentManager"
+    POWERTOOLS_LOG_LEVEL         = "DEBUG"
+    ENVIRONMENT                  = local.environment
+    USERS_TABLE_NAME             = module.user_store.table_name
+    AUDIT_TABLE_NAME             = module.audit_store.table_name
+    IDEMPOTENCY_TABLE_NAME       = module.idempotency_store.table_name
+    USER_POOL_ID                 = module.identity.user_pool_id
+    AUDIT_RETENTION_DAYS         = "90"
+  }
+
+  additional_iam_policy_json = data.aws_iam_policy_document.users_api.json
+}
+
 module "http_api" {
   source = "../../modules/http_api"
 
@@ -113,10 +206,12 @@ module "http_api" {
 
   cors_allow_methods = [
     "GET",
+    "POST",
   ]
 
   cors_allow_headers = [
     "Authorization",
+    "Idempotency-Key",
   ]
 
   integrations = {
@@ -124,6 +219,11 @@ module "http_api" {
       invoke_arn    = module.students_api.alias_invoke_arn
       function_name = module.students_api.function_name
       alias_name    = module.students_api.alias_name
+    }
+    users = {
+      invoke_arn    = module.users_api.alias_invoke_arn
+      function_name = module.users_api.function_name
+      alias_name    = module.users_api.alias_name
     }
   }
 
@@ -143,6 +243,12 @@ module "http_api" {
     list_students = {
       route_key          = "GET /students"
       integration_key    = "students"
+      authorization_type = "JWT"
+    }
+
+    activate_current_user = {
+      route_key          = "POST /users/me/activation"
+      integration_key    = "users"
       authorization_type = "JWT"
     }
   }

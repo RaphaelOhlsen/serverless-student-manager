@@ -75,3 +75,60 @@ jobs:
         run: |
           sam build \
             --template-file backend/students-api/template.local.yaml
+
+  users-api:
+    name: Users API
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            requirements-dev.txt
+            backend/users-api/app/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+          python -m pip install -r backend/users-api/app/requirements.txt
+
+      - name: Ruff lint
+        run: python -m ruff check backend/users-api
+
+      - name: Ruff format
+        run: python -m ruff format --check backend/users-api
+
+      - name: Mypy
+        run: python -m mypy backend/users-api
+
+      - name: Unit tests with coverage
+        run: |
+          python -m pytest \
+            backend/users-api/tests/unit \
+            -v \
+            --cov=backend/users-api/app/users_api \
+            --cov-report=term-missing \
+            --cov-fail-under=80
+
+      - name: Set up AWS SAM CLI
+        uses: aws-actions/setup-sam@v3
+        with:
+          version: "1.165.0"
+
+      - name: Validate SAM template
+        run: |
+          sam validate \
+            --template-file backend/users-api/template.local.yaml \
+            --lint
+
+      - name: Build SAM application
+        run: |
+          sam build \
+            --template-file backend/users-api/template.local.yaml
