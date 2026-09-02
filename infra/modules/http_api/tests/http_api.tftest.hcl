@@ -48,6 +48,12 @@ variables {
       integration_key    = "students"
       authorization_type = "JWT"
     }
+
+    list_students = {
+      route_key          = "GET /students"
+      integration_key    = "students"
+      authorization_type = "JWT"
+    }
   }
 
   cors_allow_origins = [
@@ -220,6 +226,16 @@ run "plans_http_api" {
   }
 
   assert {
+    condition     = aws_apigatewayv2_route.this["list_students"].route_key == "GET /students"
+    error_message = "The list-students route key is incorrect."
+  }
+
+  assert {
+    condition     = aws_apigatewayv2_route.this["list_students"].authorization_type == "JWT"
+    error_message = "The list-students route must use JWT authorization."
+  }
+
+  assert {
     condition     = aws_apigatewayv2_stage.default.name == "$default"
     error_message = "The HTTP API must use the default stage."
   }
@@ -323,6 +339,15 @@ run "wires_computed_references" {
       == aws_apigatewayv2_authorizer.jwt.id
     )
     error_message = "The get-student route must use the configured JWT authorizer."
+  }
+
+
+  assert {
+    condition = (
+      aws_apigatewayv2_route.this["list_students"].authorizer_id
+      == aws_apigatewayv2_authorizer.jwt.id
+    )
+    error_message = "The list-students route must use the configured JWT authorizer."
   }
 
   assert {

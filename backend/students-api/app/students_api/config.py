@@ -14,3 +14,12 @@ def get_students_table_name() -> str:
         raise RuntimeError("STUDENTS_TABLE_NAME environment variable is required")
 
     return table_name
+
+
+def get_users_table_name() -> str:
+    table_name = os.getenv("USERS_TABLE_NAME")
+
+    if not table_name:
+        raise RuntimeError("USERS_TABLE_NAME environment variable is required")
+
+    return table_name

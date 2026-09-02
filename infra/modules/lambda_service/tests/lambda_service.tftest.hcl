@@ -40,6 +40,7 @@ variables {
     POWERTOOLS_METRICS_NAMESPACE = "ServerlessStudentManager"
     POWERTOOLS_LOG_LEVEL         = "DEBUG"
     STUDENTS_TABLE_NAME          = "serverless-student-manager-dev-students"
+    USERS_TABLE_NAME             = "serverless-student-manager-dev-users"
   }
 
   tags = {
@@ -120,6 +121,15 @@ run "plans_lambda_service" {
       == "serverless-student-manager-dev-students"
     )
     error_message = "STUDENTS_TABLE_NAME is incorrect."
+  }
+
+
+  assert {
+    condition = (
+      one(aws_lambda_function.this.environment).variables["USERS_TABLE_NAME"]
+      == "serverless-student-manager-dev-users"
+    )
+    error_message = "USERS_TABLE_NAME is incorrect."
   }
 
   assert {

@@ -36,6 +36,33 @@ data "aws_iam_policy_document" "students_api" {
       module.student_store.table_arn,
     ]
   }
+
+  statement {
+    sid    = "ReadUserAuthorization"
+    effect = "Allow"
+
+    actions = [
+      "dynamodb:GetItem",
+    ]
+
+    resources = [
+      module.user_store.table_arn,
+    ]
+  }
+
+  statement {
+    sid    = "QueryStudentListIndexes"
+    effect = "Allow"
+
+    actions = [
+      "dynamodb:Query",
+    ]
+
+    resources = [
+      "${module.student_store.table_arn}/index/${module.student_store.gsi_status_name}",
+      "${module.student_store.table_arn}/index/${module.student_store.gsi_all_name}",
+    ]
+  }
 }
 
 module "students_api" {
@@ -63,6 +90,7 @@ module "students_api" {
     POWERTOOLS_METRICS_NAMESPACE = "ServerlessStudentManager"
     POWERTOOLS_LOG_LEVEL         = "DEBUG"
     STUDENTS_TABLE_NAME          = module.student_store.table_name
+    USERS_TABLE_NAME             = module.user_store.table_name
   }
 
   additional_iam_policy_json = data.aws_iam_policy_document.students_api.json
@@ -108,6 +136,12 @@ module "http_api" {
 
     get_student = {
       route_key          = "GET /students/{studentId}"
+      integration_key    = "students"
+      authorization_type = "JWT"
+    }
+
+    list_students = {
+      route_key          = "GET /students"
       integration_key    = "students"
       authorization_type = "JWT"
     }
