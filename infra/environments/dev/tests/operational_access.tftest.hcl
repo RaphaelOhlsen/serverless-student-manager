@@ -14,8 +14,10 @@ variables {
 override_module {
   target = module.student_store
   outputs = {
-    table_name = "serverless-student-manager-dev-students"
-    table_arn  = "arn:aws:dynamodb:us-east-1:123456789012:table/serverless-student-manager-dev-students"
+    table_name      = "serverless-student-manager-dev-students"
+    table_arn       = "arn:aws:dynamodb:us-east-1:123456789012:table/serverless-student-manager-dev-students"
+    gsi_status_name = "gsi-status-name"
+    gsi_all_name    = "gsi-all-name"
   }
 }
 
@@ -667,5 +669,53 @@ run "plans_bootstrap_admin_access" {
       module.user_store.table_arn,
     ])
     error_message = "The bootstrap users write statement must target only the users table."
+  }
+}
+
+run "plans_students_list_api_access" {
+  command = plan
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.students_api.statement : statement.actions
+      if statement.sid == "ReadUserAuthorization"
+    ])) == toset(["dynamodb:GetItem"])
+    error_message = "The students API users statement must contain only GetItem."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.students_api.statement : statement.resources
+      if statement.sid == "ReadUserAuthorization"
+    ])) == toset([module.user_store.table_arn])
+    error_message = "The students API authorization read must target only the users table."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.students_api.statement : statement.actions
+      if statement.sid == "QueryStudentListIndexes"
+    ])) == toset(["dynamodb:Query"])
+    error_message = "The students list statement must contain only Query."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.students_api.statement : statement.resources
+      if statement.sid == "QueryStudentListIndexes"
+      ])) == toset([
+      "${module.student_store.table_arn}/index/gsi-status-name",
+      "${module.student_store.table_arn}/index/gsi-all-name",
+    ])
+    error_message = "The students list Query permission must target only the two approved GSIs."
+  }
+
+  assert {
+    condition = alltrue(flatten([
+      for statement in data.aws_iam_policy_document.students_api.statement : [
+        for action in statement.actions : action != "dynamodb:Scan"
+      ]
+    ]))
+    error_message = "The students API policy must not allow DynamoDB Scan."
   }
 }

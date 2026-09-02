@@ -1,6 +1,7 @@
 import json
 from typing import Any, cast
 
+import pytest
 from aws_lambda_powertools.event_handler import APIGatewayHttpResolver
 from aws_lambda_powertools.utilities.typing import LambdaContext
 from students_api.errors import StudentNotFoundError
@@ -19,6 +20,10 @@ class FakeStudentService:
             raise StudentNotFoundError
 
         return self.student
+
+    def list_students(self, **kwargs: Any) -> dict[str, Any]:
+        self.list_call = kwargs
+        return {"items": [], "nextCursor": None, "hasMore": False}
 
 
 def make_event(student_id: str) -> dict[str, Any]:
@@ -42,6 +47,49 @@ def make_event(student_id: str) -> dict[str, Any]:
 
 
 TEST_CONTEXT = cast(LambdaContext, object())
+
+
+def make_list_event(raw_query: str = "") -> dict[str, Any]:
+    event = make_event("")
+    event["routeKey"] = "GET /students"
+    event["rawPath"] = "/students"
+    event["rawQueryString"] = raw_query
+    event["requestContext"]["routeKey"] = "GET /students"
+    event["requestContext"]["http"]["path"] = "/students"
+    event["requestContext"]["authorizer"] = {"jwt": {"claims": {"sub": "subject-1"}}}
+    return event
+
+
+def test_list_students_parses_defaults_and_authenticated_subject() -> None:
+    service = FakeStudentService(None)
+    app = APIGatewayHttpResolver()
+    register_student_routes(app, service)
+
+    response = app.resolve(make_list_event(), TEST_CONTEXT)
+
+    assert response["statusCode"] == 200
+    assert service.list_call == {
+        "cognito_sub": "subject-1",
+        "limit": 20,
+        "status": "ACTIVE",
+        "name_prefix": None,
+        "cursor": None,
+    }
+
+
+@pytest.mark.parametrize(
+    "query",
+    ["limit=0", "limit=101", "limit=1.5", "status=active", "unknown=x", "limit=1&limit=2"],
+)
+def test_list_students_rejects_invalid_or_duplicate_parameters(query: str) -> None:
+    service = FakeStudentService(None)
+    app = APIGatewayHttpResolver()
+    register_student_routes(app, service)
+
+    response = app.resolve(make_list_event(query), TEST_CONTEXT)
+
+    assert response["statusCode"] == 400
+    assert json.loads(response["body"])["error"] == "INVALID_REQUEST"
 
 
 def test_get_student_returns_200_without_dynamodb_keys() -> None:
