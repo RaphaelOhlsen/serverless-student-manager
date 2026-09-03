@@ -236,6 +236,33 @@ resource "aws_iam_role_policy_attachment" "terraform_state_dev" {
   policy_arn = aws_iam_policy.terraform_state_dev.arn
 }
 
+data "aws_partition" "current" {}
+
+data "aws_caller_identity" "current" {}
+
+resource "aws_iam_role_policy" "lambda_application_release_dev" {
+  name = "student-manager-dev-lambda-application-release"
+  role = aws_iam_role.github_actions_dev_deployment.name
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid    = "ReleaseDevLambdaApplicationCode"
+      Effect = "Allow"
+      Action = [
+        "lambda:GetAlias",
+        "lambda:GetFunctionConfiguration",
+        "lambda:PublishVersion",
+        "lambda:UpdateAlias",
+        "lambda:UpdateFunctionCode",
+      ]
+      Resource = [
+        "arn:${data.aws_partition.current.partition}:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:serverless-student-manager-dev-students-api",
+        "arn:${data.aws_partition.current.partition}:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:serverless-student-manager-dev-users-api",
+      ]
+    }]
+  })
+}
+
 resource "aws_iam_role_policy_attachment" "terraform_state_prod" {
   role       = aws_iam_role.github_actions_prod_deployment.name
   policy_arn = aws_iam_policy.terraform_state_prod.arn
