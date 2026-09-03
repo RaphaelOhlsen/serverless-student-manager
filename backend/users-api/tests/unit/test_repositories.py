@@ -1,3 +1,4 @@
+from decimal import Decimal
 from typing import Any
 
 from users_api.repositories.cognito_repository import CognitoRepository
@@ -62,3 +63,39 @@ def test_idempotency_repository_uses_conditional_state_changes() -> None:
     )
     assert table.calls[0][1]["ConditionExpression"] == "attribute_not_exists(id)"
     assert table.calls[-1][1]["ConditionExpression"] == "#state = :started"
+
+
+def test_idempotency_repository_normalizes_nested_dynamodb_numbers() -> None:
+    table = FakeTable()
+    table.item = {
+        "id": "record",
+        "response": {
+            "authVersion": Decimal("1"),
+            "values": [
+                Decimal("2"),
+                {
+                    "fraction": Decimal("1.5"),
+                    "nan": Decimal("NaN"),
+                    "infinity": Decimal("Infinity"),
+                },
+            ],
+        },
+    }
+
+    item = IdempotencyRepository(table).get("record")
+
+    assert item is not None
+    response = item["response"]
+    assert isinstance(response, dict)
+    assert response["authVersion"] == 1
+    assert type(response["authVersion"]) is int
+    values = response["values"]
+    assert isinstance(values, list)
+    assert values[0] == 2
+    assert type(values[0]) is int
+    nested = values[1]
+    assert isinstance(nested, dict)
+    assert nested["fraction"] == Decimal("1.5")
+    assert isinstance(nested["fraction"], Decimal)
+    assert isinstance(nested["nan"], Decimal) and nested["nan"].is_nan()
+    assert isinstance(nested["infinity"], Decimal) and nested["infinity"].is_infinite()
