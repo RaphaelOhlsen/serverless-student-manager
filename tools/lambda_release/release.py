@@ -100,13 +100,14 @@ def release(
         raise ReleaseError("artifact does not exist")
 
     code_sha256 = _artifact_code_sha256(artifact)
-    current = run(["lambda", "get-function-configuration", "--function-name", function_name])
-    current_revision = _required_string(current.get("RevisionId"), "function RevisionId")
     alias = run(["lambda", "get-alias", "--function-name", function_name, "--name", "live"])
     alias_revision = _required_string(alias.get("RevisionId"), "alias RevisionId")
     previous_version = _required_string(alias.get("FunctionVersion"), "alias FunctionVersion")
 
     if previous_version == "$LATEST":
+        current = run(["lambda", "get-function-configuration", "--function-name", function_name])
+        current_revision = _required_string(current.get("RevisionId"), "function RevisionId")
+        current_code_sha256 = _required_string(current.get("CodeSha256"), "function CodeSha256")
         baseline = run(
             [
                 "lambda",
@@ -118,6 +119,7 @@ def release(
             ]
         )
         previous_version = _required_string(baseline.get("Version"), "baseline Version")
+        _validate_configuration(baseline, function_name, previous_version, current_code_sha256)
         baseline_alias = run(
             [
                 "lambda",
@@ -134,6 +136,8 @@ def release(
         )
         alias_revision = _required_string(baseline_alias.get("RevisionId"), "alias RevisionId")
 
+    current = run(["lambda", "get-function-configuration", "--function-name", function_name])
+    current_revision = _required_string(current.get("RevisionId"), "function RevisionId")
     updated = run(
         [
             "lambda",

@@ -18,6 +18,7 @@ class FakeAws:
         self.alias_revision = "alias-before"
         self.hash = base64.b64encode(hashlib.sha256(artifact.read_bytes()).digest()).decode()
         self.publishes = 0
+        self.function_revision = "function-before"
 
     def __call__(self, arguments: Sequence[str]) -> dict[str, Any]:
         call = list(arguments)
@@ -28,18 +29,22 @@ class FakeAws:
             return {
                 "FunctionName": FUNCTION,
                 "Version": qualifier,
-                "RevisionId": "function-revision",
+                "RevisionId": self.function_revision,
                 "CodeSha256": self.hash,
                 "LastUpdateStatus": "Successful",
             }
         if operation == "get-alias":
             return {"FunctionVersion": self.version, "RevisionId": self.alias_revision}
         if operation == "update-function-code":
+            assert call[call.index("--revision-id") + 1] == self.function_revision
+            self.function_revision = "updated-revision"
             return {"RevisionId": "updated-revision"}
         if operation == "wait":
             return {}
         if operation == "publish-version":
+            assert call[call.index("--revision-id") + 1] == self.function_revision
             self.publishes += 1
+            self.function_revision = f"function-after-publish-{self.publishes}"
             return {
                 "FunctionName": FUNCTION,
                 "Version": str(4 + self.publishes),
@@ -98,14 +103,62 @@ def test_initial_latest_is_frozen_before_update(tmp_path: Path) -> None:
         run=aws,
         smoke=lambda _method, _url: 401,
     )
-    assert [call[1] for call in aws.calls][:5] == [
-        "get-function-configuration",
+    assert [call[1] for call in aws.calls][:6] == [
         "get-alias",
+        "get-function-configuration",
         "publish-version",
         "update-alias",
+        "get-function-configuration",
         "update-function-code",
     ]
+    update = next(call for call in aws.calls if call[1] == "update-function-code")
+    assert update[update.index("--revision-id") + 1] == "function-after-publish-1"
+    assert "function-before" not in update
     assert result["previous_version"] == "5"
+
+
+def test_numeric_live_uses_current_revision_without_new_baseline(tmp_path: Path) -> None:
+    package = artifact(tmp_path)
+    aws = FakeAws(package, "1")
+    release(
+        api="users-api",
+        function_name=FUNCTION,
+        artifact=package,
+        api_base_url="https://example.test",
+        run=aws,
+        smoke=lambda _method, _url: 401,
+    )
+    assert [call[1] for call in aws.calls[:3]] == [
+        "get-alias",
+        "get-function-configuration",
+        "update-function-code",
+    ]
+    assert aws.publishes == 1
+
+
+def test_refresh_failure_prevents_code_update(tmp_path: Path) -> None:
+    package = artifact(tmp_path)
+    aws = FakeAws(package, "$LATEST")
+    configuration_reads = 0
+
+    def fail_refresh(arguments: Sequence[str]) -> dict[str, Any]:
+        nonlocal configuration_reads
+        if list(arguments)[1] == "get-function-configuration":
+            configuration_reads += 1
+            if configuration_reads == 2:
+                raise ReleaseError("refresh failed")
+        return aws(arguments)
+
+    with pytest.raises(ReleaseError, match="refresh failed"):
+        release(
+            api="users-api",
+            function_name=FUNCTION,
+            artifact=package,
+            api_base_url="https://example.test",
+            run=fail_refresh,
+            smoke=lambda _method, _url: 401,
+        )
+    assert not any(call[1] == "update-function-code" for call in aws.calls)
 
 
 def test_failed_smoke_rolls_back(tmp_path: Path) -> None:
