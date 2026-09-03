@@ -6,19 +6,27 @@ from typing import Any
 
 import pytest
 
-from tools.lambda_release.release import ReleaseError, release
+from tools.lambda_release.release import UPDATE_MAX_ATTEMPTS, ReleaseError, release
 
 FUNCTION = "serverless-student-manager-dev-users-api"
 
 
 class FakeAws:
-    def __init__(self, artifact: Path, previous: str = "4") -> None:
+    def __init__(
+        self,
+        artifact: Path,
+        previous: str = "4",
+        update_statuses: Sequence[str] = ("Successful",),
+    ) -> None:
         self.calls: list[list[str]] = []
         self.version = previous
         self.alias_revision = "alias-before"
         self.hash = base64.b64encode(hashlib.sha256(artifact.read_bytes()).digest()).decode()
         self.publishes = 0
         self.function_revision = "function-before"
+        self.code_updated = False
+        self.update_statuses = list(update_statuses)
+        self.update_status_index = 0
 
     def __call__(self, arguments: Sequence[str]) -> dict[str, Any]:
         call = list(arguments)
@@ -26,21 +34,27 @@ class FakeAws:
         operation = call[1]
         if operation == "get-function-configuration":
             qualifier = call[call.index("--qualifier") + 1] if "--qualifier" in call else "$LATEST"
+            status = "Successful"
+            if self.code_updated:
+                status = self.update_statuses[self.update_status_index]
+                if self.update_status_index < len(self.update_statuses) - 1:
+                    self.update_status_index += 1
             return {
                 "FunctionName": FUNCTION,
                 "Version": qualifier,
                 "RevisionId": self.function_revision,
                 "CodeSha256": self.hash,
-                "LastUpdateStatus": "Successful",
+                "LastUpdateStatus": status,
+                "LastUpdateStatusReason": "unsafe details must not be reported",
+                "LastUpdateStatusReasonCode": "EniLimitExceeded",
             }
         if operation == "get-alias":
             return {"FunctionVersion": self.version, "RevisionId": self.alias_revision}
         if operation == "update-function-code":
             assert call[call.index("--revision-id") + 1] == self.function_revision
             self.function_revision = "updated-revision"
+            self.code_updated = True
             return {"RevisionId": "updated-revision"}
-        if operation == "wait":
-            return {}
         if operation == "publish-version":
             assert call[call.index("--revision-id") + 1] == self.function_revision
             self.publishes += 1
@@ -83,11 +97,9 @@ def test_release_sequence_and_users_smoke(tmp_path: Path) -> None:
     )
     operations = [call[1] for call in aws.calls]
     assert result == {"previous_version": "4", "published_version": "5", "alias_version": "5"}
-    assert (
-        operations.index("wait")
-        < operations.index("publish-version")
-        < operations.index("update-alias")
-    )
+    assert operations.index("get-function-configuration") < operations.index("publish-version")
+    assert "wait" not in operations
+    assert "get-function" not in operations
     assert not any("--qualifier" in call for call in aws.calls)
     assert smoke_calls == [("POST", "https://example.test/users/me/activation")]
 
@@ -134,6 +146,110 @@ def test_numeric_live_uses_current_revision_without_new_baseline(tmp_path: Path)
         "update-function-code",
     ]
     assert aws.publishes == 1
+
+
+def test_update_polling_waits_from_in_progress_to_successful(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    package = artifact(tmp_path)
+    aws = FakeAws(package, "1", ("InProgress", "Successful"))
+    sleeps: list[int] = []
+    monkeypatch.setattr("tools.lambda_release.release.time.sleep", sleeps.append)
+
+    result = release(
+        api="users-api",
+        function_name=FUNCTION,
+        artifact=package,
+        api_base_url="https://example.test",
+        run=aws,
+        smoke=lambda _method, _url: 401,
+    )
+
+    assert result["published_version"] == "5"
+    assert sleeps == [1]
+    assert "wait" not in [call[1] for call in aws.calls]
+    assert "get-function" not in [call[1] for call in aws.calls]
+
+
+def test_update_polling_accepts_immediate_success_without_sleep(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    package = artifact(tmp_path)
+    aws = FakeAws(package, "1")
+    sleeps: list[int] = []
+    monkeypatch.setattr("tools.lambda_release.release.time.sleep", sleeps.append)
+
+    release(
+        api="users-api",
+        function_name=FUNCTION,
+        artifact=package,
+        api_base_url="https://example.test",
+        run=aws,
+        smoke=lambda _method, _url: 401,
+    )
+
+    assert sleeps == []
+
+
+def test_failed_update_aborts_before_publish_and_sanitizes_reason(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    package = artifact(tmp_path)
+    aws = FakeAws(package, "1", ("InProgress", "Failed"))
+    monkeypatch.setattr("tools.lambda_release.release.time.sleep", lambda _seconds: None)
+
+    with pytest.raises(ReleaseError, match=r"Lambda update failed \(EniLimitExceeded\)") as error:
+        release(
+            api="users-api",
+            function_name=FUNCTION,
+            artifact=package,
+            api_base_url="https://example.test",
+            run=aws,
+            smoke=lambda _method, _url: 401,
+        )
+
+    assert "unsafe details" not in str(error.value)
+    assert aws.publishes == 0
+
+
+def test_update_polling_times_out_before_publish(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    package = artifact(tmp_path)
+    aws = FakeAws(package, "1", ("InProgress",))
+    sleeps: list[int] = []
+    monkeypatch.setattr("tools.lambda_release.release.time.sleep", sleeps.append)
+
+    with pytest.raises(ReleaseError, match="Lambda update timed out"):
+        release(
+            api="users-api",
+            function_name=FUNCTION,
+            artifact=package,
+            api_base_url="https://example.test",
+            run=aws,
+            smoke=lambda _method, _url: 401,
+        )
+
+    assert len(sleeps) == UPDATE_MAX_ATTEMPTS - 1
+    assert set(sleeps) == {1}
+    assert aws.publishes == 0
+
+
+def test_update_polling_rejects_unexpected_status_before_publish(tmp_path: Path) -> None:
+    package = artifact(tmp_path)
+    aws = FakeAws(package, "1", ("Pending",))
+
+    with pytest.raises(ReleaseError, match="unexpected status"):
+        release(
+            api="users-api",
+            function_name=FUNCTION,
+            artifact=package,
+            api_base_url="https://example.test",
+            run=aws,
+            smoke=lambda _method, _url: 401,
+        )
+
+    assert aws.publishes == 0
 
 
 def test_refresh_failure_prevents_code_update(tmp_path: Path) -> None:
