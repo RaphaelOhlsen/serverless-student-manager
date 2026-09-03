@@ -17,6 +17,8 @@ SMOKE_TARGETS = {
     "students-api": ("GET", "/students"),
     "users-api": ("POST", "/users/me/activation"),
 }
+UPDATE_POLL_INTERVAL_SECONDS = 1
+UPDATE_MAX_ATTEMPTS = 300
 
 
 class ReleaseError(RuntimeError):
@@ -70,6 +72,38 @@ def _validate_configuration(
         raise ReleaseError("Lambda code hash mismatch")
     if configuration.get("LastUpdateStatus") not in {None, "Successful"}:
         raise ReleaseError("Lambda update is not successful")
+
+
+def _sanitized_update_failure_code(configuration: dict[str, Any]) -> str:
+    reason_code = configuration.get("LastUpdateStatusReasonCode")
+    if (
+        isinstance(reason_code, str)
+        and 0 < len(reason_code) <= 100
+        and all(
+            character.isascii() and (character.isalnum() or character in "._-")
+            for character in reason_code
+        )
+    ):
+        return reason_code
+    return "unspecified"
+
+
+def _wait_for_update(function_name: str, run: CommandRunner) -> dict[str, Any]:
+    for attempt in range(UPDATE_MAX_ATTEMPTS):
+        configuration = run(
+            ["lambda", "get-function-configuration", "--function-name", function_name]
+        )
+        status = configuration.get("LastUpdateStatus")
+        if status == "Successful":
+            return configuration
+        if status == "Failed":
+            reason_code = _sanitized_update_failure_code(configuration)
+            raise ReleaseError(f"Lambda update failed ({reason_code})")
+        if status != "InProgress":
+            raise ReleaseError("Lambda update returned an unexpected status")
+        if attempt < UPDATE_MAX_ATTEMPTS - 1:
+            time.sleep(UPDATE_POLL_INTERVAL_SECONDS)
+    raise ReleaseError("Lambda update timed out")
 
 
 def _smoke_with_retry(api: str, api_base_url: str, smoke: SmokeRunner) -> bool:
@@ -151,8 +185,7 @@ def release(
         ]
     )
     updated_revision = _required_string(updated.get("RevisionId"), "updated RevisionId")
-    run(["lambda", "wait", "function-updated-v2", "--function-name", function_name])
-    latest = run(["lambda", "get-function-configuration", "--function-name", function_name])
+    latest = _wait_for_update(function_name, run)
     _validate_configuration(latest, function_name, "$LATEST", code_sha256)
 
     published = run(
