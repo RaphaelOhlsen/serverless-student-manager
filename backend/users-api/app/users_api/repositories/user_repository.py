@@ -1,7 +1,13 @@
 from decimal import Decimal
 from typing import Any, Protocol
 
+from aws_lambda_powertools import Logger
 from boto3.dynamodb.types import TypeDeserializer, TypeSerializer  # type: ignore[import-untyped]
+from botocore.exceptions import ClientError  # type: ignore[import-untyped]
+
+from users_api.config import SERVICE_NAME
+
+logger = Logger(service=SERVICE_NAME)
 
 
 class DynamoDBClient(Protocol):
@@ -130,10 +136,31 @@ class UserRepository:
                 }
             }
         )
-        self._client.transact_write_items(
-            TransactItems=items,
-            ClientRequestToken=client_request_token,
-        )
+        try:
+            self._client.transact_write_items(
+                TransactItems=items,
+                ClientRequestToken=client_request_token,
+            )
+        except ClientError as error:
+            details: dict[str, object] = {
+                "stage": "activation_transaction",
+                "exceptionClass": type(error).__name__,
+                "operation": error.operation_name,
+                "awsErrorCode": str(error.response.get("Error", {}).get("Code", "")),
+                "awsRequestId": str(
+                    error.response.get("ResponseMetadata", {}).get("RequestId", "")
+                ),
+                "correlationId": correlation_id,
+            }
+            cancellation_reasons = error.response.get("CancellationReasons")
+            if isinstance(cancellation_reasons, list):
+                details["cancellationReasonCodes"] = [
+                    {"index": index, "code": str(reason.get("Code", ""))}
+                    for index, reason in enumerate(cancellation_reasons)
+                    if isinstance(reason, dict)
+                ]
+            logger.error("Activation transaction failed", extra=details)
+            raise
 
     def _get_user_item(self, partition_key: str, sort_key: str) -> dict[str, object] | None:
         response = self._client.get_item(
