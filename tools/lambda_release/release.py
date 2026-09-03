@@ -184,9 +184,10 @@ def release(
             current_revision,
         ]
     )
-    updated_revision = _required_string(updated.get("RevisionId"), "updated RevisionId")
+    _required_string(updated.get("RevisionId"), "updated RevisionId")
     latest = _wait_for_update(function_name, run)
     _validate_configuration(latest, function_name, "$LATEST", code_sha256)
+    publish_revision = _required_string(latest.get("RevisionId"), "post-update RevisionId")
 
     published = run(
         [
@@ -197,7 +198,7 @@ def release(
             "--code-sha256",
             code_sha256,
             "--revision-id",
-            updated_revision,
+            publish_revision,
         ]
     )
     published_version = _required_string(published.get("Version"), "published Version")

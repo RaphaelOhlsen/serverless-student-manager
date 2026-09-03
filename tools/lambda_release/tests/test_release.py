@@ -17,6 +17,7 @@ class FakeAws:
         artifact: Path,
         previous: str = "4",
         update_statuses: Sequence[str] = ("Successful",),
+        successful_revision: str | None = "function-after-update",
     ) -> None:
         self.calls: list[list[str]] = []
         self.version = previous
@@ -27,6 +28,7 @@ class FakeAws:
         self.code_updated = False
         self.update_statuses = list(update_statuses)
         self.update_status_index = 0
+        self.successful_revision = successful_revision
 
     def __call__(self, arguments: Sequence[str]) -> dict[str, Any]:
         call = list(arguments)
@@ -39,7 +41,9 @@ class FakeAws:
                 status = self.update_statuses[self.update_status_index]
                 if self.update_status_index < len(self.update_statuses) - 1:
                     self.update_status_index += 1
-            return {
+                if status == "Successful" and self.successful_revision is not None:
+                    self.function_revision = self.successful_revision
+            configuration = {
                 "FunctionName": FUNCTION,
                 "Version": qualifier,
                 "RevisionId": self.function_revision,
@@ -48,6 +52,9 @@ class FakeAws:
                 "LastUpdateStatusReason": "unsafe details must not be reported",
                 "LastUpdateStatusReasonCode": "EniLimitExceeded",
             }
+            if self.code_updated and status == "Successful" and self.successful_revision is None:
+                configuration.pop("RevisionId")
+            return configuration
         if operation == "get-alias":
             return {"FunctionVersion": self.version, "RevisionId": self.alias_revision}
         if operation == "update-function-code":
@@ -146,6 +153,71 @@ def test_numeric_live_uses_current_revision_without_new_baseline(tmp_path: Path)
         "update-function-code",
     ]
     assert aws.publishes == 1
+
+
+def test_publish_uses_post_update_revision_instead_of_update_revision(tmp_path: Path) -> None:
+    package = artifact(tmp_path)
+    aws = FakeAws(package, "1")
+
+    release(
+        api="users-api",
+        function_name=FUNCTION,
+        artifact=package,
+        api_base_url="https://example.test",
+        run=aws,
+        smoke=lambda _method, _url: 401,
+    )
+
+    update = next(call for call in aws.calls if call[1] == "update-function-code")
+    publish = next(call for call in aws.calls if call[1] == "publish-version")
+    update_revision = update[update.index("--revision-id") + 1]
+    publish_revision = publish[publish.index("--revision-id") + 1]
+    assert update_revision == "function-before"
+    assert publish_revision == "function-after-update"
+    assert publish_revision != update_revision
+
+
+def test_missing_post_update_revision_prevents_publish_and_alias_update(tmp_path: Path) -> None:
+    package = artifact(tmp_path)
+    aws = FakeAws(package, "1", successful_revision=None)
+
+    with pytest.raises(ReleaseError, match="AWS response omitted post-update RevisionId"):
+        release(
+            api="users-api",
+            function_name=FUNCTION,
+            artifact=package,
+            api_base_url="https://example.test",
+            run=aws,
+            smoke=lambda _method, _url: 401,
+        )
+
+    assert "publish-version" not in [call[1] for call in aws.calls]
+    assert "update-alias" not in [call[1] for call in aws.calls]
+
+
+def test_concurrent_change_during_publish_does_not_update_alias(tmp_path: Path) -> None:
+    package = artifact(tmp_path)
+    aws = FakeAws(package, "1")
+
+    def reject_concurrent_publish(arguments: Sequence[str]) -> dict[str, Any]:
+        call = list(arguments)
+        if call[1] == "publish-version":
+            aws.calls.append(call)
+            assert call[call.index("--revision-id") + 1] == "function-after-update"
+            raise ReleaseError("concurrent function change")
+        return aws(arguments)
+
+    with pytest.raises(ReleaseError, match="concurrent function change"):
+        release(
+            api="users-api",
+            function_name=FUNCTION,
+            artifact=package,
+            api_base_url="https://example.test",
+            run=reject_concurrent_publish,
+            smoke=lambda _method, _url: 401,
+        )
+
+    assert "update-alias" not in [call[1] for call in aws.calls]
 
 
 def test_update_polling_waits_from_in_progress_to_successful(
