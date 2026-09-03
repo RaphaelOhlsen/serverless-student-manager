@@ -9,7 +9,7 @@ export class AuthSessionUnavailableError extends Error {
   }
 }
 
-export async function authenticatedGet(path: string): Promise<Response> {
+async function getAccessToken(): Promise<string> {
   let accessToken: string | undefined
 
   try {
@@ -23,12 +23,37 @@ export async function authenticatedGet(path: string): Promise<Response> {
     throw new AuthSessionUnavailableError()
   }
 
+  return accessToken
+}
+
+function apiUrl(path: string): string {
   const baseUrl = env.apiBaseUrl.replace(/\/+$/, '')
 
-  return fetch(`${baseUrl}/${path.replace(/^\/+/, '')}`, {
+  return `${baseUrl}/${path.replace(/^\/+/, '')}`
+}
+
+export async function authenticatedGet(path: string): Promise<Response> {
+  const accessToken = await getAccessToken()
+
+  return fetch(apiUrl(path), {
     method: 'GET',
     headers: {
       Authorization: `Bearer ${accessToken}`,
+    },
+  })
+}
+
+export async function authenticatedPost(
+  path: string,
+  idempotencyKey: string,
+): Promise<Response> {
+  const accessToken = await getAccessToken()
+
+  return fetch(apiUrl(path), {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Idempotency-Key': idempotencyKey,
     },
   })
 }

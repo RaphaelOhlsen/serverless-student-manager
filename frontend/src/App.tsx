@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useState } from 'react'
+import { type FormEvent, useEffect, useRef, useState } from 'react'
 import {
   confirmSignIn,
   getCurrentUser,
@@ -10,6 +10,7 @@ import {
 import { Button } from '@/components/ui/button'
 import {
   authenticatedGet,
+  authenticatedPost,
   AuthSessionUnavailableError,
 } from '@/lib/api'
 
@@ -43,6 +44,14 @@ const API_TEST_TRANSPORT_ERROR =
   'Não foi possível alcançar a API. Verifique a conexão e tente novamente.'
 const API_TEST_UNEXPECTED_STATUS =
   'A API retornou um resultado inesperado para este teste.'
+const ACTIVATION_SUCCESS = 'Acesso ativado com sucesso.'
+const ACTIVATION_INVALID_REQUEST = 'A solicitação de ativação é inválida.'
+const ACTIVATION_AUTH_ERROR = 'Sua sessão ou autenticação não é válida.'
+const ACTIVATION_FORBIDDEN = 'Esta identidade não está autorizada.'
+const ACTIVATION_CONFLICT =
+  'A ativação ainda não é permitida ou o estado é incompatível.'
+const ACTIVATION_TEMPORARY_ERROR =
+  'Não foi possível ativar o acesso agora. Tente novamente.'
 const UNSUPPORTED_STEP_ERROR =
   'Não foi possível concluir o acesso nesta etapa. Tente novamente mais tarde.'
 const AUTHENTICATOR_APP_NAME = 'Serverless Student Manager'
@@ -87,6 +96,13 @@ function App() {
   const [isApiTestLoading, setIsApiTestLoading] = useState(false)
   const [apiTestMessage, setApiTestMessage] = useState<string | null>(null)
   const [isApiTestError, setIsApiTestError] = useState(false)
+  const [isActivationLoading, setIsActivationLoading] = useState(false)
+  const [activationMessage, setActivationMessage] = useState<string | null>(
+    null,
+  )
+  const [isActivationError, setIsActivationError] = useState(false)
+  const activationIdempotencyKey = useRef<string | null>(null)
+  const activationInFlight = useRef(false)
 
   useEffect(() => {
     let isActive = true
@@ -293,6 +309,9 @@ function App() {
       setEmail('')
       setApiTestMessage(null)
       setIsApiTestError(false)
+      setActivationMessage(null)
+      setIsActivationError(false)
+      activationIdempotencyKey.current = null
       setAuthView('sign-in')
     } catch {
       setErrorMessage(GENERIC_SIGN_OUT_ERROR)
@@ -330,6 +349,77 @@ function App() {
       )
     } finally {
       setIsApiTestLoading(false)
+    }
+  }
+
+  async function handleActivation() {
+    if (activationInFlight.current) {
+      return
+    }
+
+    activationInFlight.current = true
+    setActivationMessage(null)
+    setIsActivationError(false)
+    setIsActivationLoading(true)
+
+    const idempotencyKey =
+      activationIdempotencyKey.current ?? crypto.randomUUID()
+    activationIdempotencyKey.current = idempotencyKey
+
+    try {
+      const response = await authenticatedPost(
+        '/users/me/activation',
+        idempotencyKey,
+      )
+
+      if (response.status === 200) {
+        const result: unknown = await response.json()
+
+        if (!isSuccessfulActivation(result)) {
+          setIsActivationError(true)
+          setActivationMessage(ACTIVATION_TEMPORARY_ERROR)
+          return
+        }
+
+        activationIdempotencyKey.current = null
+        setActivationMessage(ACTIVATION_SUCCESS)
+        return
+      }
+
+      setIsActivationError(true)
+
+      if (response.status < 500) {
+        activationIdempotencyKey.current = null
+      }
+
+      switch (response.status) {
+        case 400:
+          setActivationMessage(ACTIVATION_INVALID_REQUEST)
+          break
+        case 401:
+          setActivationMessage(ACTIVATION_AUTH_ERROR)
+          break
+        case 403:
+          setActivationMessage(ACTIVATION_FORBIDDEN)
+          break
+        case 409:
+          setActivationMessage(ACTIVATION_CONFLICT)
+          break
+        default:
+          setActivationMessage(ACTIVATION_TEMPORARY_ERROR)
+      }
+    } catch (error) {
+      setIsActivationError(true)
+
+      if (error instanceof AuthSessionUnavailableError) {
+        activationIdempotencyKey.current = null
+        setActivationMessage(ACTIVATION_AUTH_ERROR)
+      } else {
+        setActivationMessage(ACTIVATION_TEMPORARY_ERROR)
+      }
+    } finally {
+      activationInFlight.current = false
+      setIsActivationLoading(false)
     }
   }
 
@@ -496,11 +586,28 @@ function App() {
             </p>
           ) : null}
 
+          {activationMessage ? (
+            <p
+              className={isActivationError ? 'auth-error' : 'auth-notice'}
+              role={isActivationError ? 'alert' : 'status'}
+            >
+              {activationMessage}
+            </p>
+          ) : null}
+
+          <Button
+            type="button"
+            onClick={handleActivation}
+            disabled={isLoading || isApiTestLoading || isActivationLoading}
+          >
+            {isActivationLoading ? 'Ativando…' : 'Ativar acesso'}
+          </Button>
+
           <Button
             type="button"
             variant="outline"
             onClick={handleProtectedApiTest}
-            disabled={isLoading || isApiTestLoading}
+            disabled={isLoading || isApiTestLoading || isActivationLoading}
           >
             {isApiTestLoading ? 'Testando…' : 'Testar API protegida'}
           </Button>
@@ -508,7 +615,7 @@ function App() {
           <Button
             type="button"
             onClick={handleSignOut}
-            disabled={isLoading || isApiTestLoading}
+            disabled={isLoading || isApiTestLoading || isActivationLoading}
           >
             {isLoading ? 'Saindo…' : 'Sair'}
           </Button>
@@ -587,6 +694,27 @@ function App() {
         </form>
       </section>
     </main>
+  )
+}
+
+function isSuccessfulActivation(value: unknown): value is {
+  userId: string
+  role: 'ADMIN' | 'OPERATOR'
+  status: 'ACTIVE'
+  authVersion: number
+} {
+  if (typeof value !== 'object' || value === null) {
+    return false
+  }
+
+  const activation = value as Record<string, unknown>
+
+  return (
+    typeof activation.userId === 'string' &&
+    (activation.role === 'ADMIN' || activation.role === 'OPERATOR') &&
+    activation.status === 'ACTIVE' &&
+    Number.isInteger(activation.authVersion) &&
+    typeof activation.authVersion === 'number'
   )
 }
 
