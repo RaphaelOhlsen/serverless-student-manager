@@ -1,10 +1,14 @@
+import json
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid5
 
 import pytest
+from aws_lambda_powertools.shared.json_encoder import Encoder
 from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 from users_api.errors import ActivationConflictError, ActivationForbiddenError
+from users_api.repositories.dynamodb_values import normalize_dynamodb_value
 from users_api.services.activation_service import ActivationService
 
 SUB = "11111111-1111-1111-1111-111111111111"
@@ -116,6 +120,12 @@ class ConcurrentCompletionIdempotency(FakeIdempotency):
         raise client_error("ConditionalCheckFailedException", "UpdateItem")
 
 
+class DynamoCompletedIdempotency(FakeIdempotency):
+    def get(self, record_id: str) -> dict[str, object] | None:
+        normalized = normalize_dynamodb_value(super().get(record_id))
+        return normalized if isinstance(normalized, dict) else None
+
+
 def make_service(
     users: FakeUsers | None = None,
     cognito: FakeCognito | None = None,
@@ -199,6 +209,42 @@ def test_completed_replay_returns_preserved_response() -> None:
     second = activate(service)
     assert second == first
     assert len(users.activations) == 1
+
+
+def test_completed_replay_normalizes_persisted_response_without_changing_context() -> None:
+    idempotency = DynamoCompletedIdempotency()
+    service, users, _, _ = make_service(idempotency=idempotency)
+    record = started_record(service)
+    record.update(
+        state="COMPLETED",
+        response={
+            "userId": USER_ID,
+            "role": "ADMIN",
+            "status": "ACTIVE",
+            "authVersion": Decimal("1"),
+        },
+    )
+    record_id = str(record["id"])
+    idempotency.records[record_id] = record
+
+    first_response = {
+        "userId": USER_ID,
+        "role": "ADMIN",
+        "status": "ACTIVE",
+        "authVersion": 1,
+    }
+    replay = activate(service)
+
+    assert replay == first_response
+    assert type(replay["authVersion"]) is int
+    assert type(replay["authVersion"]) is type(first_response["authVersion"])
+    serialized_replay = json.loads(json.dumps(replay, cls=Encoder))
+    assert serialized_replay["authVersion"] == 1
+    assert type(serialized_replay["authVersion"]) is int
+    assert users.activations == []
+    assert record["eventId"] == "44444444-4444-4444-8444-444444444444"
+    assert record["correlationId"] == "original-request"
+    assert record["occurredAt"] == "2026-09-01T10:30:00.000Z"
 
 
 def test_response_lost_reconciles_started_record_without_duplicate_effects() -> None:

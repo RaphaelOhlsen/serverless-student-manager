@@ -1,5 +1,7 @@
 from typing import Any, Protocol
 
+from users_api.repositories.dynamodb_values import normalize_dynamodb_value
+
 
 class IdempotencyTable(Protocol):
     def put_item(self, **kwargs: object) -> dict[str, Any]: ...
@@ -22,7 +24,8 @@ class IdempotencyRepository:
     def get(self, record_id: str) -> dict[str, object] | None:
         response = self._table.get_item(Key={"id": record_id}, ConsistentRead=True)
         item = response.get("Item")
-        return item if isinstance(item, dict) else None
+        normalized = normalize_dynamodb_value(item)
+        return normalized if isinstance(normalized, dict) else None
 
     def complete(
         self,
