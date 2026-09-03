@@ -126,6 +126,25 @@ data "aws_iam_policy_document" "users_api" {
   }
 
   statement {
+    sid    = "UpdateActivationStateInTransaction"
+    effect = "Allow"
+
+    actions = [
+      "dynamodb:UpdateItem",
+    ]
+
+    resources = [
+      module.user_store.table_arn,
+    ]
+
+    condition {
+      test     = "StringEquals"
+      variable = "dynamodb:EnclosingOperation"
+      values   = ["TransactWriteItems"]
+    }
+  }
+
+  statement {
     sid    = "AppendActivationAudit"
     effect = "Allow"
 
@@ -136,6 +155,25 @@ data "aws_iam_policy_document" "users_api" {
     resources = [
       module.audit_store.table_arn,
     ]
+  }
+
+  statement {
+    sid    = "AppendActivationAuditInTransaction"
+    effect = "Allow"
+
+    actions = [
+      "dynamodb:PutItem",
+    ]
+
+    resources = [
+      module.audit_store.table_arn,
+    ]
+
+    condition {
+      test     = "StringEquals"
+      variable = "dynamodb:EnclosingOperation"
+      values   = ["TransactWriteItems"]
+    }
   }
 
   statement {

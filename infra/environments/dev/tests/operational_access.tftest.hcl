@@ -738,8 +738,8 @@ run "plans_user_activation_api_access" {
   command = plan
 
   assert {
-    condition     = length(data.aws_iam_policy_document.users_api.statement) == 4
-    error_message = "The users-api policy must contain exactly four semantic statements."
+    condition     = length(data.aws_iam_policy_document.users_api.statement) == 6
+    error_message = "The users-api policy must contain exactly six semantic statements."
   }
 
   assert {
@@ -783,6 +783,39 @@ run "plans_user_activation_api_access" {
   assert {
     condition = toset(one([
       for statement in data.aws_iam_policy_document.users_api.statement : statement.actions
+      if statement.sid == "UpdateActivationStateInTransaction"
+    ])) == toset(["dynamodb:UpdateItem"])
+    error_message = "The transactional users update statement must contain only UpdateItem."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.users_api.statement : statement.resources
+      if statement.sid == "UpdateActivationStateInTransaction"
+    ])) == toset([module.user_store.table_arn])
+    error_message = "The transactional users update must target only users."
+  }
+
+  assert {
+    condition = length(one([
+      for statement in data.aws_iam_policy_document.users_api.statement : statement.condition
+      if statement.sid == "UpdateActivationStateInTransaction"
+      ])) == 1 && one(one([
+      for statement in data.aws_iam_policy_document.users_api.statement : statement.condition
+      if statement.sid == "UpdateActivationStateInTransaction"
+      ])).test == "StringEquals" && one(one([
+      for statement in data.aws_iam_policy_document.users_api.statement : statement.condition
+      if statement.sid == "UpdateActivationStateInTransaction"
+      ])).variable == "dynamodb:EnclosingOperation" && toset(one(one([
+        for statement in data.aws_iam_policy_document.users_api.statement : statement.condition
+        if statement.sid == "UpdateActivationStateInTransaction"
+    ])).values) == toset(["TransactWriteItems"])
+    error_message = "UpdateItem on users must require EnclosingOperation TransactWriteItems."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.users_api.statement : statement.actions
       if statement.sid == "AppendActivationAudit"
     ])) == toset(["dynamodb:TransactWriteItems"])
     error_message = "The audit statement must contain only TransactWriteItems."
@@ -794,6 +827,51 @@ run "plans_user_activation_api_access" {
       if statement.sid == "AppendActivationAudit"
     ])) == toset([module.audit_store.table_arn])
     error_message = "The activation audit statement must target only audit-events."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.users_api.statement : statement.actions
+      if statement.sid == "AppendActivationAuditInTransaction"
+    ])) == toset(["dynamodb:PutItem"])
+    error_message = "The transactional audit append statement must contain only PutItem."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.users_api.statement : statement.resources
+      if statement.sid == "AppendActivationAuditInTransaction"
+    ])) == toset([module.audit_store.table_arn])
+    error_message = "The transactional audit append must target only audit-events."
+  }
+
+  assert {
+    condition = length(one([
+      for statement in data.aws_iam_policy_document.users_api.statement : statement.condition
+      if statement.sid == "AppendActivationAuditInTransaction"
+      ])) == 1 && one(one([
+      for statement in data.aws_iam_policy_document.users_api.statement : statement.condition
+      if statement.sid == "AppendActivationAuditInTransaction"
+      ])).test == "StringEquals" && one(one([
+      for statement in data.aws_iam_policy_document.users_api.statement : statement.condition
+      if statement.sid == "AppendActivationAuditInTransaction"
+      ])).variable == "dynamodb:EnclosingOperation" && toset(one(one([
+        for statement in data.aws_iam_policy_document.users_api.statement : statement.condition
+        if statement.sid == "AppendActivationAuditInTransaction"
+    ])).values) == toset(["TransactWriteItems"])
+    error_message = "PutItem on audit must require EnclosingOperation TransactWriteItems."
+  }
+
+  assert {
+    condition = alltrue([
+      for statement in data.aws_iam_policy_document.users_api.statement :
+      length(setintersection(
+        toset(statement.actions),
+        toset(["dynamodb:UpdateItem", "dynamodb:PutItem"]),
+      )) == 0 || length(statement.condition) == 1
+      if statement.sid != "ManageActivationIdempotency"
+    ])
+    error_message = "Activation UpdateItem and PutItem grants must not be usable outside TransactWriteItems."
   }
 
   assert {
