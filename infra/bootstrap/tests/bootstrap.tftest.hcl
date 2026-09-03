@@ -1,4 +1,16 @@
-mock_provider "aws" {}
+mock_provider "aws" {
+  mock_data "aws_partition" {
+    defaults = {
+      partition = "aws"
+    }
+  }
+
+  mock_data "aws_caller_identity" {
+    defaults = {
+      account_id = "123456789012"
+    }
+  }
+}
 
 variables {
   aws_region           = "us-east-1"
@@ -134,6 +146,30 @@ run "secure_bootstrap_configuration" {
   assert {
     condition     = length(regexall("actions = \\[\"s3:GetObject\", \"s3:PutObject\", \"s3:DeleteObject\"\\]", file("${path.module}/main.tf"))) == 2
     error_message = "Each lockfile must grant GetObject, PutObject and DeleteObject."
+  }
+
+  assert {
+    condition = toset(jsondecode(aws_iam_role_policy.lambda_application_release_dev.policy).Statement[0].Action) == toset([
+      "lambda:GetAlias",
+      "lambda:GetFunctionConfiguration",
+      "lambda:PublishVersion",
+      "lambda:UpdateAlias",
+      "lambda:UpdateFunctionCode",
+    ])
+    error_message = "The dev release policy must grant only the approved Lambda release actions."
+  }
+
+  assert {
+    condition = (
+      length(jsondecode(aws_iam_role_policy.lambda_application_release_dev.policy).Statement[0].Resource) == 2 &&
+      alltrue([
+        for resource in jsondecode(aws_iam_role_policy.lambda_application_release_dev.policy).Statement[0].Resource :
+        startswith(resource, "arn:aws:lambda:us-east-1:") &&
+        strcontains(resource, ":function:serverless-student-manager-dev-") &&
+        (endswith(resource, "students-api") || endswith(resource, "users-api"))
+      ])
+    )
+    error_message = "The dev release policy must be restricted to the Students and Users Lambda functions."
   }
 
   assert {
