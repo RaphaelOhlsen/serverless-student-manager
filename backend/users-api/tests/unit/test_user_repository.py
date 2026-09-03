@@ -6,6 +6,8 @@ from boto3.dynamodb.types import (  # type: ignore[import-untyped]
     TypeDeserializer,
     TypeSerializer,
 )
+from botocore.exceptions import ClientError  # type: ignore[import-untyped]
+from users_api.repositories import user_repository
 from users_api.repositories.user_repository import UserRepository
 
 
@@ -14,6 +16,7 @@ class FakeClient:
         self.responses: list[dict[str, Any]] = []
         self.get_calls: list[dict[str, object]] = []
         self.transaction: dict[str, object] | None = None
+        self.transaction_error: ClientError | None = None
 
     def get_item(self, **kwargs: object) -> dict[str, Any]:
         self.get_calls.append(kwargs)
@@ -21,6 +24,8 @@ class FakeClient:
 
     def transact_write_items(self, **kwargs: object) -> dict[str, Any]:
         self.transaction = kwargs
+        if self.transaction_error is not None:
+            raise self.transaction_error
         return {}
 
 
@@ -130,3 +135,61 @@ def test_operator_transaction_has_no_admin_counter() -> None:
         item.get("Update", {}).get("UpdateExpression") != "ADD activeAdminCount :one"
         for item in items
     )
+
+
+def test_transaction_error_logging_is_structured_and_sanitized(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = FakeClient()
+    client.transaction_error = ClientError(
+        {
+            "Error": {
+                "Code": "ValidationException",
+                "Message": (
+                    "contains USER#secret, ExpressionAttributeValues, sub-1, "
+                    "admin@example.test, token-secret and 22222222-2222-4222-8222-222222222222"
+                ),
+            },
+            "ResponseMetadata": {"RequestId": "aws-request-1"},
+            "CancellationReasons": [
+                {"Code": "None", "Message": "private"},
+                {"Code": "ValidationError", "Item": {"PK": {"S": "private"}}},
+            ],
+        },
+        "TransactWriteItems",
+    )
+    logged: list[tuple[str, dict[str, object]]] = []
+    monkeypatch.setattr(
+        user_repository.logger,
+        "error",
+        lambda message, *, extra: logged.append((message, extra)),
+    )
+
+    with pytest.raises(ClientError):
+        activate(UserRepository(client, "users", "audit"), client, "ADMIN")
+
+    assert logged == [
+        (
+            "Activation transaction failed",
+            {
+                "stage": "activation_transaction",
+                "exceptionClass": "ClientError",
+                "operation": "TransactWriteItems",
+                "awsErrorCode": "ValidationException",
+                "awsRequestId": "aws-request-1",
+                "correlationId": "request-1",
+                "cancellationReasonCodes": [
+                    {"index": 0, "code": "None"},
+                    {"index": 1, "code": "ValidationError"},
+                ],
+            },
+        )
+    ]
+    rendered = repr(logged)
+    assert "USER#secret" not in rendered
+    assert "ExpressionAttributeValues" not in rendered
+    assert "private" not in rendered
+    assert "sub-1" not in rendered
+    assert "admin@example.test" not in rendered
+    assert "token-secret" not in rendered
+    assert "22222222-2222-4222-8222-222222222222" not in rendered

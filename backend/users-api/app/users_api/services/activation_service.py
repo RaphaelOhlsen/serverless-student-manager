@@ -79,13 +79,24 @@ class ActivationService:
 
         self._validate_cognito(user_id, cognito_sub)
 
+        record_id = self._record_id(user_id, idempotency_key)
+        payload_hash = self._payload_hash(user_id)
+        existing = self._idempotency.get(record_id)
+        if existing is not None:
+            return self._replay(
+                existing=existing,
+                record_id=record_id,
+                payload_hash=payload_hash,
+                cognito_sub=cognito_sub,
+                idempotency_key=idempotency_key,
+                user_id=user_id,
+            )
+
         now = self._clock().astimezone(UTC)
         occurred_at = now.isoformat(timespec="milliseconds").replace("+00:00", "Z")
         correlation_id = request_id or str(self._identifier_factory())
         event_id = str(self._identifier_factory())
         response = self._response(user_id, role, auth_version)
-        record_id = self._record_id(user_id, idempotency_key)
-        payload_hash = self._payload_hash(user_id)
         record = {
             "id": record_id,
             "environment": self._environment,
@@ -109,9 +120,12 @@ class ActivationService:
             if self._error_code(error) != "ConditionalCheckFailedException":
                 raise
             return self._replay(
+                existing=None,
                 record_id=record_id,
                 payload_hash=payload_hash,
                 cognito_sub=cognito_sub,
+                idempotency_key=idempotency_key,
+                user_id=user_id,
             )
 
         if status == "ACTIVE":
@@ -121,6 +135,87 @@ class ActivationService:
                 updated_at=occurred_at,
             )
 
+        return self._activate_and_complete(
+            record_id=record_id,
+            cognito_sub=cognito_sub,
+            user_id=user_id,
+            role=role,
+            auth_version=auth_version,
+            occurred_at=occurred_at,
+            event_id=event_id,
+            correlation_id=correlation_id,
+            audit_expires_at=int((now + timedelta(days=self._audit_retention_days)).timestamp()),
+            response=response,
+        )
+
+    def _replay(
+        self,
+        *,
+        existing: dict[str, object] | None,
+        record_id: str,
+        payload_hash: str,
+        cognito_sub: str,
+        idempotency_key: str,
+        user_id: str,
+    ) -> dict[str, object]:
+        if existing is None:
+            existing = self._idempotency.get(record_id)
+        if existing is None or not self._same_context(
+            existing,
+            record_id=record_id,
+            payload_hash=payload_hash,
+            idempotency_key=idempotency_key,
+            user_id=user_id,
+        ):
+            raise ActivationConflictError
+        if existing.get("state") == "COMPLETED":
+            response = existing.get("response")
+            if not isinstance(response, dict):
+                raise ActivationConflictError
+            return response
+        if existing.get("state") != "STARTED":
+            raise ActivationConflictError
+
+        authorization, profile = self._load_and_reconcile(cognito_sub)
+        user_id = self._required_string(authorization, "userId")
+        role = self._required_string(authorization, "role")
+        auth_version = self._required_int(authorization, "authVersion")
+        response = self._response(user_id, role, auth_version)
+        occurred_at = self._required_string(existing, "occurredAt")
+        if self._both_active(authorization, profile):
+            return self._complete_idempotency(
+                record_id=record_id,
+                response=response,
+                updated_at=occurred_at,
+            )
+
+        return self._activate_and_complete(
+            record_id=record_id,
+            cognito_sub=cognito_sub,
+            user_id=user_id,
+            role=role,
+            auth_version=auth_version,
+            occurred_at=occurred_at,
+            event_id=self._required_string(existing, "eventId"),
+            correlation_id=self._required_string(existing, "correlationId"),
+            audit_expires_at=self._audit_expires_at(occurred_at),
+            response=response,
+        )
+
+    def _activate_and_complete(
+        self,
+        *,
+        record_id: str,
+        cognito_sub: str,
+        user_id: str,
+        role: str,
+        auth_version: int,
+        occurred_at: str,
+        event_id: str,
+        correlation_id: str,
+        audit_expires_at: int,
+        response: dict[str, object],
+    ) -> dict[str, object]:
         try:
             self._users.activate(
                 user_id=user_id,
@@ -130,7 +225,7 @@ class ActivationService:
                 occurred_at=occurred_at,
                 event_id=event_id,
                 correlation_id=correlation_id,
-                expires_at=int((now + timedelta(days=self._audit_retention_days)).timestamp()),
+                expires_at=audit_expires_at,
                 client_request_token=str(uuid5(UUID(int=0), record_id)),
             )
         except ClientError as error:
@@ -149,42 +244,33 @@ class ActivationService:
             updated_at=occurred_at,
         )
 
-    def _replay(
+    def _same_context(
         self,
+        existing: dict[str, object],
         *,
         record_id: str,
         payload_hash: str,
-        cognito_sub: str,
-    ) -> dict[str, object]:
-        existing = self._idempotency.get(record_id)
-        if existing is None or existing.get("payloadHash") != payload_hash:
-            raise ActivationConflictError
-        if existing.get("operation") != "activate-current-user":
-            raise ActivationConflictError
-        if existing.get("state") == "COMPLETED":
-            response = existing.get("response")
-            if not isinstance(response, dict):
-                raise ActivationConflictError
-            return response
-        if existing.get("state") != "STARTED":
-            raise ActivationConflictError
+        idempotency_key: str,
+        user_id: str,
+    ) -> bool:
+        return (
+            existing.get("id") == record_id
+            and existing.get("environment") == self._environment
+            and existing.get("actorId") == user_id
+            and existing.get("target") == user_id
+            and existing.get("operation") == "activate-current-user"
+            and existing.get("idempotencyKey") == idempotency_key
+            and existing.get("payloadHash") == payload_hash
+        )
 
-        authorization, profile = self._load_and_reconcile(cognito_sub)
-        if not self._both_active(authorization, profile):
+    def _audit_expires_at(self, occurred_at: str) -> int:
+        try:
+            timestamp = datetime.fromisoformat(occurred_at.replace("Z", "+00:00"))
+        except ValueError:
+            raise ActivationConflictError from None
+        if timestamp.tzinfo is None or not occurred_at.endswith("Z"):
             raise ActivationConflictError
-        response = self._response(
-            self._required_string(authorization, "userId"),
-            self._required_string(authorization, "role"),
-            self._required_int(authorization, "authVersion"),
-        )
-        updated_at = (
-            self._clock().astimezone(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
-        )
-        return self._complete_idempotency(
-            record_id=record_id,
-            response=response,
-            updated_at=updated_at,
-        )
+        return int((timestamp + timedelta(days=self._audit_retention_days)).timestamp())
 
     def _complete_idempotency(
         self,

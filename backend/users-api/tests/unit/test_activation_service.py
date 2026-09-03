@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid5
 
 import pytest
 from botocore.exceptions import ClientError  # type: ignore[import-untyped]
@@ -144,6 +144,26 @@ def activate(service: ActivationService) -> dict[str, object]:
     )
 
 
+def started_record(service: ActivationService) -> dict[str, object]:
+    record_id = f"HTTP#dev#{USER_ID}#activate-current-user#{KEY}"
+    return {
+        "id": record_id,
+        "environment": "dev",
+        "actorId": USER_ID,
+        "operation": "activate-current-user",
+        "target": USER_ID,
+        "idempotencyKey": KEY,
+        "payloadHash": service._payload_hash(USER_ID),
+        "state": "STARTED",
+        "eventId": "44444444-4444-4444-8444-444444444444",
+        "correlationId": "original-request",
+        "occurredAt": "2026-09-01T10:30:00.000Z",
+        "createdAt": "2026-09-01T10:30:00.000Z",
+        "updatedAt": "2026-09-01T10:30:00.000Z",
+        "expiration": 1798626600,
+    }
+
+
 @pytest.mark.parametrize("role", ["ADMIN", "OPERATOR"])
 def test_invited_user_is_activated_for_allowed_roles(role: str) -> None:
     service, users, _, idempotency = make_service(FakeUsers(role=role))
@@ -202,17 +222,78 @@ def test_concurrent_transaction_loser_returns_active_without_second_effect() -> 
     assert len(users.activations) == 1
 
 
-def test_started_replay_while_still_invited_conflicts() -> None:
-    service, _, _, idempotency = make_service()
-    record_id = f"HTTP#dev#{USER_ID}#activate-current-user#{KEY}"
-    idempotency.records[record_id] = {
-        "id": record_id,
-        "operation": "activate-current-user",
-        "payloadHash": service._payload_hash(USER_ID),
-        "state": "STARTED",
-    }
+def test_started_invited_replay_resumes_with_preserved_context() -> None:
+    service, users, _, idempotency = make_service()
+    generated_ids: list[UUID] = []
+
+    def generate_id() -> UUID:
+        value = UUID("55555555-5555-4555-8555-555555555555")
+        generated_ids.append(value)
+        return value
+
+    service._identifier_factory = generate_id
+    record = started_record(service)
+    record_id = str(record["id"])
+    idempotency.records[record_id] = record
+
+    assert activate(service)["status"] == "ACTIVE"
+
+    assert len(idempotency.records) == 1
+    assert generated_ids == []
+    assert len(users.activations) == 1
+    transaction = users.activations[0]
+    assert transaction["event_id"] == record["eventId"]
+    assert transaction["correlation_id"] == record["correlationId"]
+    assert transaction["occurred_at"] == record["occurredAt"]
+    assert transaction["expires_at"] == 1796034600
+    assert transaction["client_request_token"] == str(uuid5(UUID(int=0), record_id))
+    assert idempotency.records[record_id]["state"] == "COMPLETED"
+    assert idempotency.records[record_id]["updatedAt"] == record["occurredAt"]
+
+
+def test_started_active_replay_completes_without_duplicate_effects() -> None:
+    service, users, _, idempotency = make_service(FakeUsers(status="ACTIVE"))
+    record = started_record(service)
+    idempotency.records[str(record["id"])] = record
+
+    assert activate(service)["status"] == "ACTIVE"
+    assert users.activations == []
+    assert record["state"] == "COMPLETED"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("environment", "prod"),
+        ("actorId", "other"),
+        ("target", "other"),
+        ("operation", "other"),
+        ("idempotencyKey", "55555555-5555-4555-8555-555555555555"),
+        ("payloadHash", "different"),
+    ],
+)
+def test_started_replay_rejects_incompatible_context(field: str, value: object) -> None:
+    service, users, _, idempotency = make_service()
+    record = started_record(service)
+    record[field] = value
+    idempotency.records[str(record["id"])] = record
+
     with pytest.raises(ActivationConflictError):
         activate(service)
+    assert users.activations == []
+
+
+def test_started_replay_rejects_incoherent_application_state() -> None:
+    users = FakeUsers()
+    assert users.profile is not None
+    users.profile["status"] = "ACTIVE"
+    service, users, _, idempotency = make_service(users)
+    record = started_record(service)
+    idempotency.records[str(record["id"])] = record
+
+    with pytest.raises(ActivationForbiddenError):
+        activate(service)
+    assert users.activations == []
 
 
 def test_incompatible_idempotency_context_conflicts() -> None:

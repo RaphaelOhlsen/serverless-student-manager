@@ -4,6 +4,7 @@ from typing import Any, cast
 import pytest
 from aws_lambda_powertools.event_handler import APIGatewayHttpResolver
 from aws_lambda_powertools.utilities.typing import LambdaContext
+from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 from users_api.app import lambda_handler
 from users_api.errors import ActivationConflictError, ActivationForbiddenError
 from users_api.routes import activation
@@ -128,6 +129,22 @@ def test_domain_and_unexpected_errors_are_sanitized(error: Exception, status: in
     response = resolve(FakeService(error), event())
     assert response["statusCode"] == status
     assert "sensitive" not in response["body"]
+
+
+def test_dynamodb_client_error_remains_generic_http_500() -> None:
+    error = ClientError(
+        {
+            "Error": {"Code": "ValidationException", "Message": "sensitive details"},
+            "ResponseMetadata": {"RequestId": "aws-request-1"},
+        },
+        "TransactWriteItems",
+    )
+    response = resolve(FakeService(error), event())
+    assert response["statusCode"] == 500
+    assert json.loads(response["body"]) == {
+        "error": "INTERNAL_ERROR",
+        "message": "Unexpected internal error",
+    }
 
 
 def test_lambda_handler_routes_activation(monkeypatch: pytest.MonkeyPatch) -> None:
