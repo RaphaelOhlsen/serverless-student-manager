@@ -34,7 +34,8 @@
 5. JWT Authorizer valida o JWT.
 6. Lambda valida `token_use=access`.
 7. Lambda consulta `COGNITO#<sub>` em `users`.
-8. Lambda aplica role/status atuais e regra de negócio.
+8. Para self-profile, Lambda reconcilia AUTHORIZATION e PROFILE; para operações
+   de negócio, aplica role/status atuais e exige `ACTIVE`.
 9. Escritas usam idempotência.
 10. DynamoDB persiste negócio e auditoria quando possível na mesma transação.
 11. Logs e métricas vão para CloudWatch.
@@ -60,3 +61,4 @@
 - ADR-022: acesso operacional usa GitHub Actions OIDC com roles separadas por capacidade e ambiente, independentes das roles de deploy.
 - ADR-024: o bootstrap inicial usa protocolo determinístico, marker singleton permanente e transação de cinco itens; `resume-first-admin-invitation` retoma somente o onboarding do mesmo Admin `INVITED` reconciliado.
 - ADR-025: futuras criações do primeiro Admin definem `email_verified=true` com `ForceAliasCreation=false`; a identidade histórica é corrigida somente pela operação separada `verify-first-admin-email`, preservando `userId`, `Username`, `sub`, senha temporária e MFA.
+- ADR-029: `GET /users/me` resolve o próprio perfil por AUTHORIZATION + PROFILE; somente essa leitura e a ativação aceitam `INVITED`, enquanto operações de negócio exigem `ACTIVE`.

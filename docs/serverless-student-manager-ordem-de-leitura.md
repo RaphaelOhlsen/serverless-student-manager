@@ -47,30 +47,31 @@ Antes de qualquer implementação, o Codex deve ler `../AGENTS.md`.
 33. `decisions/adr/adr-026-students-list-contract-and-physical-modeling.md` — Approved
 34. `decisions/adr/adr-027-user-activation-after-first-sign-in.md` — Approved
 35. `decisions/adr/adr-028-lambda-application-release-via-github-actions.md` — Approved
+36. `decisions/adr/adr-029-self-profile-resolution.md` — Approved
 
 ## 4. Arquitetura consolidada
 
-36. `architecture/architecture-overview.md`
-37. `architecture/data-model.md`
-38. `architecture/security.md`
-39. `architecture/deployment-and-cicd.md`
-40. `architecture/observability.md`
-41. `architecture/diagrams.md`
+37. `architecture/architecture-overview.md`
+38. `architecture/data-model.md`
+39. `architecture/security.md`
+40. `architecture/deployment-and-cicd.md`
+41. `architecture/observability.md`
+42. `architecture/diagrams.md`
 
 ## 5. Operação
 
-42. `operations/cognito-dynamodb-compensation.md`
-43. `operations/non-http-idempotency.md`
-44. `operations/first-admin-email-verification.md`
-45. `operations/first-admin-invitation-resume.md`
-46. `operations/sole-admin-mfa-recovery.md`
-47. `operations/rollback-strategy.md`
+43. `operations/cognito-dynamodb-compensation.md`
+44. `operations/non-http-idempotency.md`
+45. `operations/first-admin-email-verification.md`
+46. `operations/first-admin-invitation-resume.md`
+47. `operations/sole-admin-mfa-recovery.md`
+48. `operations/rollback-strategy.md`
 
 ## 6. Apoio e auditoria
 
-48. `references.md`
-49. `AUDIT-REPORT.md`
-50. `MANIFEST.md`
+49. `references.md`
+50. `AUDIT-REPORT.md`
+51. `MANIFEST.md`
 
 ## Leitura rápida para orientação
 

@@ -2,7 +2,7 @@
 
 **Projeto:** Serverless Student Manager  
 **Versão:** 2.8 — Engineering Ready
-**Data:** 2026-08-28
+**Data:** 2026-09-04
 **Status:** Canônica — engenharia em andamento
 
 ## Escopo desta versão
@@ -10,7 +10,7 @@
 Esta versão consolida:
 
 - SRS v1.2 com MFA e rastreabilidade atualizados;
-- ADR-001 a ADR-026 aprovadas;
+- ADR-001 a ADR-029 aprovadas;
 - modelos físicos de dados;
 - autenticação, autorização e MFA;
 - bootstrap do primeiro Administrador;
@@ -40,6 +40,9 @@ Esta versão consolida:
 7. A capacidade OIDC dedicada em `dev` possui CLI, workflow e Terraform declarativo implementados no repositório; role/policy, GitHub Environment e variables ainda dependem de provisionamento e configuração.
 8. O login exclusivo por e-mail no frontend permanece bloqueado até a reconciliação histórica e a validação read-only da prontidão do alias.
 9. ADR-026 aprovada — contrato HTTP, autorização funcional, índices e cursor v1 para `GET /students`.
+10. ADR-027 aprovada — ativação autenticada e idempotente após o primeiro login.
+11. ADR-028 aprovada — releases de código Lambda pelo GitHub Actions e alias `live`.
+12. ADR-029 aprovada — `GET /users/me` resolve canonicamente o próprio perfil e limita a exceção `INVITED` às rotas de self-profile e ativação.
 
 ## Estado de implementação desta baseline
 
