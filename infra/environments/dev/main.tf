@@ -63,6 +63,99 @@ data "aws_iam_policy_document" "students_api" {
       "${module.student_store.table_arn}/index/${module.student_store.gsi_all_name}",
     ]
   }
+
+  statement {
+    sid    = "TransactStudentCreation"
+    effect = "Allow"
+
+    actions = [
+      "dynamodb:TransactWriteItems",
+    ]
+
+    resources = [
+      module.student_store.table_arn,
+    ]
+  }
+
+  statement {
+    sid    = "PutStudentCreationInTransaction"
+    effect = "Allow"
+
+    actions = [
+      "dynamodb:PutItem",
+    ]
+
+    resources = [
+      module.student_store.table_arn,
+    ]
+
+    condition {
+      test     = "StringEquals"
+      variable = "dynamodb:EnclosingOperation"
+      values   = ["TransactWriteItems"]
+    }
+  }
+
+  statement {
+    sid    = "TransactStudentCreationAudit"
+    effect = "Allow"
+
+    actions = [
+      "dynamodb:TransactWriteItems",
+    ]
+
+    resources = [
+      module.audit_store.table_arn,
+    ]
+  }
+
+  statement {
+    sid    = "PutStudentCreationAuditInTransaction"
+    effect = "Allow"
+
+    actions = [
+      "dynamodb:PutItem",
+    ]
+
+    resources = [
+      module.audit_store.table_arn,
+    ]
+
+    condition {
+      test     = "StringEquals"
+      variable = "dynamodb:EnclosingOperation"
+      values   = ["TransactWriteItems"]
+    }
+  }
+
+  statement {
+    sid    = "ReadStudentCreationAuditReconciliation"
+    effect = "Allow"
+
+    actions = [
+      "dynamodb:GetItem",
+    ]
+
+    resources = [
+      module.audit_store.table_arn,
+    ]
+  }
+
+  statement {
+    sid    = "ManageStudentCreationIdempotency"
+    effect = "Allow"
+
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:PutItem",
+      "dynamodb:UpdateItem",
+      "dynamodb:DeleteItem",
+    ]
+
+    resources = [
+      module.idempotency_store.table_arn,
+    ]
+  }
 }
 
 module "students_api" {
@@ -86,6 +179,10 @@ module "students_api" {
   data_classification = "confidential"
 
   environment_variables = {
+    AUDIT_RETENTION_DAYS         = "90"
+    AUDIT_TABLE_NAME             = module.audit_store.table_name
+    ENVIRONMENT                  = local.environment
+    IDEMPOTENCY_TABLE_NAME       = module.idempotency_store.table_name
     POWERTOOLS_SERVICE_NAME      = "students-api"
     POWERTOOLS_METRICS_NAMESPACE = "ServerlessStudentManager"
     POWERTOOLS_LOG_LEVEL         = "DEBUG"
@@ -280,6 +377,12 @@ module "http_api" {
 
     list_students = {
       route_key          = "GET /students"
+      integration_key    = "students"
+      authorization_type = "JWT"
+    }
+
+    create_student = {
+      route_key          = "POST /students"
       integration_key    = "students"
       authorization_type = "JWT"
     }

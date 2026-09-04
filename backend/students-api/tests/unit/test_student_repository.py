@@ -1,5 +1,6 @@
 from typing import Any
 
+from boto3.dynamodb.types import TypeDeserializer  # type: ignore[import-untyped]
 from students_api.repositories.student_repository import StudentRepository
 
 
@@ -10,13 +11,31 @@ class FakeDynamoDBTable:
         self.query_response: dict[str, Any] = {}
         self.query_call: dict[str, Any] | None = None
 
-    def get_item(self, *, Key: dict[str, str]) -> dict[str, Any]:
-        self.last_key = Key
+    def get_item(self, **kwargs: Any) -> dict[str, Any]:
+        self.last_key = kwargs["Key"]
         return self.response
 
     def query(self, **kwargs: Any) -> dict[str, Any]:
         self.query_call = kwargs
         return self.query_response
+
+
+class FakeDynamoDBClient:
+    def __init__(self) -> None:
+        self.transaction: dict[str, Any] | None = None
+        self.get_calls: list[dict[str, Any]] = []
+        self.items: dict[tuple[str, str, str], dict[str, Any]] = {}
+
+    def transact_write_items(self, **kwargs: Any) -> dict[str, Any]:
+        self.transaction = kwargs
+        return {}
+
+    def get_item(self, **kwargs: Any) -> dict[str, Any]:
+        self.get_calls.append(kwargs)
+        deserializer = TypeDeserializer()
+        key = {name: deserializer.deserialize(value) for name, value in kwargs["Key"].items()}
+        item = self.items.get((kwargs["TableName"], key["PK"], key["SK"]))
+        return {"Item": item} if item is not None else {}
 
 
 def test_get_by_id_uses_student_profile_key() -> None:
@@ -105,3 +124,74 @@ def test_list_all_students_queries_all_index_without_scan() -> None:
     assert "ExclusiveStartKey" not in table.query_call
     assert page.items == []
     assert page.next_position is None
+
+
+def test_create_student_writes_four_conditioned_items_in_fixed_order() -> None:
+    client = FakeDynamoDBClient()
+    repository = StudentRepository(
+        FakeDynamoDBTable({}),
+        client=client,
+        students_table_name="Students",
+        audit_table_name="Audit",
+    )
+    profile: dict[str, object] = {"PK": "STUDENT#1", "SK": "PROFILE", "version": 1}
+    registration: dict[str, object] = {
+        "PK": "UNIQUE#REGISTRATION#MAT-1",
+        "SK": "UNIQUE",
+        "studentId": "1",
+    }
+    email: dict[str, object] = {
+        "PK": "UNIQUE#EMAIL#a@example.com",
+        "SK": "UNIQUE",
+        "studentId": "1",
+    }
+    audit: dict[str, object] = {
+        "PK": "RESOURCE#STUDENT#1",
+        "SK": "TS#now#EVENT#1",
+        "correlationId": "r",
+    }
+
+    repository.create_student(
+        profile=profile,
+        registration=registration,
+        email=email,
+        audit=audit,
+        client_request_token="11111111-1111-4111-8111-111111111111",
+    )
+
+    assert client.transaction is not None
+    assert client.transaction["ClientRequestToken"] == "11111111-1111-4111-8111-111111111111"
+    puts = [item["Put"] for item in client.transaction["TransactItems"]]
+    assert [put["TableName"] for put in puts] == ["Students", "Students", "Students", "Audit"]
+    assert all(
+        put["ConditionExpression"] == "attribute_not_exists(PK) AND attribute_not_exists(SK)"
+        for put in puts
+    )
+    deserializer = TypeDeserializer()
+    assert [
+        {name: deserializer.deserialize(value) for name, value in put["Item"].items()}["PK"]
+        for put in puts
+    ] == [profile["PK"], registration["PK"], email["PK"], audit["PK"]]
+
+
+def test_reconciliation_reads_are_consistent_and_use_exact_tables() -> None:
+    client = FakeDynamoDBClient()
+    repository = StudentRepository(
+        FakeDynamoDBTable({}),
+        client=client,
+        students_table_name="Students",
+        audit_table_name="Audit",
+    )
+
+    assert repository.get_profile_consistent("1") is None
+    assert repository.get_registration_reservation("MAT-1") is None
+    assert repository.get_email_reservation("a@example.com") is None
+    assert repository.get_audit_event("RESOURCE#STUDENT#1", "TS#now#EVENT#1") is None
+
+    assert [call["TableName"] for call in client.get_calls] == [
+        "Students",
+        "Students",
+        "Students",
+        "Audit",
+    ]
+    assert all(call["ConsistentRead"] is True for call in client.get_calls)
