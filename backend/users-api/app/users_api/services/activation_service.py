@@ -8,13 +8,14 @@ from uuid import UUID, uuid4, uuid5
 from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 
 from users_api.errors import ActivationConflictError, ActivationForbiddenError
+from users_api.services.user_state import (
+    UserStateReconciliationError,
+    UserStateRepositoryProtocol,
+    reconcile_user_state,
+)
 
 
-class UserRepositoryProtocol(Protocol):
-    def get_authorization(self, cognito_sub: str) -> dict[str, object] | None: ...
-
-    def get_profile(self, user_id: str) -> dict[str, object] | None: ...
-
+class UserRepositoryProtocol(UserStateRepositoryProtocol, Protocol):
     def activate(
         self,
         *,
@@ -301,35 +302,30 @@ class ActivationService:
             return preserved
 
     def _load_and_reconcile(self, cognito_sub: str) -> tuple[dict[str, object], dict[str, object]]:
-        authorization = self._users.get_authorization(cognito_sub)
-        if authorization is None:
-            raise ActivationForbiddenError
-        user_id = self._required_string(authorization, "userId")
-        profile = self._users.get_profile(user_id)
-        if profile is None:
-            raise ActivationForbiddenError
-
         try:
-            role = self._required_string(authorization, "role")
-            status = self._required_string(authorization, "status")
-            auth_version = self._required_int(authorization, "authVersion")
-            if role not in {"ADMIN", "OPERATOR"}:
-                raise ActivationForbiddenError
-            if status not in {"INVITED", "ACTIVE"}:
-                raise ActivationConflictError
-            if self._required_string(profile, "userId") != user_id:
-                raise ActivationForbiddenError
-            if self._required_string(profile, "cognitoSub") != cognito_sub:
-                raise ActivationForbiddenError
-            if self._required_string(profile, "role") != role:
-                raise ActivationForbiddenError
-            if self._required_string(profile, "status") != status:
-                raise ActivationForbiddenError
-            if self._required_int(profile, "authVersion") != auth_version:
-                raise ActivationForbiddenError
-        except (KeyError, TypeError):
+            state = reconcile_user_state(
+                self._users,
+                cognito_sub,
+                self._validate_activation_authorization,
+            )
+        except UserStateReconciliationError:
             raise ActivationForbiddenError from None
-        return authorization, profile
+        return (
+            {
+                "userId": state.user_id,
+                "role": state.role,
+                "status": state.status,
+                "authVersion": state.auth_version,
+            },
+            state.profile,
+        )
+
+    @staticmethod
+    def _validate_activation_authorization(role: str, status: str, auth_version: int) -> None:
+        if role not in {"ADMIN", "OPERATOR"}:
+            raise ActivationForbiddenError
+        if status not in {"INVITED", "ACTIVE"}:
+            raise ActivationConflictError
 
     def _validate_cognito(self, user_id: str, cognito_sub: str) -> None:
         try:

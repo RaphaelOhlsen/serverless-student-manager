@@ -9,7 +9,9 @@ from aws_lambda_powertools.shared.json_encoder import Encoder
 from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 from users_api.errors import ActivationConflictError, ActivationForbiddenError
 from users_api.repositories.dynamodb_values import normalize_dynamodb_value
+from users_api.services import activation_service
 from users_api.services.activation_service import ActivationService
+from users_api.services.user_state import reconcile_user_state
 
 SUB = "11111111-1111-1111-1111-111111111111"
 USER_ID = "01JUSER0000000000000000000"
@@ -152,6 +154,24 @@ def activate(service: ActivationService) -> dict[str, object]:
         idempotency_key=KEY,
         request_id="request-123",
     )
+
+
+def test_uses_shared_user_state_reconciliation(monkeypatch: pytest.MonkeyPatch) -> None:
+    reconciled_subjects: list[str] = []
+
+    def reconcile(
+        users: Any,
+        cognito_sub: str,
+        authorization_validator: Any = None,
+    ) -> Any:
+        reconciled_subjects.append(cognito_sub)
+        return reconcile_user_state(users, cognito_sub, authorization_validator)
+
+    monkeypatch.setattr(activation_service, "reconcile_user_state", reconcile)
+    service, _, _, _ = make_service(FakeUsers(status="ACTIVE"))
+
+    assert activate(service)["status"] == "ACTIVE"
+    assert reconciled_subjects == [SUB]
 
 
 def started_record(service: ActivationService) -> dict[str, object]:

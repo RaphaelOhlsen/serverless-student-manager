@@ -289,6 +289,12 @@ module "http_api" {
       integration_key    = "users"
       authorization_type = "JWT"
     }
+
+    get_current_user = {
+      route_key          = "GET /users/me"
+      integration_key    = "users"
+      authorization_type = "JWT"
+    }
   }
 
   component           = "http-api"
