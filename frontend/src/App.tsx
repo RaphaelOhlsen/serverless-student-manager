@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useRef, useState } from 'react'
+import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react'
 import {
   confirmSignIn,
   getCurrentUser,
@@ -9,9 +9,12 @@ import {
 
 import { Button } from '@/components/ui/button'
 import {
-  authenticatedGet,
   authenticatedPost,
   AuthSessionUnavailableError,
+  fetchCurrentUserProfile,
+  fetchStudents,
+  type StudentSummary,
+  type UserProfile,
 } from '@/lib/api'
 
 import './App.css'
@@ -23,7 +26,9 @@ type AuthView =
   | 'mfa-setup-selection'
   | 'totp-setup'
   | 'totp-challenge'
-  | 'authenticated'
+  | 'profile-resolution'
+  | 'activation'
+  | 'operational'
   | 'unsupported-step'
 
 const GENERIC_SIGN_IN_ERROR =
@@ -36,14 +41,10 @@ const GENERIC_SESSION_ERROR =
   'Não foi possível verificar sua sessão. Entre novamente.'
 const GENERIC_SIGN_OUT_ERROR =
   'Não foi possível sair. Tente novamente.'
-const API_TEST_SUCCESS =
-  'Integração autenticada confirmada: o aluno de teste não existe.'
-const API_TEST_AUTH_ERROR =
-  'Não foi possível autorizar a chamada à API protegida.'
-const API_TEST_TRANSPORT_ERROR =
-  'Não foi possível alcançar a API. Verifique a conexão e tente novamente.'
-const API_TEST_UNEXPECTED_STATUS =
-  'A API retornou um resultado inesperado para este teste.'
+const PROFILE_RESOLUTION_ERROR =
+  'Não foi possível carregar seu perfil. Tente novamente.'
+const STUDENTS_LOAD_ERROR =
+  'Não foi possível carregar os alunos. Tente novamente.'
 const ACTIVATION_SUCCESS = 'Acesso ativado com sucesso.'
 const ACTIVATION_INVALID_REQUEST = 'A solicitação de ativação é inválida.'
 const ACTIVATION_AUTH_ERROR = 'Sua sessão ou autenticação não é válida.'
@@ -69,11 +70,6 @@ const nextStageContent: Partial<
     title: 'Preparando o autenticador',
     description: 'Aguarde enquanto o método de segurança é preparado.',
   },
-  authenticated: {
-    eyebrow: 'Acesso confirmado',
-    title: 'Autenticação concluída',
-    description: 'Sua identidade foi autenticada com sucesso.',
-  },
   'unsupported-step': {
     eyebrow: 'Acesso não concluído',
     title: 'Não foi possível continuar',
@@ -93,9 +89,12 @@ function App() {
   const [copyConfirmation, setCopyConfirmation] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
-  const [isApiTestLoading, setIsApiTestLoading] = useState(false)
-  const [apiTestMessage, setApiTestMessage] = useState<string | null>(null)
-  const [isApiTestError, setIsApiTestError] = useState(false)
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
+  const [isProfileLoading, setIsProfileLoading] = useState(false)
+  const [profileError, setProfileError] = useState<string | null>(null)
+  const [students, setStudents] = useState<StudentSummary[]>([])
+  const [isStudentsLoading, setIsStudentsLoading] = useState(false)
+  const [studentsError, setStudentsError] = useState<string | null>(null)
   const [isActivationLoading, setIsActivationLoading] = useState(false)
   const [activationMessage, setActivationMessage] = useState<string | null>(
     null,
@@ -103,6 +102,51 @@ function App() {
   const [isActivationError, setIsActivationError] = useState(false)
   const activationIdempotencyKey = useRef<string | null>(null)
   const activationInFlight = useRef(false)
+
+  const loadStudents = useCallback(async () => {
+    setStudentsError(null)
+    setIsStudentsLoading(true)
+
+    try {
+      const page = await fetchStudents()
+      setStudents(page.items)
+    } catch {
+      setStudentsError(STUDENTS_LOAD_ERROR)
+    } finally {
+      setIsStudentsLoading(false)
+    }
+  }, [])
+
+  const resolveCurrentUser = useCallback(async (
+    isCurrent: () => boolean = () => true,
+  ) => {
+    setAuthView('profile-resolution')
+    setProfileError(null)
+    setIsProfileLoading(true)
+
+    try {
+      const profile = await fetchCurrentUserProfile()
+      if (!isCurrent()) {
+        return
+      }
+
+      setUserProfile(profile)
+      if (profile.status === 'INVITED') {
+        setAuthView('activation')
+      } else {
+        setAuthView('operational')
+        await loadStudents()
+      }
+    } catch {
+      if (isCurrent()) {
+        setProfileError(PROFILE_RESOLUTION_ERROR)
+      }
+    } finally {
+      if (isCurrent()) {
+        setIsProfileLoading(false)
+      }
+    }
+  }, [loadStudents])
 
   useEffect(() => {
     let isActive = true
@@ -112,7 +156,7 @@ function App() {
         await getCurrentUser()
 
         if (isActive) {
-          setAuthView('authenticated')
+          await resolveCurrentUser(() => isActive)
         }
       } catch (error) {
         if (!isActive) {
@@ -133,7 +177,7 @@ function App() {
     return () => {
       isActive = false
     }
-  }, [])
+  }, [resolveCurrentUser])
 
   function clearPasswords() {
     setPassword('')
@@ -201,7 +245,7 @@ function App() {
         clearPasswords()
         clearTotpData()
         setEmail('')
-        setAuthView('authenticated')
+        await resolveCurrentUser()
         break
       default:
         transitionToUnsupportedStep()
@@ -307,8 +351,10 @@ function App() {
       clearPasswords()
       clearTotpData()
       setEmail('')
-      setApiTestMessage(null)
-      setIsApiTestError(false)
+      setUserProfile(null)
+      setProfileError(null)
+      setStudents([])
+      setStudentsError(null)
       setActivationMessage(null)
       setIsActivationError(false)
       activationIdempotencyKey.current = null
@@ -317,38 +363,6 @@ function App() {
       setErrorMessage(GENERIC_SIGN_OUT_ERROR)
     } finally {
       setIsLoading(false)
-    }
-  }
-
-  async function handleProtectedApiTest() {
-    setApiTestMessage(null)
-    setIsApiTestError(false)
-    setIsApiTestLoading(true)
-
-    try {
-      const studentId = crypto.randomUUID()
-      const response = await authenticatedGet(`/students/${studentId}`)
-
-      if (response.status === 404) {
-        setApiTestMessage(API_TEST_SUCCESS)
-        return
-      }
-
-      setIsApiTestError(true)
-      setApiTestMessage(
-        response.status === 401 || response.status === 403
-          ? API_TEST_AUTH_ERROR
-          : API_TEST_UNEXPECTED_STATUS,
-      )
-    } catch (error) {
-      setIsApiTestError(true)
-      setApiTestMessage(
-        error instanceof AuthSessionUnavailableError
-          ? API_TEST_AUTH_ERROR
-          : API_TEST_TRANSPORT_ERROR,
-      )
-    } finally {
-      setIsApiTestLoading(false)
     }
   }
 
@@ -382,7 +396,19 @@ function App() {
         }
 
         activationIdempotencyKey.current = null
+        setUserProfile((current) =>
+          current
+            ? {
+                ...current,
+                role: result.role,
+                status: 'ACTIVE',
+                authVersion: result.authVersion,
+              }
+            : current,
+        )
         setActivationMessage(ACTIVATION_SUCCESS)
+        setAuthView('operational')
+        await loadStudents()
         return
       }
 
@@ -559,32 +585,58 @@ function App() {
     )
   }
 
-  if (authView === 'authenticated') {
+  if (authView === 'profile-resolution') {
     return (
       <main className="auth-page">
-        <section className="auth-card" aria-labelledby="authenticated-title">
+        <section className="auth-card" aria-labelledby="profile-title">
           <div className="auth-heading">
             <p className="auth-eyebrow">Acesso confirmado</p>
-            <h1 id="authenticated-title">Autenticação concluída</h1>
+            <h1 id="profile-title">Carregando seu perfil</h1>
             <p className="auth-description">
-              Sua identidade foi autenticada com sucesso.
+              Aguarde enquanto verificamos seu estado de acesso.
             </p>
           </div>
 
-          {errorMessage ? (
+          {profileError ? (
             <p className="auth-error" role="alert">
-              {errorMessage}
+              {profileError}
             </p>
           ) : null}
 
-          {apiTestMessage ? (
-            <p
-              className={isApiTestError ? 'auth-error' : 'auth-notice'}
-              role={isApiTestError ? 'alert' : 'status'}
-            >
-              {apiTestMessage}
+          {isProfileLoading ? (
+            <p className="auth-notice" role="status">
+              Verificando acesso…
             </p>
-          ) : null}
+          ) : (
+            <Button type="button" onClick={() => void resolveCurrentUser()}>
+              Tentar novamente
+            </Button>
+          )}
+
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleSignOut}
+            disabled={isLoading || isProfileLoading}
+          >
+            {isLoading ? 'Saindo…' : 'Sair'}
+          </Button>
+        </section>
+      </main>
+    )
+  }
+
+  if (authView === 'activation') {
+    return (
+      <main className="auth-page">
+        <section className="auth-card" aria-labelledby="activation-title">
+          <div className="auth-heading">
+            <p className="auth-eyebrow">Primeiro acesso</p>
+            <h1 id="activation-title">Ative seu acesso</h1>
+            <p className="auth-description">
+              Olá, {userProfile?.fullName}. Conclua a ativação para continuar.
+            </p>
+          </div>
 
           {activationMessage ? (
             <p
@@ -598,7 +650,7 @@ function App() {
           <Button
             type="button"
             onClick={handleActivation}
-            disabled={isLoading || isApiTestLoading || isActivationLoading}
+            disabled={isLoading || isActivationLoading}
           >
             {isActivationLoading ? 'Ativando…' : 'Ativar acesso'}
           </Button>
@@ -606,19 +658,78 @@ function App() {
           <Button
             type="button"
             variant="outline"
-            onClick={handleProtectedApiTest}
-            disabled={isLoading || isApiTestLoading || isActivationLoading}
-          >
-            {isApiTestLoading ? 'Testando…' : 'Testar API protegida'}
-          </Button>
-
-          <Button
-            type="button"
             onClick={handleSignOut}
-            disabled={isLoading || isApiTestLoading || isActivationLoading}
+            disabled={isLoading || isActivationLoading}
           >
             {isLoading ? 'Saindo…' : 'Sair'}
           </Button>
+        </section>
+      </main>
+    )
+  }
+
+  if (authView === 'operational') {
+    return (
+      <main className="operational-page">
+        <section className="operational-card" aria-labelledby="students-title">
+          <header className="operational-header">
+            <div className="auth-heading">
+              <p className="auth-eyebrow">Área operacional</p>
+              <h1 id="students-title">Alunos</h1>
+              <p className="auth-description">
+                {userProfile?.fullName}, consulte os alunos cadastrados.
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleSignOut}
+              disabled={isLoading || isStudentsLoading}
+            >
+              {isLoading ? 'Saindo…' : 'Sair'}
+            </Button>
+          </header>
+
+          {activationMessage ? (
+            <p className="auth-notice" role="status">
+              {activationMessage}
+            </p>
+          ) : null}
+
+          {isStudentsLoading ? (
+            <p className="auth-notice" role="status">
+              Carregando alunos…
+            </p>
+          ) : null}
+
+          {studentsError ? (
+            <div className="students-feedback">
+              <p className="auth-error" role="alert">
+                {studentsError}
+              </p>
+              <Button type="button" onClick={() => void loadStudents()}>
+                Tentar novamente
+              </Button>
+            </div>
+          ) : null}
+
+          {!isStudentsLoading && !studentsError && students.length === 0 ? (
+            <p className="students-empty">Nenhum aluno encontrado.</p>
+          ) : null}
+
+          {!isStudentsLoading && !studentsError && students.length > 0 ? (
+            <ul className="students-list">
+              {students.map((student) => (
+                <li className="student-card" key={student.studentId}>
+                  <div>
+                    <h2>{student.fullName}</h2>
+                    <p>Matrícula: {student.registrationNumber}</p>
+                  </div>
+                  <span className="student-status">{student.status}</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </section>
       </main>
     )

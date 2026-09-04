@@ -24,6 +24,84 @@
   box-shadow: 0 1.5rem 4rem oklch(0.2 0.02 250 / 10%);
 }
 
+.operational-page {
+  min-height: 100vh;
+  padding: 2rem;
+  background:
+    radial-gradient(circle at top, oklch(0.97 0.02 250), transparent 45%),
+    var(--background);
+}
+
+.operational-card {
+  width: min(100%, 56rem);
+  margin: 0 auto;
+  display: grid;
+  gap: 1.5rem;
+  padding: 2rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--card);
+  color: var(--card-foreground);
+  box-shadow: 0 1.5rem 4rem oklch(0.2 0.02 250 / 10%);
+}
+
+.operational-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.students-feedback {
+  display: grid;
+  gap: 0.75rem;
+  justify-items: start;
+}
+
+.students-empty {
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-lg);
+  padding: 2rem;
+  color: var(--muted-foreground);
+  text-align: center;
+}
+
+.students-list {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.student-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1rem;
+}
+
+.student-card h2 {
+  font-size: 1rem;
+  font-weight: 650;
+}
+
+.student-card p,
+.student-status {
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+}
+
+.student-status {
+  border-radius: 999px;
+  background: var(--muted);
+  padding: 0.3rem 0.6rem;
+  font-weight: 600;
+}
+
 .auth-heading {
   display: grid;
   gap: 0.5rem;
@@ -149,5 +227,19 @@
 
   .auth-card {
     padding: 1.5rem;
+  }
+
+  .operational-page {
+    padding: 1rem;
+  }
+
+  .operational-card {
+    padding: 1.5rem;
+  }
+
+  .operational-header,
+  .student-card {
+    align-items: stretch;
+    flex-direction: column;
   }
 }
