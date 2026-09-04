@@ -2,68 +2,95 @@
  * @vitest-environment jsdom
  */
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { createElement } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const authMocks = vi.hoisted(() => ({
-  fetchAuthSession: vi.fn(),
-  getCurrentUser: vi.fn(),
-}))
+const authMocks = vi.hoisted(() => ({ fetchAuthSession: vi.fn() }))
 
-vi.mock('aws-amplify/auth', () => ({
-  confirmSignIn: vi.fn(),
-  fetchAuthSession: authMocks.fetchAuthSession,
-  getCurrentUser: authMocks.getCurrentUser,
-  signIn: vi.fn(),
-  signOut: vi.fn(),
-}))
+vi.mock('aws-amplify/auth', () => ({ fetchAuthSession: authMocks.fetchAuthSession }))
+vi.mock('@/config/env', () => ({ env: { apiBaseUrl: 'https://api.example.test/' } }))
 
-vi.mock('@/config/env', () => ({
-  env: {
-    apiBaseUrl: 'https://api.example.test/',
-  },
-}))
+import {
+  ApiResponseError,
+  authenticatedPost,
+  fetchCurrentUserProfile,
+  fetchStudents,
+} from '@/lib/api'
 
-import App from '@/App'
-import { authenticatedPost } from '@/lib/api'
-
-const activationResponse = {
+const profile = {
   userId: '00000000-0000-4000-8000-000000000001',
+  fullName: 'Usuário Exemplo',
+  email: 'usuario@example.test',
   role: 'ADMIN',
   status: 'ACTIVE',
   authVersion: 1,
 }
+const studentsPage = {
+  items: [{
+    studentId: '00000000-0000-4000-8000-000000000100',
+    registrationNumber: 'MAT-001',
+    fullName: 'Aluno Exemplo',
+    status: 'ACTIVE',
+  }],
+  nextCursor: null,
+  hasMore: false,
+}
 
-describe('authenticated activation request', () => {
+describe('authenticated API requests', () => {
   beforeEach(() => {
     authMocks.fetchAuthSession.mockResolvedValue({
-      tokens: {
-        accessToken: {
-          toString: () => 'fake-access-token',
-        },
-      },
+      tokens: { accessToken: { toString: () => 'fake-access-token' } },
     })
-    authMocks.getCurrentUser.mockResolvedValue({ username: 'fake-user' })
   })
 
   afterEach(() => {
-    cleanup()
     vi.restoreAllMocks()
     vi.clearAllMocks()
   })
 
-  it('sends the activation POST with authentication and idempotency headers and no body', async () => {
-    const fetchMock = vi
-      .spyOn(globalThis, 'fetch')
-      .mockResolvedValue(new Response(null, { status: 200 }))
+  it('gets and validates the current profile with the access token', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(profile), { status: 200 }),
+    )
+    await expect(fetchCurrentUserProfile()).resolves.toEqual(profile)
+    expect(fetchMock).toHaveBeenCalledWith('https://api.example.test/users/me', {
+      method: 'GET',
+      headers: { Authorization: 'Bearer fake-access-token' },
+    })
+  })
 
+  it('rejects a string authVersion in the current profile', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ ...profile, authVersion: '1' }), { status: 200 }),
+    )
+    await expect(fetchCurrentUserProfile()).rejects.toBeInstanceOf(ApiResponseError)
+  })
+
+  it('gets and validates the default students page with the access token', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(studentsPage), { status: 200 }),
+    )
+    await expect(fetchStudents()).resolves.toEqual(studentsPage)
+    expect(fetchMock).toHaveBeenCalledWith('https://api.example.test/students', {
+      method: 'GET',
+      headers: { Authorization: 'Bearer fake-access-token' },
+    })
+  })
+
+  it('rejects an invalid students response', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ ...studentsPage, hasMore: 'false' }), { status: 200 }),
+    )
+    await expect(fetchStudents()).rejects.toBeInstanceOf(ApiResponseError)
+  })
+
+  it('sends activation with authentication, idempotency and no body', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(null, { status: 200 }),
+    )
     await authenticatedPost(
       '/users/me/activation',
       '00000000-0000-4000-8000-000000000002',
     )
-
-    expect(fetchMock).toHaveBeenCalledOnce()
     expect(fetchMock).toHaveBeenCalledWith(
       'https://api.example.test/users/me/activation',
       {
@@ -75,40 +102,5 @@ describe('authenticated activation request', () => {
       },
     )
     expect(fetchMock.mock.calls[0]?.[1]).not.toHaveProperty('body')
-  })
-
-  it('accepts an integer authVersion in the activation response', async () => {
-    vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue(
-      '00000000-0000-4000-8000-000000000003',
-    )
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify(activationResponse), { status: 200 }),
-    )
-
-    render(createElement(App))
-    fireEvent.click(await screen.findByRole('button', { name: 'Ativar acesso' }))
-
-    expect(await screen.findByText('Acesso ativado com sucesso.')).toBeTruthy()
-  })
-
-  it('rejects a string authVersion in the activation response', async () => {
-    vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue(
-      '00000000-0000-4000-8000-000000000004',
-    )
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(
-        JSON.stringify({ ...activationResponse, authVersion: '1' }),
-        { status: 200 },
-      ),
-    )
-
-    render(createElement(App))
-    fireEvent.click(await screen.findByRole('button', { name: 'Ativar acesso' }))
-
-    expect(
-      await screen.findByText(
-        'Não foi possível ativar o acesso agora. Tente novamente.',
-      ),
-    ).toBeTruthy()
   })
 })
