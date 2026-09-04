@@ -12,3 +12,11 @@ class ActivationForbiddenError(RuntimeError):
 
 class ActivationConflictError(RuntimeError):
     pass
+
+
+class SelfProfileUnauthorizedError(RuntimeError):
+    pass
+
+
+class SelfProfileForbiddenError(RuntimeError):
+    pass
