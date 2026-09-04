@@ -1,9 +1,9 @@
-# Manifesto do pacote canônico v2.8 — Engineering Ready
+# Manifesto do pacote canônico v2.9 — Engineering Ready
 
 **Projeto:** Serverless Student Manager
-**Versão:** 2.8
-**Data:** 2026-08-28
-**Arquivos listados:** 54
+**Versão:** 2.9
+**Data:** 2026-09-04
+**Arquivos listados:** 55
 
 O próprio `MANIFEST.md` não é listado para evitar hash autorreferencial.
 
@@ -14,15 +14,15 @@ O próprio `MANIFEST.md` não é listado para evitar hash autorreferencial.
 | `AGENTS.md` | `beafa571941a98ccd89f087f21939be4c6d0d44b660c4e7623f15260f5844448` |
 | `RESTORE-INSTRUCTIONS.md` | `9f7d55d96f112e2bb50f73995f2ca42fbb5a4bbb5ba4b32fb54ba2beb6438e8d` |
 | `docs/AUDIT-REPORT.md` | `60eb194a127c553fcf6b9ebe991ab8ba403deebeead4bd49c284b00794e7e13f` |
-| `docs/DOCUMENTATION-VERSION.md` | `f80841a1c23cb3482836a519270b10fc4623e90dcc14b3ffc43a227f363936b3` |
+| `docs/DOCUMENTATION-VERSION.md` | `c720a20ab35e8b64456ec8697e42fdfbe6c03f44c4f1783921b6b5a61e2f0eee` |
 | `docs/ENGINEERING-READINESS.md` | `1a890640dbd850a116d57311e9afc5b2197b0b3c1bd6b6f8e30bfab90ebac36a` |
-| `docs/README.md` | `d4b7d5750000196ef579b4047001b0f823ff6f8f90ff2e7125e18aa8033b1cbb` |
-| `docs/architecture/architecture-overview.md` | `57a096fb1498e98278668aa512bb20c14335007b82f5ad23dbe845f20e29d5d8` |
-| `docs/architecture/data-model.md` | `2262d621de776bb878d7c71d3491beed43c64c83e3b75ee869bedda6a04deb23` |
+| `docs/README.md` | `a6bd38ae75fe56ce43f4a3cc27f95d41639367dda36a9e21b588e3546aea6d54` |
+| `docs/architecture/architecture-overview.md` | `2d07a3425ba5896f04bd570fcd3ca6050e0492f1693e0a0e0eb640ccf382fefb` |
+| `docs/architecture/data-model.md` | `1b3d1c413060bf909bef4f8280053823f0286aec9052335c5a16eec2e2e0e530` |
 | `docs/architecture/deployment-and-cicd.md` | `5a34bde2310a274fb62557a007695bddb8f73fe9a65b9ad6681fde6df3358b21` |
 | `docs/architecture/diagrams.md` | `c6d18b9af0cb28f495bb1e86fb785b73da81a63cf508a13716dd9d706b1965cc` |
 | `docs/architecture/observability.md` | `164ea0d7a1c1a0e4005f58c6cb7d68e175b39d3b0f1d7bb65ad5c94f6f143f0b` |
-| `docs/architecture/security.md` | `c21c154ae9072a84980009167afafe7ba5aa8d158e63145bf52e4ca7069b0336` |
+| `docs/architecture/security.md` | `54973c9a4de3d7b742032fa7957f0a7e8468967681c4141b18f7f1c6657b0a77` |
 | `docs/decisions/adr/adr-001-monorepo.md` | `68549fff169d8fd5190e4502f17f6a89b61fb05579ac5b4b0c535bf03f885c8f` |
 | `docs/decisions/adr/adr-002-frontend-hosting.md` | `ca847e03a949c9dcbd74575bd0ac4c2f46985397770456d8089afaeb6d9c0add` |
 | `docs/decisions/adr/adr-003-api-gateway-http-api.md` | `d7746a1ce7e1246d862d91acde9e31e1c4fcd5637855429c1e32b46d6afe8d65` |
@@ -52,8 +52,9 @@ O próprio `MANIFEST.md` não é listado para evitar hash autorreferencial.
 | `docs/decisions/adr/adr-027-user-activation-after-first-sign-in.md` | `19096d119afc6d4258aab6941ea1b14c7dece26a55c18428480eadb99973d4f5` |
 | `docs/decisions/adr/adr-028-lambda-application-release-via-github-actions.md` | `dec580a6979c144ee660af14e33a182e75431f386931dea5682a12a5cabd0924` |
 | `docs/decisions/adr/adr-029-self-profile-resolution.md` | `a265176f4c28d21541b326d6dc9904856082206bddf4030ff520c43ab373769f` |
-| `docs/decisions/decision-register.md` | `0b8be6b89795b8cc448650b57b37a38052ec28a028986d33f927589f56c81e81` |
-| `docs/decisions/pending-decisions.md` | `85e7eb0bb98a0c5ca323dd2279fa70e187d52ed1c5575ce6287bf9c62f66c400` |
+| `docs/decisions/adr/adr-030-student-creation.md` | `a8038803c0baf6b56f4e01eb0e7592fb4907af0b53916aaa057f375bfad56891` |
+| `docs/decisions/decision-register.md` | `dadbe48f719801c2c9ce20df60b07938eb604e796e66db5b41371e556e803769` |
+| `docs/decisions/pending-decisions.md` | `4a775022b4581325ea518e1c3d0061684a2dd545a29f41797bf5a9ada82a4e98` |
 | `docs/operations/cognito-dynamodb-compensation.md` | `d2914292047679b7858e6b130f4baf04440913f9fb0809b243df22323d448807` |
 | `docs/operations/first-admin-email-verification.md` | `f067eb2b1bbea6d453d542b67fbf6d9d8a86504c2c293f5e035786518480150d` |
 | `docs/operations/first-admin-invitation-resume.md` | `33213a038e5f7400b09cb88cba7f19c75be248ac860b1bccd6af762153f6679a` |
@@ -62,6 +63,6 @@ O próprio `MANIFEST.md` não é listado para evitar hash autorreferencial.
 | `docs/operations/sole-admin-mfa-recovery.md` | `30dce5d37c002be252e16509fd43afa0e26f38ad2e05453eb0656cee0ff24797` |
 | `docs/overview.md` | `99c0311d0a7f4993b3bf5e715e3da7e455b20959dc33d0e1d8f6968ca7e29e97` |
 | `docs/references.md` | `f86b0ea29df69ea0ba5e6bad78e6dc661cad6ee24dc45bcc63222fd6735ff236` |
-| `docs/requirements/srs.md` | `b307693426fa694caf9b45335aa566963d5c67d8125d752d96e939f833e1118d` |
-| `docs/serverless-student-manager-ordem-de-leitura.md` | `29ed5893c2098a8d85c7f687ee92ebd57744a14c3d2297e7246abdd59ff89939` |
+| `docs/requirements/srs.md` | `55b87a03290a0b4542c5b33a57bab27c12fb87f9449c45891b1ac09e0802d572` |
+| `docs/serverless-student-manager-ordem-de-leitura.md` | `84ffae576f9f81771734fd7bdd61c66d76339297c327fd356004d492a272d484` |
 | `docs/serverless-student-manager-ordem-de-leitura.png` | `0243000a218ca8860a10c45b0eeb21a02195664f9c4da1eacb1f8abf9ceed611` |

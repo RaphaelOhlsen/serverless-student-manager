@@ -1,6 +1,6 @@
 # Arquitetura de segurança
 
-**Versão:** 2.8
+**Versão:** 2.9
 **Status:** Approved
 
 ## 1. Autenticação
@@ -165,6 +165,28 @@ falham de forma fechada com `403`, sem revelar existência ou vínculo.
 Todos os campos públicos vêm do DynamoDB. Essa leitura não consulta Cognito,
 não expõe MFA, senha, tokens ou atributos internos e não exige novo índice ou
 permissão IAM.
+
+### Criação de aluno
+
+A ADR-030 aprova `POST /students` como operação de negócio para `ADMIN` e
+`OPERATOR` exclusivamente `ACTIVE`. O Cognito `sub` vem somente do JWT validado
+e resolve `COGNITO#<sub> / AUTHORIZATION` com leitura consistente. `INVITED`,
+`INACTIVE`, vínculo inconsistente ou role diferente falham com `403`. Não há
+consulta nem escrita Cognito.
+
+O request exige JSON estrito, `Idempotency-Key` UUID canônico e validação de
+nome, matrícula, e-mail, telefone E.164 e data de nascimento. O fingerprint
+idempotente usa somente o payload normalizado e não persiste PII completa.
+
+A Lambda recebe menor privilégio para a transação nas tabelas `students` e
+`audit-events`; `PutItem` fica condicionado a
+`dynamodb:EnclosingOperation = TransactWriteItems`. Na tabela `idempotency`,
+recebe apenas as ações exigidas pela ADR-012. Não recebe permissão Cognito.
+
+Aluno, reservas de unicidade e auditoria de sucesso são gravados atomicamente.
+O evento `STUDENT_CREATED` registra somente status e versão iniciais; não
+registra e-mail, telefone ou corpo integral. Erros não revelam chaves físicas,
+cancellation reasons, stack traces ou dados pessoais desnecessários.
 
 Reset de MFA é administrativo e auditado.  
 O único Administrador terá procedimento excepcional controlado de recuperação.

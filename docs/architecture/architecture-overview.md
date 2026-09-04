@@ -1,6 +1,6 @@
 # Visão geral da arquitetura
 
-**Versão:** 2.8
+**Versão:** 2.9
 **Status:** Approved
 
 ## Componentes
@@ -62,3 +62,6 @@
 - ADR-024: o bootstrap inicial usa protocolo determinístico, marker singleton permanente e transação de cinco itens; `resume-first-admin-invitation` retoma somente o onboarding do mesmo Admin `INVITED` reconciliado.
 - ADR-025: futuras criações do primeiro Admin definem `email_verified=true` com `ForceAliasCreation=false`; a identidade histórica é corrigida somente pela operação separada `verify-first-admin-email`, preservando `userId`, `Username`, `sub`, senha temporária e MFA.
 - ADR-029: `GET /users/me` resolve o próprio perfil por AUTHORIZATION + PROFILE; somente essa leitura e a ativação aceitam `INVITED`, enquanto operações de negócio exigem `ACTIVE`.
+- ADR-030: `POST /students` cria perfil, reservas de matrícula/e-mail e evento
+  `STUDENT_CREATED` em uma transação, com autorização `ACTIVE`, idempotência
+  HTTP e unicidade atômica.
