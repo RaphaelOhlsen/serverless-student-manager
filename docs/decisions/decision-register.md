@@ -1,7 +1,7 @@
 # Decision Register
 
 **Projeto:** Serverless Student Manager  
-**Versão:** 2.8
+**Versão:** 2.9
 **Data:** 2026-09-04
 **Status:** Canônico
 
@@ -63,6 +63,7 @@
 | ADR-027 | Ativação do usuário após o primeiro login | Approved |
 | ADR-028 | Release de código Lambda via GitHub Actions | Approved |
 | ADR-029 | Resolução autenticada do próprio perfil | Approved |
+| ADR-030 | Criação transacional e idempotente de aluno | Approved |
 
 ## 3. Modelos de dados aprovados
 
@@ -90,9 +91,9 @@
 
 ## 5. Situação arquitetural
 
-As ADR-001 a ADR-029 estão aprovadas.
+As ADR-001 a ADR-030 estão aprovadas.
 
-Novas decisões relevantes surgidas durante a engenharia devem ser registradas em ADR-030 ou posterior.
+Novas decisões relevantes surgidas durante a engenharia devem ser registradas em ADR-031 ou posterior.
 
 ## 6. Regra de manutenção
 

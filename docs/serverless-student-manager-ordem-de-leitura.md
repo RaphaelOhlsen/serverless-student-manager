@@ -1,6 +1,6 @@
 # Serverless Student Manager — Ordem canônica de leitura
 
-**Versão:** 2.8 — Engineering Ready
+**Versão:** 2.9 — Engineering Ready
 
 Antes de qualquer implementação, o Codex deve ler `../AGENTS.md`.
 
@@ -48,30 +48,31 @@ Antes de qualquer implementação, o Codex deve ler `../AGENTS.md`.
 34. `decisions/adr/adr-027-user-activation-after-first-sign-in.md` — Approved
 35. `decisions/adr/adr-028-lambda-application-release-via-github-actions.md` — Approved
 36. `decisions/adr/adr-029-self-profile-resolution.md` — Approved
+37. `decisions/adr/adr-030-student-creation.md` — Approved
 
 ## 4. Arquitetura consolidada
 
-37. `architecture/architecture-overview.md`
-38. `architecture/data-model.md`
-39. `architecture/security.md`
-40. `architecture/deployment-and-cicd.md`
-41. `architecture/observability.md`
-42. `architecture/diagrams.md`
+38. `architecture/architecture-overview.md`
+39. `architecture/data-model.md`
+40. `architecture/security.md`
+41. `architecture/deployment-and-cicd.md`
+42. `architecture/observability.md`
+43. `architecture/diagrams.md`
 
 ## 5. Operação
 
-43. `operations/cognito-dynamodb-compensation.md`
-44. `operations/non-http-idempotency.md`
-45. `operations/first-admin-email-verification.md`
-46. `operations/first-admin-invitation-resume.md`
-47. `operations/sole-admin-mfa-recovery.md`
-48. `operations/rollback-strategy.md`
+44. `operations/cognito-dynamodb-compensation.md`
+45. `operations/non-http-idempotency.md`
+46. `operations/first-admin-email-verification.md`
+47. `operations/first-admin-invitation-resume.md`
+48. `operations/sole-admin-mfa-recovery.md`
+49. `operations/rollback-strategy.md`
 
 ## 6. Apoio e auditoria
 
-49. `references.md`
-50. `AUDIT-REPORT.md`
-51. `MANIFEST.md`
+50. `references.md`
+51. `AUDIT-REPORT.md`
+52. `MANIFEST.md`
 
 ## Leitura rápida para orientação
 

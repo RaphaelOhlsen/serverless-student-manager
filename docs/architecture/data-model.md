@@ -1,6 +1,6 @@
 # Modelo de dados
 
-**Versão:** 2.8
+**Versão:** 2.9
 **Status:** Approved
 
 ## 1. Estratégia
@@ -30,14 +30,20 @@ PK = STUDENT#<studentId>
 SK = PROFILE
 ```
 
-Itens técnicos de unicidade continuam fazendo parte do modelo:
+Itens técnicos de unicidade fazem parte do modelo:
 
 ```text
-UNIQUE#REGISTRATION#<registrationNumber>
-UNIQUE#EMAIL#<normalizedEmail>
+PK = UNIQUE#REGISTRATION#<registrationNumber>
+SK = UNIQUE
+studentId = <studentId>
+
+PK = UNIQUE#EMAIL#<normalizedEmail>
+SK = UNIQUE
+studentId = <studentId>
 ```
 
-A convenção de `SK` dos itens técnicos de unicidade será definida junto ao fluxo de escrita.
+`registrationNumber` usa trim e uppercase. `normalizedEmail` usa trim e
+lowercase. As reservas não participam dos índices de listagem.
 
 ### GSIs
 
@@ -76,6 +82,24 @@ de autorização. A definição normativa completa está na ADR-026.
 - paginação por cursor;
 - controle otimista por `version`;
 - unicidade mantida com transação DynamoDB.
+
+### Criação transacional
+
+`POST /students`, conforme ADR-030, usa uma única `TransactWriteItems`:
+
+1. `Put STUDENT#<studentId> / PROFILE`;
+2. `Put UNIQUE#REGISTRATION#<registrationNumber> / UNIQUE`;
+3. `Put UNIQUE#EMAIL#<normalizedEmail> / UNIQUE`;
+4. `Put STUDENT_CREATED / SUCCESS` em `audit-events`.
+
+Todos os itens usam condições contra sobrescrita. Uma colisão cancela a
+transação inteira, garantindo unicidade de matrícula e e-mail sob concorrência
+e impedindo persistência parcial. O registro idempotente HTTP envolve a
+transação conforme ADR-012, sem integrar esse conjunto atômico de negócio.
+
+O PROFILE inicial possui `status = ACTIVE`, `version = 1`, UUIDv4 lowercase
+gerado pelo backend, campos de autoria derivados do ator autorizado e as chaves
+de GSI já definidas para listagem. Nenhuma tabela ou índice novo é necessário.
 
 ## 3. `users`
 

@@ -1,8 +1,8 @@
 # Serverless Student Manager — Documentação canônica
 
-**Versão:** 2.8 — Engineering Ready
+**Versão:** 2.9 — Engineering Ready
 **Data:** 2026-09-04
-**Status:** Engenharia em andamento — ADR-001 a ADR-029 aprovadas
+**Status:** Engenharia em andamento — ADR-001 a ADR-030 aprovadas
 
 ## Objetivo
 
@@ -45,7 +45,8 @@ Estão concluídos e aprovados:
 - rollback em camadas;
 - organização dos módulos Terraform;
 - resolução autenticada e self-service do próprio perfil;
-- ADR-001 a ADR-029.
+- criação transacional e idempotente de aluno;
+- ADR-001 a ADR-030.
 
 A implementação está em andamento. A ADR-025 possui implementação Python, CLI,
 workflow e Terraform declarativo da capacidade operacional em `dev`; os
@@ -54,12 +55,11 @@ provisionados ou configurados, e a correção histórica não foi autorizada.
 
 ## Próximo marco
 
-1. revisar e integrar a capacidade operacional `verify-first-admin-email`;
-2. provisionar a role/policy e configurar o Environment dedicado em `dev`;
-3. executar validações read-only e obter autorização explícita para a correção;
-4. reconciliar o primeiro Administrador histórico e confirmar `email_verified=true`;
-5. validar de forma read-only a prontidão do alias de e-mail para autenticação;
-6. retomar a autenticação do frontend React e evoluir os demais fluxos da aplicação.
+1. implementar `POST /students` conforme a ADR-030;
+2. revisar e integrar rota, IAM mínimo, idempotência e auditoria;
+3. aplicar infraestrutura e publicar a `students-api` somente após autorização;
+4. validar a criação em `dev`;
+5. integrar o formulário de criação ao frontend.
 
 ## Estrutura documental
 
@@ -78,7 +78,7 @@ docs/
 │   ├── pending-decisions.md
 │   └── adr/
 │       ├── adr-001-...
-│       └── adr-024-...
+│       └── adr-030-...
 ├── architecture/
 ├── operations/
 ├── references.md

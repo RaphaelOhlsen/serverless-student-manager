@@ -287,6 +287,32 @@ Administrators and Operators shall be able to register a student.
 - Success returns HTTP `201 Created`.
 - Duplicate registration number or email returns HTTP `409 Conflict`.
 
+The canonical HTTP contract is `POST /students`, protected by the JWT
+authorizer and restricted to `ADMIN` or `OPERATOR` users with current
+application status `ACTIVE`. The request requires a canonical UUID
+`Idempotency-Key`, `Content-Type: application/json` and exactly:
+
+```json
+{
+  "fullName": "Maria da Silva",
+  "registrationNumber": "MAT-0001",
+  "studentEmail": "maria@example.com",
+  "phone": "+5527999999999",
+  "birthDate": "2010-05-21"
+}
+```
+
+The backend generates a lowercase UUIDv4 `studentId`, creates the student as
+`ACTIVE` with `version = 1`, and returns `201` with only `studentId`,
+`registrationNumber`, `fullName`, `studentEmail`, `phone`, `birthDate`,
+`status`, `version`, `createdAt` and `updatedAt`.
+
+Creation atomically writes the student profile, registration reservation,
+email reservation and immutable `STUDENT_CREATED / SUCCESS` audit event.
+Idempotent replay returns the exact prior `201` response without duplicate
+effects. The complete contract, normalization and conflict taxonomy are defined
+by ADR-030.
+
 ### RF-ALU-002 — Consult student by identifier
 
 Administrators and Operators shall be able to consult a student by internal identifier.
