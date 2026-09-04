@@ -1,8 +1,8 @@
 # Serverless Student Manager — Documentação canônica
 
 **Versão:** 2.8 — Engineering Ready
-**Data:** 2026-08-28
-**Status:** Engenharia em andamento — ADR-001 a ADR-026 aprovadas
+**Data:** 2026-09-04
+**Status:** Engenharia em andamento — ADR-001 a ADR-029 aprovadas
 
 ## Objetivo
 
@@ -44,7 +44,8 @@ Estão concluídos e aprovados:
 - retenção;
 - rollback em camadas;
 - organização dos módulos Terraform;
-- ADR-001 a ADR-026.
+- resolução autenticada e self-service do próprio perfil;
+- ADR-001 a ADR-029.
 
 A implementação está em andamento. A ADR-025 possui implementação Python, CLI,
 workflow e Terraform declarativo da capacidade operacional em `dev`; os

@@ -441,6 +441,35 @@ Administrators and Operators shall recover their own access through Cognito.
 
 Authenticated users shall consult their own name, email, role and status.
 
+The HTTP contract is:
+
+```http
+GET /users/me
+Authorization: Bearer <access-token>
+```
+
+**Acceptance criteria:**
+
+- The Cognito `sub` is obtained exclusively from the validated JWT access token.
+- The operation resolves only the authenticated user's own profile and does not
+  accept a `userId`, request body or query parameters.
+- `ADMIN` and `OPERATOR` users in `INVITED` or `ACTIVE` status are allowed.
+- The `INVITED` exception is restricted to `GET /users/me` and
+  `POST /users/me/activation`; business operations continue to require `ACTIVE`.
+- `INACTIVE` users are denied fail-closed with HTTP `403 Forbidden`.
+- `COGNITO#<sub> / AUTHORIZATION` resolves the authoritative `userId`, `role`,
+  `status` and `authVersion`.
+- `USER#<userId> / PROFILE` provides `fullName` and `email`.
+- PROFILE and AUTHORIZATION must agree on `userId`, `cognitoSub`, `role`,
+  `status` and `authVersion`.
+- A successful response contains only `userId`, `fullName`, `email`, `role`,
+  `status` and `authVersion`; `authVersion` is a JSON integer greater than or
+  equal to `1`.
+- The operation does not query Cognito and does not expose MFA information,
+  passwords, tokens, normalized fields, physical keys or internal attributes.
+- Missing bindings, missing PROFILE, inconsistent projections, unsupported
+  roles and disallowed statuses return HTTP `403 Forbidden`, not `404`.
+
 ### RF-USR-011 — User administration audit
 
 Creation, invitation, role changes, deactivation, reactivation and unauthorized attempts shall be audited.
@@ -1149,6 +1178,11 @@ Actor: Administrator.
 
 Actors: Administrator and Operator.
 
+The authenticated client calls `GET /users/me`. The backend resolves the
+Cognito `sub` from the access token, reconciles AUTHORIZATION and PROFILE and
+returns the public self-profile contract. `INVITED` users may use this operation
+only to resolve onboarding state; `INACTIVE` users are denied.
+
 ### UC-017 — First access and TOTP enrollment
 
 Actors: Administrator and Operator.
@@ -1229,6 +1263,7 @@ The detailed exceptional recovery sequence for the sole active Administrator is 
 | ADR-019 — Sole Administrator MFA recovery | RF-AUTH-014, RN-USR-002, UC-018, RNF-SEC-012, RNF-REL-002, RNF-REL-003 |
 | ADR-020 — Layered rollback and deployment recovery | RNF-REL-001, RNF-TEST-003, RNF-COMP-003 and deployment recovery procedures |
 | ADR-027 — User activation after first sign-in | RF-AUTH-001, RF-AUTH-012, RF-AUTH-015, RN-USR-003, UC-017, RNF-SEC-012, RNF-REL-002, RNF-REL-003 |
+| ADR-029 — Authenticated self-profile resolution | RF-AUTH-001, RF-AUTH-005 to RF-AUTH-009, RF-USR-010, RN-USR-002, RN-USR-003, UC-016, UC-017 |
 
 ---
 

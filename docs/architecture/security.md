@@ -148,6 +148,24 @@ user pool aplicável. A operação não modifica Cognito. Não há atomicidade
 distribuída entre essas leituras e DynamoDB; a transação revalida o estado de
 USER e AUTHORIZATION com conditions no momento da escrita.
 
+### Resolução do próprio perfil
+
+A ADR-029 aprova `GET /users/me` como leitura autenticada e estritamente
+self-service. O `sub` vem exclusivamente do access token validado, resolve
+`COGNITO#<sub> / AUTHORIZATION` e, a partir do `userId` autoritativo, resolve
+`USER#<userId> / PROFILE`. Os itens devem estar reconciliados em `userId`,
+`cognitoSub`, `role`, `status` e `authVersion`.
+
+`ADMIN` e `OPERATOR` em `INVITED` ou `ACTIVE` podem consultar o próprio perfil.
+As únicas exceções para `INVITED` são `GET /users/me` e
+`POST /users/me/activation`; todas as operações de negócio continuam exigindo
+`ACTIVE`. Usuários `INACTIVE`, projeções ausentes ou estados inconsistentes
+falham de forma fechada com `403`, sem revelar existência ou vínculo.
+
+Todos os campos públicos vêm do DynamoDB. Essa leitura não consulta Cognito,
+não expõe MFA, senha, tokens ou atributos internos e não exige novo índice ou
+permissão IAM.
+
 Reset de MFA é administrativo e auditado.  
 O único Administrador terá procedimento excepcional controlado de recuperação.
 

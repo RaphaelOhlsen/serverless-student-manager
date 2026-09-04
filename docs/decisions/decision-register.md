@@ -2,7 +2,7 @@
 
 **Projeto:** Serverless Student Manager  
 **Versão:** 2.8
-**Data:** 2026-09-01
+**Data:** 2026-09-04
 **Status:** Canônico
 
 ## 1. Decisões de produto, restrições e segurança
@@ -62,6 +62,7 @@
 | ADR-026 | Contrato de listagem e modelagem física de Students | Approved |
 | ADR-027 | Ativação do usuário após o primeiro login | Approved |
 | ADR-028 | Release de código Lambda via GitHub Actions | Approved |
+| ADR-029 | Resolução autenticada do próprio perfil | Approved |
 
 ## 3. Modelos de dados aprovados
 
@@ -89,9 +90,9 @@
 
 ## 5. Situação arquitetural
 
-As ADR-001 a ADR-028 estão aprovadas.
+As ADR-001 a ADR-029 estão aprovadas.
 
-Novas decisões relevantes surgidas durante a engenharia devem ser registradas em ADR-029 ou posterior.
+Novas decisões relevantes surgidas durante a engenharia devem ser registradas em ADR-030 ou posterior.
 
 ## 6. Regra de manutenção
 
