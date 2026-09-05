@@ -41,3 +41,115 @@ def test_missing_or_disallowed_authorization_is_forbidden(
 ) -> None:
     with pytest.raises(ForbiddenError):
         AuthorizationService(FakeUsersTable(item)).authorize_list_students(subject)
+
+
+@pytest.mark.parametrize("role", ["ADMIN", "OPERATOR"])
+def test_active_allowed_roles_can_create_student(role: str) -> None:
+    table = FakeUsersTable(
+        {
+            "PK": "COGNITO#subject-123",
+            "SK": "AUTHORIZATION",
+            "userId": "user-1",
+            "status": "ACTIVE",
+            "role": role,
+            "authVersion": 1,
+        }
+    )
+
+    actor_id = AuthorizationService(table).authorize_create_student("subject-123")
+
+    assert actor_id == "user-1"
+    assert table.call == {
+        "Key": {"PK": "COGNITO#subject-123", "SK": "AUTHORIZATION"},
+        "ConsistentRead": True,
+    }
+
+
+@pytest.mark.parametrize(
+    "subject,item",
+    [
+        (None, None),
+        ("subject-123", None),
+        (
+            "subject-123",
+            {
+                "PK": "COGNITO#subject-123",
+                "SK": "AUTHORIZATION",
+                "userId": "user-1",
+                "status": "INVITED",
+                "role": "ADMIN",
+                "authVersion": 1,
+            },
+        ),
+        (
+            "subject-123",
+            {
+                "PK": "COGNITO#subject-123",
+                "SK": "AUTHORIZATION",
+                "userId": "user-1",
+                "status": "INACTIVE",
+                "role": "OPERATOR",
+                "authVersion": 1,
+            },
+        ),
+        (
+            "subject-123",
+            {
+                "PK": "COGNITO#subject-123",
+                "SK": "AUTHORIZATION",
+                "userId": "user-1",
+                "status": "ACTIVE",
+                "role": "VIEWER",
+                "authVersion": 1,
+            },
+        ),
+        (
+            "subject-123",
+            {
+                "PK": "COGNITO#other",
+                "SK": "AUTHORIZATION",
+                "userId": "user-1",
+                "status": "ACTIVE",
+                "role": "ADMIN",
+                "authVersion": 1,
+            },
+        ),
+        (
+            "subject-123",
+            {
+                "PK": "COGNITO#subject-123",
+                "SK": "OTHER",
+                "userId": "user-1",
+                "status": "ACTIVE",
+                "role": "ADMIN",
+                "authVersion": 1,
+            },
+        ),
+        (
+            "subject-123",
+            {
+                "PK": "COGNITO#subject-123",
+                "SK": "AUTHORIZATION",
+                "userId": "user-1",
+                "status": "ACTIVE",
+                "role": "ADMIN",
+                "authVersion": "1",
+            },
+        ),
+        (
+            "subject-123",
+            {
+                "PK": "COGNITO#subject-123",
+                "SK": "AUTHORIZATION",
+                "status": "ACTIVE",
+                "role": "ADMIN",
+                "authVersion": 1,
+            },
+        ),
+    ],
+)
+def test_create_student_fails_closed_for_invalid_authorization(
+    subject: str | None, item: dict[str, Any] | None
+) -> None:
+    with pytest.raises(ForbiddenError):
+        AuthorizationService(FakeUsersTable(item)).authorize_create_student(subject)

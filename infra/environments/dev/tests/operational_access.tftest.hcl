@@ -690,6 +690,11 @@ run "plans_students_list_api_access" {
   command = plan
 
   assert {
+    condition     = length(data.aws_iam_policy_document.students_api.statement) == 9
+    error_message = "The students-api policy must contain exactly nine semantic statements."
+  }
+
+  assert {
     condition = toset(one([
       for statement in data.aws_iam_policy_document.students_api.statement : statement.actions
       if statement.sid == "ReadUserAuthorization"
@@ -731,6 +736,130 @@ run "plans_students_list_api_access" {
       ]
     ]))
     error_message = "The students API policy must not allow DynamoDB Scan."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.students_api.statement : statement.actions
+      if statement.sid == "TransactStudentCreation"
+    ])) == toset(["dynamodb:TransactWriteItems"])
+    error_message = "Student creation must use only TransactWriteItems on the students table."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.students_api.statement : statement.resources
+      if statement.sid == "TransactStudentCreation"
+    ])) == toset([module.student_store.table_arn])
+    error_message = "Student creation transaction must target only the students table."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.students_api.statement : statement.actions
+      if statement.sid == "PutStudentCreationInTransaction"
+    ])) == toset(["dynamodb:PutItem"])
+    error_message = "Student profile and uniqueness writes must contain only PutItem."
+  }
+
+  assert {
+    condition = length(one([
+      for statement in data.aws_iam_policy_document.students_api.statement : statement.condition
+      if statement.sid == "PutStudentCreationInTransaction"
+      ])) == 1 && one(one([
+      for statement in data.aws_iam_policy_document.students_api.statement : statement.condition
+      if statement.sid == "PutStudentCreationInTransaction"
+      ])).variable == "dynamodb:EnclosingOperation" && toset(one(one([
+        for statement in data.aws_iam_policy_document.students_api.statement : statement.condition
+        if statement.sid == "PutStudentCreationInTransaction"
+    ])).values) == toset(["TransactWriteItems"])
+    error_message = "Student PutItem must require EnclosingOperation TransactWriteItems."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.students_api.statement : statement.actions
+      if statement.sid == "TransactStudentCreationAudit"
+    ])) == toset(["dynamodb:TransactWriteItems"])
+    error_message = "Student audit transaction must contain only TransactWriteItems."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.students_api.statement : statement.actions
+      if statement.sid == "PutStudentCreationAuditInTransaction"
+    ])) == toset(["dynamodb:PutItem"])
+    error_message = "Student audit append must contain only PutItem."
+  }
+
+  assert {
+    condition = length(one([
+      for statement in data.aws_iam_policy_document.students_api.statement : statement.condition
+      if statement.sid == "PutStudentCreationAuditInTransaction"
+      ])) == 1 && one(one([
+      for statement in data.aws_iam_policy_document.students_api.statement : statement.condition
+      if statement.sid == "PutStudentCreationAuditInTransaction"
+      ])).variable == "dynamodb:EnclosingOperation" && toset(one(one([
+        for statement in data.aws_iam_policy_document.students_api.statement : statement.condition
+        if statement.sid == "PutStudentCreationAuditInTransaction"
+    ])).values) == toset(["TransactWriteItems"])
+    error_message = "Audit PutItem must require EnclosingOperation TransactWriteItems."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.students_api.statement : statement.actions
+      if statement.sid == "ReadStudentCreationAuditReconciliation"
+    ])) == toset(["dynamodb:GetItem"])
+    error_message = "Student audit reconciliation must contain only GetItem."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.students_api.statement : statement.resources
+      if statement.sid == "ReadStudentCreationAuditReconciliation"
+    ])) == toset([module.audit_store.table_arn])
+    error_message = "Student audit reconciliation must target only audit-events."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.students_api.statement : statement.actions
+      if statement.sid == "ManageStudentCreationIdempotency"
+      ])) == toset([
+      "dynamodb:DeleteItem",
+      "dynamodb:GetItem",
+      "dynamodb:PutItem",
+      "dynamodb:UpdateItem",
+    ])
+    error_message = "Student creation idempotency contains unexpected actions."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.students_api.statement : statement.resources
+      if statement.sid == "ManageStudentCreationIdempotency"
+    ])) == toset([module.idempotency_store.table_arn])
+    error_message = "Student creation idempotency must target only the idempotency table."
+  }
+
+  assert {
+    condition = alltrue([
+      for statement in data.aws_iam_policy_document.students_api.statement :
+      length(setintersection(toset(statement.actions), toset(["dynamodb:PutItem"]))) == 0
+      || length(statement.condition) == 1
+      if statement.sid != "ManageStudentCreationIdempotency"
+    ])
+    error_message = "Business and audit PutItem grants must be transaction-scoped."
+  }
+
+  assert {
+    condition = alltrue(flatten([
+      for statement in data.aws_iam_policy_document.students_api.statement : [
+        for action in statement.actions : !strcontains(action, "cognito-idp:")
+      ]
+    ]))
+    error_message = "The students API policy must not grant Cognito access."
   }
 }
 

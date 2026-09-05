@@ -59,6 +59,11 @@ variables {
       integration_key    = "students"
       authorization_type = "JWT"
     }
+    create_student = {
+      route_key          = "POST /students"
+      integration_key    = "students"
+      authorization_type = "JWT"
+    }
     activate_current_user = {
       route_key          = "POST /users/me/activation"
       integration_key    = "users"
@@ -273,6 +278,16 @@ run "plans_http_api" {
   }
 
   assert {
+    condition     = aws_apigatewayv2_route.this["create_student"].route_key == "POST /students"
+    error_message = "The create-student route key is incorrect."
+  }
+
+  assert {
+    condition     = aws_apigatewayv2_route.this["create_student"].authorization_type == "JWT"
+    error_message = "The create-student route must use JWT authorization."
+  }
+
+  assert {
     condition     = aws_apigatewayv2_route.this["activate_current_user"].route_key == "POST /users/me/activation"
     error_message = "The activation route key is incorrect."
   }
@@ -389,6 +404,22 @@ run "plans_http_api" {
 
 run "wires_computed_references" {
   command = apply
+
+  assert {
+    condition = (
+      aws_apigatewayv2_route.this["create_student"].authorizer_id
+      == aws_apigatewayv2_authorizer.jwt.id
+    )
+    error_message = "The create-student route must use the configured JWT authorizer."
+  }
+
+  assert {
+    condition = (
+      aws_apigatewayv2_route.this["create_student"].target
+      == "integrations/${aws_apigatewayv2_integration.lambda["students"].id}"
+    )
+    error_message = "The create-student route must use the students integration."
+  }
 
   assert {
     condition = (
