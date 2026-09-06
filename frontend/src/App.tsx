@@ -7,6 +7,7 @@ import {
   type SignInOutput,
 } from 'aws-amplify/auth'
 
+import { CreateStudentForm } from '@/components/CreateStudentForm'
 import { Button } from '@/components/ui/button'
 import {
   authenticatedPost,
@@ -14,6 +15,7 @@ import {
   fetchCurrentUserProfile,
   fetchStudents,
   type StudentSummary,
+  type CreatedStudent,
   type UserProfile,
 } from '@/lib/api'
 
@@ -102,31 +104,43 @@ function App() {
   const [isActivationError, setIsActivationError] = useState(false)
   const activationIdempotencyKey = useRef<string | null>(null)
   const activationInFlight = useRef(false)
+  const sessionGeneration = useRef(0)
+  const listGeneration = useRef(0)
+  const [showCreate, setShowCreate] = useState(false)
+  const [creationMessage, setCreationMessage] = useState<string | null>(null)
 
   const loadStudents = useCallback(async () => {
+    const generation = ++listGeneration.current
+    const session = sessionGeneration.current
+    const isCurrent = () => generation === listGeneration.current && session === sessionGeneration.current
     setStudentsError(null)
     setIsStudentsLoading(true)
 
     try {
       const page = await fetchStudents()
-      setStudents(page.items)
+      if (isCurrent()) setStudents(page.items)
     } catch {
-      setStudentsError(STUDENTS_LOAD_ERROR)
+      if (isCurrent()) setStudentsError(STUDENTS_LOAD_ERROR)
     } finally {
-      setIsStudentsLoading(false)
+      if (isCurrent()) setIsStudentsLoading(false)
     }
   }, [])
 
   const resolveCurrentUser = useCallback(async (
     isCurrent: () => boolean = () => true,
   ) => {
+    const session = ++sessionGeneration.current
+    ++listGeneration.current
+    setShowCreate(false)
+    setCreationMessage(null)
+    const isSessionCurrent = () => isCurrent() && session === sessionGeneration.current
     setAuthView('profile-resolution')
     setProfileError(null)
     setIsProfileLoading(true)
 
     try {
       const profile = await fetchCurrentUserProfile()
-      if (!isCurrent()) {
+      if (!isSessionCurrent()) {
         return
       }
 
@@ -138,15 +152,20 @@ function App() {
         await loadStudents()
       }
     } catch {
-      if (isCurrent()) {
+      if (isSessionCurrent()) {
         setProfileError(PROFILE_RESOLUTION_ERROR)
       }
     } finally {
-      if (isCurrent()) {
+      if (isSessionCurrent()) {
         setIsProfileLoading(false)
       }
     }
   }, [loadStudents])
+
+  const invalidateRequests = useCallback(() => {
+    ++sessionGeneration.current
+    ++listGeneration.current
+  }, [])
 
   useEffect(() => {
     let isActive = true
@@ -176,8 +195,9 @@ function App() {
 
     return () => {
       isActive = false
+      invalidateRequests()
     }
-  }, [resolveCurrentUser])
+  }, [resolveCurrentUser, invalidateRequests])
 
   function clearPasswords() {
     setPassword('')
@@ -343,6 +363,12 @@ function App() {
   }
 
   async function handleSignOut() {
+    ++sessionGeneration.current
+    ++listGeneration.current
+    setShowCreate(false)
+    setIsStudentsLoading(false)
+    setIsActivationLoading(false)
+    activationInFlight.current = false
     setErrorMessage(null)
     setIsLoading(true)
 
@@ -354,6 +380,7 @@ function App() {
       setUserProfile(null)
       setProfileError(null)
       setStudents([])
+      setCreationMessage(null)
       setStudentsError(null)
       setActivationMessage(null)
       setIsActivationError(false)
@@ -371,6 +398,7 @@ function App() {
       return
     }
 
+    const session = sessionGeneration.current
     activationInFlight.current = true
     setActivationMessage(null)
     setIsActivationError(false)
@@ -386,8 +414,12 @@ function App() {
         idempotencyKey,
       )
 
+      if (session !== sessionGeneration.current) return
+
       if (response.status === 200) {
         const result: unknown = await response.json()
+
+        if (session !== sessionGeneration.current) return
 
         if (!isSuccessfulActivation(result)) {
           setIsActivationError(true)
@@ -435,6 +467,7 @@ function App() {
           setActivationMessage(ACTIVATION_TEMPORARY_ERROR)
       }
     } catch (error) {
+      if (session !== sessionGeneration.current) return
       setIsActivationError(true)
 
       if (error instanceof AuthSessionUnavailableError) {
@@ -444,8 +477,10 @@ function App() {
         setActivationMessage(ACTIVATION_TEMPORARY_ERROR)
       }
     } finally {
-      activationInFlight.current = false
-      setIsActivationLoading(false)
+      if (session === sessionGeneration.current) {
+        activationInFlight.current = false
+        setIsActivationLoading(false)
+      }
     }
   }
 
@@ -669,6 +704,20 @@ function App() {
   }
 
   if (authView === 'operational') {
+    const session = sessionGeneration.current
+    function studentCreated(student: CreatedStudent) {
+      if (session !== sessionGeneration.current) return
+      ++listGeneration.current
+      const summary: StudentSummary = {
+        studentId: student.studentId, fullName: student.fullName,
+        registrationNumber: student.registrationNumber, status: student.status,
+      }
+      setStudents((current) => [summary, ...current.filter((item) => item.studentId !== summary.studentId)])
+      setIsStudentsLoading(false)
+      setStudentsError(null)
+      setShowCreate(false)
+      setCreationMessage('Aluno criado com sucesso.')
+    }
     return (
       <main className="operational-page">
         <section className="operational-card" aria-labelledby="students-title">
@@ -684,12 +733,23 @@ function App() {
               type="button"
               variant="outline"
               onClick={handleSignOut}
-              disabled={isLoading || isStudentsLoading}
+              disabled={isLoading}
             >
               {isLoading ? 'Saindo…' : 'Sair'}
             </Button>
           </header>
 
+          {!showCreate ? (
+            <Button type="button" disabled={isLoading} onClick={() => {
+              setCreationMessage(null)
+              setShowCreate(true)
+            }}>Novo aluno</Button>
+          ) : (
+            <CreateStudentForm key={session} disabled={isLoading}
+              onCancel={() => setShowCreate(false)} onCreated={studentCreated} />
+          )}
+          {creationMessage ? <p className="auth-notice" role="status">{creationMessage}</p> : null}
+          {!showCreate ? <>
           {activationMessage ? (
             <p className="auth-notice" role="status">
               {activationMessage}
@@ -730,6 +790,7 @@ function App() {
               ))}
             </ul>
           ) : null}
+          </> : null}
         </section>
       </main>
     )

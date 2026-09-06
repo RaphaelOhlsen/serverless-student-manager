@@ -7,10 +7,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const authMocks = vi.hoisted(() => ({
   getCurrentUser: vi.fn(),
+  signIn: vi.fn(),
   signOut: vi.fn(),
 }))
 const apiMocks = vi.hoisted(() => ({
   authenticatedPost: vi.fn(),
+  createStudent: vi.fn(),
   fetchCurrentUserProfile: vi.fn(),
   fetchStudents: vi.fn(),
 }))
@@ -18,12 +20,14 @@ const apiMocks = vi.hoisted(() => ({
 vi.mock('aws-amplify/auth', () => ({
   confirmSignIn: vi.fn(),
   getCurrentUser: authMocks.getCurrentUser,
-  signIn: vi.fn(),
+  signIn: authMocks.signIn,
   signOut: authMocks.signOut,
 }))
 
 vi.mock('@/lib/api', () => ({
   authenticatedPost: apiMocks.authenticatedPost,
+  createStudent: apiMocks.createStudent,
+  ApiResponseError: class ApiResponseError extends Error {},
   fetchCurrentUserProfile: apiMocks.fetchCurrentUserProfile,
   fetchStudents: apiMocks.fetchStudents,
   AuthSessionUnavailableError: class AuthSessionUnavailableError extends Error {},
@@ -247,4 +251,110 @@ describe('activation idempotency lifecycle', () => {
     expect(await screen.findByText('Não foi possível ativar o acesso agora. Tente novamente.')).toBeTruthy()
     expect(apiMocks.fetchStudents).not.toHaveBeenCalled()
   })
+})
+
+
+describe('student creation integration', () => {
+  const created = {
+    studentId: '00000000-0000-4000-8000-000000000100', fullName: 'Aluno Novo',
+    registrationNumber: 'MAT-001', studentEmail: 'a@example.com', phone: '+15555550123',
+    birthDate: '2000-01-15', status: 'ACTIVE', version: 1,
+    createdAt: '2026-09-06T10:28:53.080Z', updatedAt: '2026-09-06T10:28:53.080Z',
+  }
+  beforeEach(() => {
+    vi.clearAllMocks()
+    authMocks.getCurrentUser.mockResolvedValue({})
+    apiMocks.fetchCurrentUserProfile.mockResolvedValue(activeProfile)
+    apiMocks.fetchStudents.mockResolvedValue(studentsPage)
+    authMocks.signOut.mockResolvedValue(undefined)
+    apiMocks.createStudent.mockResolvedValue(created)
+  })
+  afterEach(cleanup)
+  async function openAndFill() {
+    fireEvent.click(await screen.findByRole('button', { name: 'Novo aluno' }))
+    for (const [label, value] of [['Nome completo', created.fullName], ['Matrícula', created.registrationNumber],
+      ['E-mail', created.studentEmail], ['Telefone', created.phone], ['Data de nascimento', created.birthDate]])
+      fireEvent.change(screen.getByLabelText(label), { target: { value } })
+  }
+  it('opens and cancels the form preserving the list', async () => {
+    render(<App />); await openAndFill(); fireEvent.click(screen.getByText('Cancelar'))
+    expect(screen.queryByRole('form', { name: 'Novo aluno' })).toBeNull()
+    expect(await screen.findByText('Aluno Exemplo')).toBeTruthy()
+  })
+  it('closes after success, deduplicates and inserts immediately without refetch', async () => {
+    render(<App />); await openAndFill(); fireEvent.click(screen.getByText('Salvar aluno'))
+    await screen.findByText('Aluno criado com sucesso.')
+    expect(screen.queryByRole('form', { name: 'Novo aluno' })).toBeNull()
+    expect(screen.getAllByText('Aluno Novo')).toHaveLength(1)
+    expect(screen.queryByText('Aluno Exemplo')).toBeNull()
+    expect(apiMocks.fetchStudents).toHaveBeenCalledOnce()
+  })
+  it('ignores a late initial list after creation', async () => {
+    let resolve!: (value: typeof studentsPage) => void
+    apiMocks.fetchStudents.mockReturnValueOnce(new Promise((r) => { resolve = r }))
+    render(<App />); await openAndFill(); fireEvent.click(screen.getByText('Salvar aluno')); await screen.findByText('Aluno Novo')
+    await act(async () => resolve({ items: [], nextCursor: null, hasMore: false }))
+    expect(screen.getByText('Aluno Novo')).toBeTruthy(); expect(screen.queryByText('Nenhum aluno encontrado.')).toBeNull()
+  })
+  it('discards creation after logout and subsequent restored session', async () => {
+    let resolve!: (value: typeof created) => void
+    apiMocks.createStudent.mockReturnValueOnce(new Promise((r) => { resolve = r }))
+    render(<App />); await openAndFill(); fireEvent.click(screen.getByText('Salvar aluno'))
+    fireEvent.click(screen.getByRole('button', { name: 'Sair' })); await screen.findByRole('heading', { name: 'Acesse sua conta' })
+    apiMocks.fetchCurrentUserProfile.mockResolvedValue({ ...activeProfile, userId: 'other-user' })
+    apiMocks.fetchStudents.mockResolvedValue({ items: [], nextCursor: null, hasMore: false })
+    authMocks.signIn.mockResolvedValue({ nextStep: { signInStep: 'DONE' } })
+    fireEvent.change(screen.getByLabelText('E-mail'), { target: { value: 'other@example.test' } })
+    fireEvent.change(screen.getByLabelText('Senha'), { target: { value: 'synthetic-password' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Entrar' }))
+    await screen.findByText('Nenhum aluno encontrado.')
+    await act(async () => resolve(created))
+    expect(screen.queryByText('Aluno Novo')).toBeNull(); expect(screen.queryByText('Aluno criado com sucesso.')).toBeNull()
+  })
+  it('ignores a list response after logout', async () => {
+    let resolve!: (value: typeof studentsPage) => void
+    apiMocks.fetchStudents.mockReturnValueOnce(new Promise((r) => { resolve = r }))
+    render(<App />); await screen.findByText('Carregando alunos…')
+    fireEvent.click(screen.getByRole('button', { name: 'Sair' })); await screen.findByRole('heading', { name: 'Acesse sua conta' })
+    await act(async () => resolve(studentsPage)); expect(screen.queryByText('Aluno Exemplo')).toBeNull()
+  })
+})
+
+
+it('resets activation on logout and isolates the old finally from a new session', async () => {
+  vi.clearAllMocks()
+  authMocks.getCurrentUser.mockResolvedValue({})
+  authMocks.signOut.mockResolvedValue(undefined)
+  authMocks.signIn.mockResolvedValue({ nextStep: { signInStep: 'DONE' } })
+  apiMocks.fetchCurrentUserProfile.mockResolvedValue(invitedProfile)
+  let resolveOldList!: (value: typeof studentsPage) => void
+  apiMocks.fetchStudents.mockReturnValueOnce(new Promise((resolve) => { resolveOldList = resolve }))
+  apiMocks.authenticatedPost.mockResolvedValueOnce(response(200, successfulActivation))
+  render(<App />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Ativar acesso' }))
+  await screen.findByText('Carregando alunos…')
+  fireEvent.click(screen.getByRole('button', { name: 'Sair' }))
+  await screen.findByRole('heading', { name: 'Acesse sua conta' })
+  apiMocks.fetchCurrentUserProfile.mockResolvedValue({ ...invitedProfile, userId: 'new-user' })
+  fireEvent.change(screen.getByLabelText('E-mail'), { target: { value: 'new@example.test' } })
+  fireEvent.change(screen.getByLabelText('Senha'), { target: { value: 'synthetic-password' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Entrar' }))
+  const activate = await screen.findByRole('button', { name: 'Ativar acesso' })
+  expect((activate as HTMLButtonElement).disabled).toBe(false)
+  expect((screen.getByRole('button', { name: 'Sair' }) as HTMLButtonElement).disabled).toBe(false)
+
+  let resolveNewActivation!: (value: Response) => void
+  apiMocks.authenticatedPost.mockReturnValueOnce(new Promise((resolve) => { resolveNewActivation = resolve }))
+  fireEvent.click(activate)
+  expect(apiMocks.authenticatedPost).toHaveBeenCalledTimes(2)
+  await act(async () => resolveOldList(studentsPage))
+  expect((screen.getByRole('button', { name: 'Ativando…' }) as HTMLButtonElement).disabled).toBe(true)
+  expect(screen.queryByText('Aluno Exemplo')).toBeNull()
+  expect(screen.queryByRole('heading', { name: 'Alunos' })).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Ativando…' }))
+  expect(apiMocks.authenticatedPost).toHaveBeenCalledTimes(2)
+  await act(async () => resolveNewActivation(response(500)))
+  expect((screen.getByRole('button', { name: 'Ativar acesso' }) as HTMLButtonElement).disabled).toBe(false)
+  expect((screen.getByRole('button', { name: 'Sair' }) as HTMLButtonElement).disabled).toBe(false)
+  cleanup()
 })
