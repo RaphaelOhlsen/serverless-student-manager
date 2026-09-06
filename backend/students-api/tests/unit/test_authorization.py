@@ -1,8 +1,10 @@
+from decimal import Decimal
 from typing import Any
 
 import pytest
 from students_api.authorization import AuthorizationService
 from students_api.errors import ForbiddenError
+from students_api.repositories.dynamodb_values import normalize_dynamodb_value
 
 
 class FakeUsersTable:
@@ -44,7 +46,8 @@ def test_missing_or_disallowed_authorization_is_forbidden(
 
 
 @pytest.mark.parametrize("role", ["ADMIN", "OPERATOR"])
-def test_active_allowed_roles_can_create_student(role: str) -> None:
+@pytest.mark.parametrize("auth_version", [1, Decimal("1"), Decimal("2")])
+def test_active_allowed_roles_can_create_student(role: str, auth_version: object) -> None:
     table = FakeUsersTable(
         {
             "PK": "COGNITO#subject-123",
@@ -52,7 +55,7 @@ def test_active_allowed_roles_can_create_student(role: str) -> None:
             "userId": "user-1",
             "status": "ACTIVE",
             "role": role,
-            "authVersion": 1,
+            "authVersion": auth_version,
         }
     )
 
@@ -63,6 +66,50 @@ def test_active_allowed_roles_can_create_student(role: str) -> None:
         "Key": {"PK": "COGNITO#subject-123", "SK": "AUTHORIZATION"},
         "ConsistentRead": True,
     }
+
+
+def test_integral_dynamodb_number_preserves_integer_value() -> None:
+    normalized = normalize_dynamodb_value(Decimal("2"))
+
+    assert type(normalized) is int
+    assert normalized == 2
+
+
+@pytest.mark.parametrize(
+    "auth_version",
+    [
+        Decimal("1.5"),
+        Decimal("NaN"),
+        Decimal("sNaN"),
+        Decimal("Infinity"),
+        Decimal("-Infinity"),
+        Decimal("0"),
+        Decimal("-1"),
+        0,
+        -1,
+        "1",
+        True,
+        False,
+        None,
+        1.0,
+        [],
+        {},
+    ],
+)
+def test_create_student_rejects_invalid_auth_version(auth_version: object) -> None:
+    item = {
+        "PK": "COGNITO#subject-123",
+        "SK": "AUTHORIZATION",
+        "userId": "user-1",
+        "status": "ACTIVE",
+        "role": "ADMIN",
+        "authVersion": auth_version,
+    }
+    if auth_version is None:
+        del item["authVersion"]
+
+    with pytest.raises(ForbiddenError):
+        AuthorizationService(FakeUsersTable(item)).authorize_create_student("subject-123")
 
 
 @pytest.mark.parametrize(

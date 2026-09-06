@@ -1,6 +1,7 @@
 from typing import Any, Protocol
 
 from students_api.errors import ForbiddenError
+from students_api.repositories.dynamodb_values import normalize_dynamodb_value
 
 
 class UsersTable(Protocol):
@@ -53,7 +54,7 @@ class AuthorizationService:
             raise ForbiddenError
         if authorization.get("role") not in {"ADMIN", "OPERATOR"}:
             raise ForbiddenError
-        auth_version = authorization.get("authVersion")
+        auth_version = normalize_dynamodb_value(authorization.get("authVersion"))
         if not isinstance(auth_version, int) or isinstance(auth_version, bool) or auth_version < 1:
             raise ForbiddenError
         user_id = authorization.get("userId")
