@@ -33,11 +33,13 @@ export type StudentsPage = {
 
 export class ApiResponseError extends Error {
   readonly status: number
+  readonly code?: string
 
-  constructor(status: number) {
+  constructor(status: number, code?: string) {
     super(`API request failed with status ${status}`)
     this.name = 'ApiResponseError'
     this.status = status
+    this.code = code
   }
 }
 
@@ -78,6 +80,7 @@ export async function authenticatedGet(path: string): Promise<Response> {
 export async function authenticatedPost(
   path: string,
   idempotencyKey: string,
+  body?: CreateStudentRequest,
 ): Promise<Response> {
   const accessToken = await getAccessToken()
 
@@ -86,7 +89,9 @@ export async function authenticatedPost(
     headers: {
       Authorization: `Bearer ${accessToken}`,
       'Idempotency-Key': idempotencyKey,
+      ...(body ? { 'Content-Type': 'application/json' } : {}),
     },
+    ...(body ? { body: JSON.stringify(body) } : {}),
   })
 }
 
@@ -161,4 +166,64 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0
+}
+
+export type CreateStudentRequest = {
+  fullName: string
+  registrationNumber: string
+  studentEmail: string
+  phone: string
+  birthDate: string
+}
+
+export type CreatedStudent = CreateStudentRequest & {
+  studentId: string
+  status: 'ACTIVE'
+  version: number
+  createdAt: string
+  updatedAt: string
+}
+
+export async function createStudent(
+  body: CreateStudentRequest,
+  idempotencyKey: string,
+): Promise<CreatedStudent> {
+  const response = await authenticatedPost('/students', idempotencyKey, body)
+  let value: unknown
+  try {
+    value = await response.json()
+  } catch {
+    throw new ApiResponseError(response.status)
+  }
+  if (response.status !== 201 || !isCreatedStudent(value)) {
+    throw new ApiResponseError(
+      response.status,
+      response.status !== 201 && isRecord(value) && typeof value.code === 'string'
+        ? value.code : undefined,
+    )
+  }
+  return value
+}
+
+function isCreatedStudent(value: unknown): value is CreatedStudent {
+  const fields = ['studentId', 'registrationNumber', 'fullName', 'studentEmail',
+    'phone', 'birthDate', 'status', 'version', 'createdAt', 'updatedAt']
+  if (!isRecord(value) || Object.keys(value).length !== fields.length ||
+      !fields.every((field) => Object.hasOwn(value, field))) return false
+  const strings = fields.filter((field) => field !== 'version')
+  if (!strings.every((field) => isNonEmptyString(value[field]))) return false
+  const timestamp = value.createdAt
+  if (typeof timestamp !== 'string' ||
+      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(timestamp) ||
+      !Number.isFinite(Date.parse(timestamp)) ||
+      new Date(timestamp).toISOString() !== timestamp) return false
+  return typeof value.studentId === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value.studentId) &&
+    value.status === 'ACTIVE' && typeof value.version === 'number' &&
+    Number.isInteger(value.version) && value.version === 1 &&
+    value.updatedAt === timestamp && typeof value.birthDate === 'string' &&
+    /^\d{4}-\d{2}-\d{2}$/.test(value.birthDate) &&
+    value.birthDate >= '0001-01-01' &&
+    Number.isFinite(Date.parse(value.birthDate + 'T00:00:00.000Z')) &&
+    new Date(value.birthDate + 'T00:00:00.000Z').toISOString().slice(0, 10) === value.birthDate
 }
