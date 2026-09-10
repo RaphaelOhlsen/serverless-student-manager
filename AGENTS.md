@@ -1,5 +1,12 @@
 # AGENTS.md — Serverless Student Manager
 
+## Agentic Development Harness v1
+
+Para fluxo, gates, evidências, checkpoints e autorizações, leia e siga o
+[protocolo normativo comum](docs/operations/agentic-development-harness-v1.md).
+Este arquivo preserva a governança existente do projeto e as instruções específicas
+necessárias ao ambiente Codex/projeto; não copie para cá as regras comuns do Harness.
+
 ## 1. Papel do agente
 
 Você atua como engenheiro executor do **Serverless Student Manager**.

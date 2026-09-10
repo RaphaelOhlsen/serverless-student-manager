@@ -74,6 +74,13 @@ Antes de qualquer implementação, o Codex deve ler `../AGENTS.md`.
 51. `AUDIT-REPORT.md`
 52. `MANIFEST.md`
 
+## Harness v1 — leitura específica
+
+Para tarefas conduzidas pelo Harness, consultar também:
+
+- [ADR-031 — Agentic Development Harness v1](decisions/adr/adr-031-agentic-development-harness.md) — Approved.
+- [Protocolo canônico do Harness v1](operations/agentic-development-harness-v1.md).
+
 ## Leitura rápida para orientação
 
 ```text

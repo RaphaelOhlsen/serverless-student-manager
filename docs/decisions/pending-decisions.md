@@ -4,8 +4,7 @@
 **Data:** 2026-09-04
 **Status:** Engenharia em andamento
 
-As ADR-001 a ADR-030 estão aprovadas. Não há ADR proposta pendente nesta
-baseline.
+As ADR-001 a ADR-031 estão aprovadas.
 
 ## Detalhamento operacional pendente
 
