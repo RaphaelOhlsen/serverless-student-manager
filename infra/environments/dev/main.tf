@@ -346,6 +346,7 @@ module "http_api" {
 
   cors_allow_headers = [
     "Authorization",
+    "Content-Type",
     "Idempotency-Key",
   ]
 
