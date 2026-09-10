@@ -3,7 +3,7 @@
 **Projeto:** Serverless Student Manager
 **Versão:** 2.9
 **Data:** 2026-09-04
-**Arquivos listados:** 57
+**Arquivos listados:** 58
 
 O próprio `MANIFEST.md` não é listado para evitar hash autorreferencial.
 
@@ -11,7 +11,8 @@ O próprio `MANIFEST.md` não é listado para evitar hash autorreferencial.
 
 | Arquivo | SHA-256 |
 |---|---|
-| `AGENTS.md` | `beafa571941a98ccd89f087f21939be4c6d0d44b660c4e7623f15260f5844448` |
+| `AGENTS.md` | `204161a60f6fbd185cc5a9aeef09290eab5bdc39d77f700e8a60e04680544c01` |
+| `CLAUDE.md` | `53ecda846a33f286e01e9205dd5687cd641a8449d895b1037dd6b375705b920e` |
 | `RESTORE-INSTRUCTIONS.md` | `9f7d55d96f112e2bb50f73995f2ca42fbb5a4bbb5ba4b32fb54ba2beb6438e8d` |
 | `docs/AUDIT-REPORT.md` | `60eb194a127c553fcf6b9ebe991ab8ba403deebeead4bd49c284b00794e7e13f` |
 | `docs/DOCUMENTATION-VERSION.md` | `c720a20ab35e8b64456ec8697e42fdfbe6c03f44c4f1783921b6b5a61e2f0eee` |
