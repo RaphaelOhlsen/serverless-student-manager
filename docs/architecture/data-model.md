@@ -418,6 +418,24 @@ A única alteração de identidade permitida, após reconciliação completa, é
 
 O audit event da conclusão é determinístico e deve ser confirmado antes de `COMPLETED`. A ausência ou incompatibilidade da auditoria não impede o registro de `RECONCILIATION_REQUIRED` quando intervenção operacional for necessária.
 
+## Atualização parcial de aluno
+
+O contrato de `PATCH /students/{studentId}` está registrado na
+[ADR-032](../decisions/adr/adr-032-student-update.md) (Proposed).
+PROFILE, troca de UNIQUE#EMAIL quando necessária, STUDENT_UPDATED e conclusão
+idempotente INPROGRESS -> COMPLETED com resposta pública são atômicos, com condição
+de expectedVersion e identidade da operação/ator/request hash. Matrícula e sua
+reserva são preservadas. Resultado incerto exige leitura consistente da idempotência:
+COMPLETED retorna resposta original; INPROGRESS permanece não resolvido, sem inferir
+conflito de versão. ClientRequestToken é complementar à fonte durável idempotente.
+No-op finaliza apenas a idempotência condicionalmente, recuperável por leitura/retry.
+Em conflitos transacionais comprovados, versão precede e-mail; falhas de invariantes
+seguem erro interno, nunca um 409 funcional.
+Mudança de nome atualiza os atributos dos GSIs existentes. No-op com versão atual
+não altera domínio nem auditoria. Replay COMPLETED precede a checagem de versão;
+operação nova obsoleta falha antes da avaliação de no-op. Auditoria registra apenas
+nomes dos campos alterados e transição de versão, sem valores pessoais ou hashes.
+
 ## 6. Consistência
 
 - tabela base pode usar leitura fortemente consistente;
