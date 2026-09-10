@@ -1,6 +1,6 @@
 # ADR-031 — Agentic Development Harness v1
 
-**Status:** Proposed
+**Status:** Approved
 **Data:** 2026-09-10
 
 ## Contexto
@@ -10,16 +10,17 @@ execução entre sessões e fornecedores. O projeto já possui governança docum
 CI e controles de acesso; duplicar regras ou acrescentar infraestrutura aumentaria
 custo e risco sem necessidade demonstrada para a primeira versão.
 
-## Decisão proposta
+## Decisão
 
 Adotar um Harness documental, human-in-the-loop e vendor-neutral para Codex/Claude.
 A única fonte normativa é o [protocolo operacional do Harness v1](../../operations/agentic-development-harness-v1.md).
-Adaptadores mínimos apontarão/importarão essa fonte, sem reproduzir suas regras.
+Adaptadores mínimos apontam/importam essa fonte, sem reproduzir suas regras.
 O protocolo define fluxo, gates independentes, evidências e checkpoint local.
 Este ADR registra a justificativa; não é uma segunda especificação normativa.
 
-A fundação documental foi autorizada para revisão, mantendo este ADR como Proposed.
-Adoção ou edição de adaptadores e operações subsequentes exigem seus próprios gates.
+O desenho foi revisado e aprovado, e a implementação documental foi concluída.
+O adaptador Codex e a retomada em nova sessão foram validados operacionalmente.
+Edições de adaptadores e operações subsequentes exigem seus próprios gates.
 
 ## Alternativas rejeitadas para v1
 

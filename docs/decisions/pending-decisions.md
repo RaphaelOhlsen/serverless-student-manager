@@ -4,8 +4,7 @@
 **Data:** 2026-09-04
 **Status:** Engenharia em andamento
 
-As ADR-001 a ADR-030 estão aprovadas. A [ADR-031](adr/adr-031-agentic-development-harness.md)
-— Agentic Development Harness v1 — está Proposed, pendente de revisão formal.
+As ADR-001 a ADR-031 estão aprovadas.
 
 ## Detalhamento operacional pendente
 

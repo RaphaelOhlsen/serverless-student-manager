@@ -64,12 +64,7 @@
 | ADR-028 | Release de código Lambda via GitHub Actions | Approved |
 | ADR-029 | Resolução autenticada do próprio perfil | Approved |
 | ADR-030 | Criação transacional e idempotente de aluno | Approved |
-
-## 2.1 ADR proposta
-
-| ID | Decisão | Status |
-|---|---|---|
-| [ADR-031](adr/adr-031-agentic-development-harness.md) | Agentic Development Harness v1 documental | Proposed |
+| [ADR-031](adr/adr-031-agentic-development-harness.md) | Agentic Development Harness v1 documental | Approved |
 
 ## 3. Modelos de dados aprovados
 
@@ -97,9 +92,9 @@
 
 ## 5. Situação arquitetural
 
-As ADR-001 a ADR-030 estão aprovadas.
+As ADR-001 a ADR-031 estão aprovadas.
 
-Novas decisões relevantes surgidas durante a engenharia devem ser registradas em ADR-032 ou posterior. A ADR-031 está registrada como Proposed.
+Novas decisões relevantes surgidas durante a engenharia devem ser registradas em ADR-032 ou posterior.
 
 ## 6. Regra de manutenção
 

@@ -1,7 +1,7 @@
 # Agentic Development Harness v1
 
 **Natureza:** protocolo normativo de trabalho, human-in-the-loop e vendor-neutral.
-**Registro arquitetural:** [ADR-031](../decisions/adr/adr-031-agentic-development-harness.md) — Proposed.
+**Registro arquitetural:** [ADR-031](../decisions/adr/adr-031-agentic-development-harness.md) — Approved.
 
 ## Objetivo e escopo
 
@@ -10,7 +10,7 @@ permitindo retomada entre Codex e Claude sem depender do histórico completo.
 Este documento é a única fonte normativa do Harness. Adaptadores de agente devem
 somente apontar/importar esta fonte, sem duplicar regras. O Harness não substitui
 os requisitos e decisões aprovados do projeto nem controles técnicos de acesso.
-A criação documental não altera o status Proposed da ADR nem concede execução.
+A aprovação da ADR não concede autorização de execução.
 
 ## Modo econômico
 
