@@ -32,3 +32,11 @@ class IdempotencyKeyReusedError(Exception):
 
 class OperationInProgressError(Exception):
     """Raised when the same idempotent operation is still running."""
+
+
+class InvalidUpdateStudentRequestError(Exception):
+    """Raised when a partial update request violates the public contract."""
+
+
+class StudentVersionConflictError(Exception):
+    """Represents STUDENT_VERSION_CONFLICT for an outdated expected version."""

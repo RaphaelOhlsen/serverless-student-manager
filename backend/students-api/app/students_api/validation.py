@@ -6,7 +6,7 @@ from datetime import UTC, date, datetime
 from typing import Any
 
 from students_api.cursor import normalize_name
-from students_api.errors import InvalidCreateStudentRequestError
+from students_api.errors import InvalidCreateStudentRequestError, InvalidUpdateStudentRequestError
 
 _FIELDS = {"fullName", "registrationNumber", "studentEmail", "phone", "birthDate"}
 _REGISTRATION_PATTERN = re.compile(r"[A-Z0-9-]{4,20}\Z")
@@ -48,30 +48,11 @@ def parse_create_student_body(
 
     full_name = _normalize_full_name(value["fullName"])
     registration_number = value["registrationNumber"].strip().upper()
-    student_email = value["studentEmail"].strip().lower()
-    phone = value["phone"]
-    birth_date = value["birthDate"]
-
     if _REGISTRATION_PATTERN.fullmatch(registration_number) is None:
         raise InvalidCreateStudentRequestError
-    if (
-        not student_email
-        or len(student_email) > 254
-        or any(character.isspace() or _is_control(character) for character in student_email)
-    ):
-        raise InvalidCreateStudentRequestError
-    if _PHONE_PATTERN.fullmatch(phone) is None:
-        raise InvalidCreateStudentRequestError
-
-    try:
-        parsed_birth_date = date.fromisoformat(birth_date)
-    except ValueError:
-        raise InvalidCreateStudentRequestError from None
-    if parsed_birth_date.isoformat() != birth_date:
-        raise InvalidCreateStudentRequestError
-    current_date = today or datetime.now(UTC).date()
-    if parsed_birth_date > current_date:
-        raise InvalidCreateStudentRequestError
+    student_email = _normalize_email(value["studentEmail"])
+    phone = _validate_phone(value["phone"])
+    birth_date = _validate_birth_date(value["birthDate"], today=today)
 
     return CreateStudentInput(
         full_name=full_name,
@@ -81,6 +62,91 @@ def parse_create_student_body(
         phone=phone,
         birth_date=birth_date,
     )
+
+
+@dataclass(frozen=True)
+class UpdateStudentInput:
+    expected_version: int
+    full_name: str | None = None
+    student_email: str | None = None
+    phone: str | None = None
+    birth_date: str | None = None
+
+    @property
+    def normalized_name(self) -> str | None:
+        return normalize_name(self.full_name) if self.full_name is not None else None
+
+    def payload(self) -> dict[str, str | int]:
+        result: dict[str, str | int] = {"expectedVersion": self.expected_version}
+        for key, value in (
+            ("fullName", self.full_name),
+            ("studentEmail", self.student_email),
+            ("phone", self.phone),
+            ("birthDate", self.birth_date),
+        ):
+            if value is not None:
+                result[key] = value
+        return result
+
+
+def parse_update_student_body(body: str, *, today: date | None = None) -> UpdateStudentInput:
+    try:
+        value = json.loads(body, object_pairs_hook=_unique_object)
+    except (ValueError, UnicodeDecodeError):
+        raise InvalidUpdateStudentRequestError from None
+    mutable = {"fullName", "studentEmail", "phone", "birthDate"}
+    if (
+        not isinstance(value, dict)
+        or not set(value) <= mutable | {"expectedVersion"}
+        or not set(value) & mutable
+        or type(value.get("expectedVersion")) is not int
+        or value["expectedVersion"] < 1
+        or any(not isinstance(value[key], str) for key in set(value) & mutable)
+    ):
+        raise InvalidUpdateStudentRequestError
+    try:
+        return UpdateStudentInput(
+            expected_version=value["expectedVersion"],
+            full_name=_normalize_full_name(value["fullName"]) if "fullName" in value else None,
+            student_email=_normalize_email(value["studentEmail"])
+            if "studentEmail" in value
+            else None,
+            phone=_validate_phone(value["phone"]) if "phone" in value else None,
+            birth_date=(
+                _validate_birth_date(value["birthDate"], today=today)
+                if "birthDate" in value
+                else None
+            ),
+        )
+    except InvalidCreateStudentRequestError:
+        raise InvalidUpdateStudentRequestError from None
+
+
+def _normalize_email(value: str) -> str:
+    normalized = value.strip().lower()
+    if (
+        not normalized
+        or len(normalized) > 254
+        or any(character.isspace() or _is_control(character) for character in normalized)
+    ):
+        raise InvalidCreateStudentRequestError
+    return normalized
+
+
+def _validate_phone(value: str) -> str:
+    if _PHONE_PATTERN.fullmatch(value) is None:
+        raise InvalidCreateStudentRequestError
+    return value
+
+
+def _validate_birth_date(value: str, *, today: date | None) -> str:
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError:
+        raise InvalidCreateStudentRequestError from None
+    if parsed.isoformat() != value or parsed > (today or datetime.now(UTC).date()):
+        raise InvalidCreateStudentRequestError
+    return value
 
 
 def _normalize_full_name(value: str) -> str:
