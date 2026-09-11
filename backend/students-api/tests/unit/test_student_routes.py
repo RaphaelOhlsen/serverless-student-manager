@@ -1,4 +1,5 @@
 import json
+from decimal import Decimal
 from typing import Any, cast
 
 import pytest
@@ -150,14 +151,29 @@ def test_list_students_rejects_invalid_or_duplicate_parameters(query: str) -> No
     assert json.loads(response["body"])["error"] == "INVALID_REQUEST"
 
 
-def test_get_student_returns_200_without_dynamodb_keys() -> None:
+def test_get_student_returns_exact_public_model_with_numeric_version() -> None:
     service = FakeStudentService(
         {
             "PK": "STUDENT#student-123",
             "SK": "PROFILE",
+            "GSI1PK": "STATUS#ACTIVE",
+            "GSI1SK": "NAME#maria silva#STUDENT#student-123",
+            "GSI2PK": "ALL",
+            "GSI2SK": "NAME#maria silva#STUDENT#student-123",
             "studentId": "student-123",
+            "registrationNumber": "20260001",
             "fullName": "Maria Silva",
+            "normalizedName": "maria silva",
+            "studentEmail": "maria@example.com",
+            "normalizedEmail": "maria@example.com",
+            "phone": "+5527999999999",
+            "birthDate": "2000-05-10",
             "status": "ACTIVE",
+            "version": Decimal("2"),
+            "createdAt": "2026-09-10T12:07:54.388Z",
+            "createdBy": "creator-1",
+            "updatedAt": "2026-09-11T16:36:38.541Z",
+            "updatedBy": "operator-1",
         }
     )
     app = APIGatewayHttpResolver()
@@ -168,11 +184,19 @@ def test_get_student_returns_200_without_dynamodb_keys() -> None:
 
     assert response["statusCode"] == 200
     assert service.requested_student_id == "student-123"
-    assert body["studentId"] == "student-123"
-    assert body["fullName"] == "Maria Silva"
-    assert body["status"] == "ACTIVE"
-    assert "PK" not in body
-    assert "SK" not in body
+    assert body == {
+        "studentId": "student-123",
+        "registrationNumber": "20260001",
+        "fullName": "Maria Silva",
+        "studentEmail": "maria@example.com",
+        "phone": "+5527999999999",
+        "birthDate": "2000-05-10",
+        "status": "ACTIVE",
+        "version": 2,
+        "createdAt": "2026-09-10T12:07:54.388Z",
+        "updatedAt": "2026-09-11T16:36:38.541Z",
+    }
+    assert type(body["version"]) is int
 
 
 def test_get_student_returns_404_when_student_does_not_exist() -> None:

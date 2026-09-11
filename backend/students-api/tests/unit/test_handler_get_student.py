@@ -1,4 +1,5 @@
 import json
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, cast
 
@@ -48,14 +49,24 @@ def test_lambda_handler_get_student_returns_200(
         {
             "PK": "STUDENT#student-123",
             "SK": "PROFILE",
+            "GSI1PK": "STATUS#ACTIVE",
+            "GSI1SK": "NAME#maria silva#STUDENT#student-123",
+            "GSI2PK": "ALL",
+            "GSI2SK": "NAME#maria silva#STUDENT#student-123",
             "studentId": "student-123",
             "registrationNumber": "20260001",
             "fullName": "Maria Silva",
+            "normalizedName": "maria silva",
             "studentEmail": "maria@example.com",
+            "normalizedEmail": "maria@example.com",
             "phone": "+5527999999999",
             "birthDate": "2000-05-10",
             "status": "ACTIVE",
-            "version": 1,
+            "version": Decimal("2"),
+            "createdAt": "2026-09-10T12:07:54.388Z",
+            "createdBy": "creator-1",
+            "updatedAt": "2026-09-11T16:36:38.541Z",
+            "updatedBy": "operator-1",
         }
     )
 
@@ -74,11 +85,19 @@ def test_lambda_handler_get_student_returns_200(
 
     body = json.loads(cast(str, response["body"]))
 
-    assert body["studentId"] == "student-123"
-    assert body["fullName"] == "Maria Silva"
-    assert body["status"] == "ACTIVE"
-    assert "PK" not in body
-    assert "SK" not in body
+    assert body == {
+        "studentId": "student-123",
+        "registrationNumber": "20260001",
+        "fullName": "Maria Silva",
+        "studentEmail": "maria@example.com",
+        "phone": "+5527999999999",
+        "birthDate": "2000-05-10",
+        "status": "ACTIVE",
+        "version": 2,
+        "createdAt": "2026-09-10T12:07:54.388Z",
+        "updatedAt": "2026-09-11T16:36:38.541Z",
+    }
+    assert type(body["version"]) is int
 
 
 def test_lambda_handler_get_student_returns_404(

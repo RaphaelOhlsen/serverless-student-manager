@@ -26,6 +26,8 @@ from students_api.errors import (
     StudentUniquenessConflictError,
     StudentVersionConflictError,
 )
+from students_api.repositories.dynamodb_values import normalize_dynamodb_value
+from students_api.repositories.update_transaction import PUBLIC_FIELDS
 from students_api.validation import (
     CreateStudentInput,
     UpdateStudentInput,
@@ -71,17 +73,13 @@ class UpdateStudentServiceProtocol(Protocol):
     ) -> dict[str, object]: ...
 
 
-def _remove_storage_keys(student: dict[str, Any]) -> dict[str, Any]:
-    storage_keys = {
-        "PK",
-        "SK",
-        "GSI1PK",
-        "GSI1SK",
-        "GSI2PK",
-        "GSI2SK",
-    }
-
-    return {key: value for key, value in student.items() if key not in storage_keys}
+def _public_student_response(student: dict[str, Any]) -> dict[str, Any]:
+    response = {field: student[field] for field in PUBLIC_FIELDS}
+    version = normalize_dynamodb_value(response["version"])
+    if type(version) is not int:
+        raise RuntimeError("Student version must be an integer")
+    response["version"] = version
+    return response
 
 
 def register_student_routes(
@@ -241,7 +239,7 @@ def register_student_routes(
                 },
             )
 
-        return _remove_storage_keys(student)
+        return _public_student_response(student)
 
 
 def _parse_list_parameters(event: dict[str, Any]) -> dict[str, Any]:
