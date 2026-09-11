@@ -38,6 +38,10 @@ class InvalidUpdateStudentRequestError(Exception):
     """Raised when a partial update request violates the public contract."""
 
 
+class InvalidStudentLifecycleRequestError(Exception):
+    """Raised when a student lifecycle request violates the public contract."""
+
+
 class StudentVersionConflictError(Exception):
     """Represents STUDENT_VERSION_CONFLICT for an outdated expected version."""
 
