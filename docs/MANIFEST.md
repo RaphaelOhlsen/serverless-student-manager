@@ -54,8 +54,8 @@ O próprio `MANIFEST.md` não é listado para evitar hash autorreferencial.
 | `docs/decisions/adr/adr-028-lambda-application-release-via-github-actions.md` | `dec580a6979c144ee660af14e33a182e75431f386931dea5682a12a5cabd0924` |
 | `docs/decisions/adr/adr-029-self-profile-resolution.md` | `a265176f4c28d21541b326d6dc9904856082206bddf4030ff520c43ab373769f` |
 | `docs/decisions/adr/adr-030-student-creation.md` | `a8038803c0baf6b56f4e01eb0e7592fb4907af0b53916aaa057f375bfad56891` |
-| `docs/decisions/decision-register.md` | `2584b6c7f917857c0820342f9e7a4797d74a3ee0c45e09875ff526781a1a5f12` |
-| `docs/decisions/pending-decisions.md` | `f53e55b2a9e4db0a30cab8aced1aa4e1cc8ed9bb40d345fdbc8a0e7f0ffee503` |
+| `docs/decisions/decision-register.md` | `e1dc90559d6b048e9610578196d5ffb9e23a935a3e3468225d2cf51a55f5d4ae` |
+| `docs/decisions/pending-decisions.md` | `ae6fc4215fc3b3bec2465d73a10f493d8e19f252f507d2b8ae02e20802af24a3` |
 | `docs/operations/cognito-dynamodb-compensation.md` | `d2914292047679b7858e6b130f4baf04440913f9fb0809b243df22323d448807` |
 | `docs/operations/first-admin-email-verification.md` | `f067eb2b1bbea6d453d542b67fbf6d9d8a86504c2c293f5e035786518480150d` |
 | `docs/operations/first-admin-invitation-resume.md` | `33213a038e5f7400b09cb88cba7f19c75be248ac860b1bccd6af762153f6679a` |
@@ -65,8 +65,8 @@ O próprio `MANIFEST.md` não é listado para evitar hash autorreferencial.
 | `docs/overview.md` | `99c0311d0a7f4993b3bf5e715e3da7e455b20959dc33d0e1d8f6968ca7e29e97` |
 | `docs/references.md` | `f86b0ea29df69ea0ba5e6bad78e6dc661cad6ee24dc45bcc63222fd6735ff236` |
 | `docs/requirements/srs.md` | `ed3ef01ff4a7cbe3f5b913e9874ad0be3445ff237d409f130e5009fca4be4814` |
-| `docs/serverless-student-manager-ordem-de-leitura.md` | `25f7e88a22d301cdf4e9f576fa15dd412a42f3a5560055a35ca875d4e4fa738d` |
+| `docs/serverless-student-manager-ordem-de-leitura.md` | `903bec4cf89bf8cb629fa766dfcd1dbec6c85aba7626594b176eb4b2b62f4159` |
 | `docs/serverless-student-manager-ordem-de-leitura.png` | `0243000a218ca8860a10c45b0eeb21a02195664f9c4da1eacb1f8abf9ceed611` |
 | `docs/decisions/adr/adr-031-agentic-development-harness.md` | `6d0215e41b58547365c7ceb7dd0c9724f1c28f71a9ac43ded7ecb0cbec7e0e5a` |
 | `docs/operations/agentic-development-harness-v1.md` | `34aad1c59d448d5070ae2d9bbe1941bee110bec340e53d790e69f5c1323ece98` |
-| `docs/decisions/adr/adr-032-student-update.md` | `4b3f39b59871b8ec468ff782055b00d0b66359786dec717c52fc64eb3df6c2d8` |
+| `docs/decisions/adr/adr-032-student-update.md` | `f07e204c9bcd405493b24bfe54fba5415eefe877fbbcdc9034c7a2d340c6ae99` |

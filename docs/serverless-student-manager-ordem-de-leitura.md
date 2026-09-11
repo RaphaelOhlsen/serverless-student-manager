@@ -51,7 +51,7 @@ Antes de qualquer implementação, o Codex deve ler `../AGENTS.md`.
 37. `decisions/adr/adr-030-student-creation.md` — Approved
 
 Para Update Student, consultar também a
-[ADR-032 — Atualização parcial de aluno](decisions/adr/adr-032-student-update.md) — Proposed.
+[ADR-032 — Atualização parcial de aluno](decisions/adr/adr-032-student-update.md) — Approved.
 
 ## 4. Arquitetura consolidada
 

@@ -65,12 +65,7 @@
 | ADR-029 | Resolução autenticada do próprio perfil | Approved |
 | ADR-030 | Criação transacional e idempotente de aluno | Approved |
 | [ADR-031](adr/adr-031-agentic-development-harness.md) | Agentic Development Harness v1 documental | Approved |
-
-## 2.1 ADR proposta
-
-| ID | Decisão | Status |
-|---|---|---|
-| [ADR-032](adr/adr-032-student-update.md) | Atualização parcial de aluno | Proposed |
+| [ADR-032](adr/adr-032-student-update.md) | Atualização parcial de aluno | Approved |
 
 ## 3. Modelos de dados aprovados
 
@@ -98,9 +93,9 @@
 
 ## 5. Situação arquitetural
 
-As ADR-001 a ADR-031 estão aprovadas.
+As ADR-001 a ADR-032 estão aprovadas.
 
-Novas decisões relevantes surgidas durante a engenharia devem ser registradas em ADR-033 ou posterior. A ADR-032 permanece Proposed.
+Novas decisões relevantes surgidas durante a engenharia devem ser registradas em ADR-033 ou posterior.
 
 ## 6. Regra de manutenção
 
