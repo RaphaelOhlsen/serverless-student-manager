@@ -97,6 +97,26 @@ data "aws_iam_policy_document" "students_api" {
   }
 
   statement {
+    sid    = "UpdateStudentProfileAndEmailInTransaction"
+    effect = "Allow"
+
+    actions = [
+      "dynamodb:DeleteItem",
+      "dynamodb:UpdateItem",
+    ]
+
+    resources = [
+      module.student_store.table_arn,
+    ]
+
+    condition {
+      test     = "StringEquals"
+      variable = "dynamodb:EnclosingOperation"
+      values   = ["TransactWriteItems"]
+    }
+  }
+
+  statement {
     sid    = "TransactStudentCreationAudit"
     effect = "Allow"
 
@@ -150,6 +170,19 @@ data "aws_iam_policy_document" "students_api" {
       "dynamodb:PutItem",
       "dynamodb:UpdateItem",
       "dynamodb:DeleteItem",
+    ]
+
+    resources = [
+      module.idempotency_store.table_arn,
+    ]
+  }
+
+  statement {
+    sid    = "TransactStudentUpdateIdempotency"
+    effect = "Allow"
+
+    actions = [
+      "dynamodb:TransactWriteItems",
     ]
 
     resources = [
@@ -341,6 +374,7 @@ module "http_api" {
 
   cors_allow_methods = [
     "GET",
+    "PATCH",
     "POST",
   ]
 
@@ -384,6 +418,12 @@ module "http_api" {
 
     create_student = {
       route_key          = "POST /students"
+      integration_key    = "students"
+      authorization_type = "JWT"
+    }
+
+    update_student = {
+      route_key          = "PATCH /students/{studentId}"
       integration_key    = "students"
       authorization_type = "JWT"
     }
