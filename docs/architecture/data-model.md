@@ -421,7 +421,7 @@ O audit event da conclusão é determinístico e deve ser confirmado antes de `C
 ## Atualização parcial de aluno
 
 O contrato de `PATCH /students/{studentId}` está registrado na
-[ADR-032](../decisions/adr/adr-032-student-update.md) (Proposed).
+[ADR-032](../decisions/adr/adr-032-student-update.md) (Approved).
 PROFILE, troca de UNIQUE#EMAIL quando necessária, STUDENT_UPDATED e conclusão
 idempotente INPROGRESS -> COMPLETED com resposta pública são atômicos, com condição
 de expectedVersion e identidade da operação/ator/request hash. Matrícula e sua
@@ -435,6 +435,21 @@ Mudança de nome atualiza os atributos dos GSIs existentes. No-op com versão at
 não altera domínio nem auditoria. Replay COMPLETED precede a checagem de versão;
 operação nova obsoleta falha antes da avaliação de no-op. Auditoria registra apenas
 nomes dos campos alterados e transição de versão, sem valores pessoais ou hashes.
+
+## Ciclo de vida do aluno
+
+A [ADR-033](../decisions/adr/adr-033-student-lifecycle.md) (Proposed) define
+desativação e reativação. Uma transição efetiva usa três operações na mesma
+`TransactWriteItems`: Update do PROFILE condicionado à existência, versão e status
+de origem; Put do evento de auditoria; e Update da idempotência para COMPLETED com
+a resposta pública.
+
+O PROFILE altera somente `status`, `GSI1PK`, `version`, `updatedAt` e `updatedBy`.
+Ao alternar ACTIVE/INACTIVE, `GSI1PK` passa a `STATUS#<novo status>`; `GSI1SK`,
+`GSI2PK` e `GSI2SK` permanecem. O histórico e o motivo de desativação residem no
+evento `STUDENT_DEACTIVATED`, não no PROFILE. As reservas de e-mail e matrícula
+permanecem inalteradas e a reativação não as readquire. No-op conclui somente a
+idempotência e não altera PROFILE nem auditoria.
 
 ## 6. Consistência
 

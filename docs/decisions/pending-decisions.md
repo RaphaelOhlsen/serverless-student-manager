@@ -7,6 +7,10 @@
 As ADR-001 a ADR-032 estão aprovadas. O milestone Update Student foi implementado,
 validado e encerrado; não há decisão pendente específica desse milestone.
 
+A [ADR-033](adr/adr-033-student-lifecycle.md) registra o contrato aprovado para
+implementação de Deactivate/Reactivate Student e permanece Proposed até conclusão
+e validação do milestone. Delete Student permanece deferido e fora desse contrato.
+
 ## Detalhamento operacional pendente
 
 A taxonomia completa dos eventos operacionais e de auditoria para falhas, compensações, falhas de compensação, reconciliação e alertas permanece como ponto a detalhar durante a implementação e no runbook correspondente.
@@ -21,12 +25,12 @@ compensações, reconciliação e alertas continua pendente.
 
 ## Próximas atividades de engenharia
 
-1. implementar `POST /students` conforme a ADR-030;
-2. aplicar rota e IAM após revisão e autorização explícita;
-3. publicar e validar a criação em `dev`;
-4. integrar o formulário de criação no frontend;
-5. ampliar observabilidade e testes integrados/end-to-end;
-6. realizar hardening e preparar o ambiente `prod`.
+1. implementar backend de desativação/reativação conforme a ADR-033;
+2. revisar e publicar as duas rotas após autorização explícita;
+3. validar lifecycle no ambiente `dev` com fixtures descartáveis;
+4. integrar filtro de status e ações de lifecycle no frontend;
+5. promover a ADR-033 somente após implementação e validação;
+6. manter Delete Student deferido para milestone próprio.
 
 ## Itens que podem gerar novas ADRs
 

@@ -53,6 +53,9 @@ Antes de qualquer implementação, o Codex deve ler `../AGENTS.md`.
 Para Update Student, consultar também a
 [ADR-032 — Atualização parcial de aluno](decisions/adr/adr-032-student-update.md) — Approved.
 
+Para Student Lifecycle, consultar também a
+[ADR-033 — Ciclo de vida do aluno](decisions/adr/adr-033-student-lifecycle.md) — Proposed.
+
 ## 4. Arquitetura consolidada
 
 38. `architecture/architecture-overview.md`
