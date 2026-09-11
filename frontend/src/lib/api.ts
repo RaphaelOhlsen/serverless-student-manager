@@ -95,6 +95,24 @@ export async function authenticatedPost(
   })
 }
 
+export async function authenticatedPatch(
+  path: string,
+  idempotencyKey: string,
+  body: UpdateStudentRequest,
+): Promise<Response> {
+  const accessToken = await getAccessToken()
+
+  return fetch(apiUrl(path), {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+      'Idempotency-Key': idempotencyKey,
+    },
+    body: JSON.stringify(body),
+  })
+}
+
 export async function fetchCurrentUserProfile(): Promise<UserProfile> {
   const response = await authenticatedGet('/users/me')
   if (!response.ok) {
@@ -184,6 +202,22 @@ export type CreatedStudent = CreateStudentRequest & {
   updatedAt: string
 }
 
+export type StudentDetail = CreateStudentRequest & {
+  studentId: string
+  status: 'ACTIVE' | 'INACTIVE'
+  version: number
+  createdAt: string
+  updatedAt: string
+}
+
+export type UpdateStudentRequest = {
+  expectedVersion: number
+  fullName?: string
+  studentEmail?: string
+  phone?: string
+  birthDate?: string
+}
+
 export async function createStudent(
   body: CreateStudentRequest,
   idempotencyKey: string,
@@ -205,25 +239,77 @@ export async function createStudent(
   return value
 }
 
+export async function fetchStudent(studentId: string): Promise<StudentDetail> {
+  const response = await authenticatedGet(`/students/${encodeURIComponent(studentId)}`)
+  let value: unknown
+  try {
+    value = await response.json()
+  } catch {
+    throw new ApiResponseError(response.status)
+  }
+  if (!response.ok || !isStudentDetail(value)) {
+    throw new ApiResponseError(
+      response.status,
+      !response.ok && isRecord(value) && typeof value.code === 'string'
+        ? value.code
+        : undefined,
+    )
+  }
+  return value
+}
+
+export async function updateStudent(
+  studentId: string,
+  body: UpdateStudentRequest,
+  idempotencyKey: string,
+): Promise<StudentDetail> {
+  const response = await authenticatedPatch(
+    `/students/${encodeURIComponent(studentId)}`,
+    idempotencyKey,
+    body,
+  )
+  let value: unknown
+  try {
+    value = await response.json()
+  } catch {
+    throw new ApiResponseError(response.status)
+  }
+  if (response.status !== 200 || !isStudentDetail(value)) {
+    throw new ApiResponseError(
+      response.status,
+      response.status !== 200 && isRecord(value) && typeof value.code === 'string'
+        ? value.code
+        : undefined,
+    )
+  }
+  return value
+}
+
 function isCreatedStudent(value: unknown): value is CreatedStudent {
+  return isStudentDetail(value) && value.status === 'ACTIVE' &&
+    value.version === 1 && value.updatedAt === value.createdAt
+}
+
+function isStudentDetail(value: unknown): value is StudentDetail {
   const fields = ['studentId', 'registrationNumber', 'fullName', 'studentEmail',
     'phone', 'birthDate', 'status', 'version', 'createdAt', 'updatedAt']
   if (!isRecord(value) || Object.keys(value).length !== fields.length ||
       !fields.every((field) => Object.hasOwn(value, field))) return false
   const strings = fields.filter((field) => field !== 'version')
   if (!strings.every((field) => isNonEmptyString(value[field]))) return false
-  const timestamp = value.createdAt
-  if (typeof timestamp !== 'string' ||
-      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(timestamp) ||
-      !Number.isFinite(Date.parse(timestamp)) ||
-      new Date(timestamp).toISOString() !== timestamp) return false
   return typeof value.studentId === 'string' &&
     /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value.studentId) &&
-    value.status === 'ACTIVE' && typeof value.version === 'number' &&
-    Number.isInteger(value.version) && value.version === 1 &&
-    value.updatedAt === timestamp && typeof value.birthDate === 'string' &&
-    /^\d{4}-\d{2}-\d{2}$/.test(value.birthDate) &&
-    value.birthDate >= '0001-01-01' &&
+    (value.status === 'ACTIVE' || value.status === 'INACTIVE') &&
+    typeof value.version === 'number' && Number.isInteger(value.version) && value.version >= 1 &&
+    isTimestamp(value.createdAt) && isTimestamp(value.updatedAt) &&
+    value.updatedAt >= value.createdAt && typeof value.birthDate === 'string' &&
+    /^\d{4}-\d{2}-\d{2}$/.test(value.birthDate) && value.birthDate >= '0001-01-01' &&
     Number.isFinite(Date.parse(value.birthDate + 'T00:00:00.000Z')) &&
     new Date(value.birthDate + 'T00:00:00.000Z').toISOString().slice(0, 10) === value.birthDate
+}
+
+function isTimestamp(value: unknown): value is string {
+  return typeof value === 'string' &&
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value) &&
+    Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value
 }

@@ -14,7 +14,9 @@ const apiMocks = vi.hoisted(() => ({
   authenticatedPost: vi.fn(),
   createStudent: vi.fn(),
   fetchCurrentUserProfile: vi.fn(),
+  fetchStudent: vi.fn(),
   fetchStudents: vi.fn(),
+  updateStudent: vi.fn(),
 }))
 
 vi.mock('aws-amplify/auth', () => ({
@@ -27,9 +29,19 @@ vi.mock('aws-amplify/auth', () => ({
 vi.mock('@/lib/api', () => ({
   authenticatedPost: apiMocks.authenticatedPost,
   createStudent: apiMocks.createStudent,
-  ApiResponseError: class ApiResponseError extends Error {},
+  ApiResponseError: class ApiResponseError extends Error {
+    status: number
+    code?: string
+    constructor(status: number, code?: string) {
+      super()
+      this.status = status
+      this.code = code
+    }
+  },
   fetchCurrentUserProfile: apiMocks.fetchCurrentUserProfile,
+  fetchStudent: apiMocks.fetchStudent,
   fetchStudents: apiMocks.fetchStudents,
+  updateStudent: apiMocks.updateStudent,
   AuthSessionUnavailableError: class AuthSessionUnavailableError extends Error {},
 }))
 
@@ -61,6 +73,15 @@ const studentsPage = {
   ],
   nextCursor: null,
   hasMore: false,
+}
+const studentDetail = {
+  ...studentsPage.items[0],
+  studentEmail: 'aluno@example.test',
+  phone: '+15555550123',
+  birthDate: '2000-01-15',
+  version: 3,
+  createdAt: '2026-09-06T10:28:53.080Z',
+  updatedAt: '2026-09-07T10:28:53.080Z',
 }
 
 function response(status: number, body?: object): Response {
@@ -357,4 +378,57 @@ it('resets activation on logout and isolates the old finally from a new session'
   expect((screen.getByRole('button', { name: 'Ativar acesso' }) as HTMLButtonElement).disabled).toBe(false)
   expect((screen.getByRole('button', { name: 'Sair' }) as HTMLButtonElement).disabled).toBe(false)
   cleanup()
+})
+
+describe('student update integration', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    authMocks.getCurrentUser.mockResolvedValue({})
+    authMocks.signOut.mockResolvedValue(undefined)
+    apiMocks.fetchCurrentUserProfile.mockResolvedValue(activeProfile)
+    apiMocks.fetchStudents.mockResolvedValue(studentsPage)
+    apiMocks.fetchStudent.mockResolvedValue(studentDetail)
+    apiMocks.updateStudent.mockResolvedValue({
+      ...studentDetail,
+      fullName: 'Aluno Atualizado',
+      version: 4,
+      updatedAt: '2026-09-08T10:28:53.080Z',
+    })
+  })
+
+  afterEach(() => {
+    cleanup()
+    vi.restoreAllMocks()
+    vi.clearAllMocks()
+  })
+
+  it('loads detail before opening a prefilled edit form', async () => {
+    let resolve!: (value: typeof studentDetail) => void
+    apiMocks.fetchStudent.mockReturnValueOnce(new Promise((done) => { resolve = done }))
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Editar' }))
+    expect(screen.getByText('Carregando dados do aluno…')).toBeTruthy()
+    expect(screen.queryByRole('form', { name: 'Editar aluno' })).toBeNull()
+    await act(async () => resolve(studentDetail))
+    expect(await screen.findByRole('form', { name: 'Editar aluno' })).toBeTruthy()
+    expect((screen.getByLabelText('Nome completo') as HTMLInputElement).value).toBe(
+      studentDetail.fullName,
+    )
+    expect(apiMocks.fetchStudent).toHaveBeenCalledWith(studentDetail.studentId)
+  })
+
+  it('uses the returned response to close editing and update the list', async () => {
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Editar' }))
+    await screen.findByRole('form', { name: 'Editar aluno' })
+    fireEvent.change(screen.getByLabelText('Nome completo'), {
+      target: { value: 'Aluno Atualizado' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar alterações' }))
+    expect(await screen.findByText('Aluno atualizado com sucesso.')).toBeTruthy()
+    expect(screen.queryByRole('form', { name: 'Editar aluno' })).toBeNull()
+    expect(screen.getByText('Aluno Atualizado')).toBeTruthy()
+    expect(screen.queryByText('Aluno Exemplo')).toBeNull()
+    expect(apiMocks.fetchStudents).toHaveBeenCalledOnce()
+  })
 })
