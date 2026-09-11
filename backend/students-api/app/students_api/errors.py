@@ -40,3 +40,11 @@ class InvalidUpdateStudentRequestError(Exception):
 
 class StudentVersionConflictError(Exception):
     """Represents STUDENT_VERSION_CONFLICT for an outdated expected version."""
+
+
+class StudentUpdateInvariantError(RuntimeError):
+    """Technical invariant failure; never a functional conflict."""
+
+
+class StudentUpdateUnresolvedError(RuntimeError):
+    """Transaction evidence is insufficient; caller must resolve durable idempotency."""

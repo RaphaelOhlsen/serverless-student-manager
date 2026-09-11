@@ -8,7 +8,13 @@ from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 
 from students_api.config import SERVICE_NAME
 from students_api.cursor import CursorPosition
+from students_api.errors import StudentUpdateUnresolvedError
 from students_api.repositories.dynamodb_values import normalize_dynamodb_value
+from students_api.repositories.update_transaction import (
+    UpdateTransactionContext,
+    build_update_transaction,
+    classify_update_failure,
+)
 
 logger = Logger(service=SERVICE_NAME)
 
@@ -140,6 +146,36 @@ class StudentRepository:
                     ]
             logger.error("Student creation transaction failed", extra=details)
             raise
+
+    def update_student(
+        self,
+        *,
+        current: dict[str, Any],
+        target: dict[str, Any],
+        expected_version: int,
+        context: UpdateTransactionContext,
+        idempotency_table_name: str,
+    ) -> None:
+        """Persist one effective change and its durable replay response atomically."""
+        client, students_table, audit_table = self._write_dependencies()
+        items, email_changed = build_update_transaction(
+            current=current,
+            target=target,
+            expected_version=expected_version,
+            context=context,
+            students_table=students_table,
+            audit_table=audit_table,
+            idempotency_table=idempotency_table_name,
+        )
+        try:
+            client.transact_write_items(
+                TransactItems=items,
+                ClientRequestToken=context.client_request_token,
+            )
+        except ClientError as error:
+            classify_update_failure(error, email_changed=email_changed)
+        except Exception as error:
+            raise StudentUpdateUnresolvedError from error
 
     def get_registration_reservation(self, registration_number: str) -> dict[str, object] | None:
         return self._get_consistent(
