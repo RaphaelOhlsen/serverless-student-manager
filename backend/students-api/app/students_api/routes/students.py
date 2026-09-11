@@ -8,19 +8,30 @@ from aws_lambda_powertools.event_handler import (
     content_types,
 )
 
-from students_api.dependencies import get_create_student_service, get_student_service
+from students_api.dependencies import (
+    get_create_student_service,
+    get_student_service,
+    get_update_student_service,
+)
 from students_api.errors import (
     ForbiddenError,
     IdempotencyKeyReusedError,
     InvalidCreateStudentRequestError,
     InvalidListRequestError,
+    InvalidUpdateStudentRequestError,
     OperationInProgressError,
     RegistrationNumberAlreadyExistsError,
     StudentEmailAlreadyExistsError,
     StudentNotFoundError,
     StudentUniquenessConflictError,
+    StudentVersionConflictError,
 )
-from students_api.validation import CreateStudentInput, parse_create_student_body
+from students_api.validation import (
+    CreateStudentInput,
+    UpdateStudentInput,
+    parse_create_student_body,
+    parse_update_student_body,
+)
 
 
 class StudentServiceProtocol(Protocol):
@@ -48,6 +59,18 @@ class CreateStudentServiceProtocol(Protocol):
     ) -> dict[str, object]: ...
 
 
+class UpdateStudentServiceProtocol(Protocol):
+    def update_student(
+        self,
+        *,
+        cognito_sub: str | None,
+        idempotency_key: str,
+        request_id: str | None,
+        student_id: str,
+        patch: UpdateStudentInput,
+    ) -> dict[str, object]: ...
+
+
 def _remove_storage_keys(student: dict[str, Any]) -> dict[str, Any]:
     storage_keys = {
         "PK",
@@ -65,6 +88,7 @@ def register_student_routes(
     app: APIGatewayHttpResolver,
     service: StudentServiceProtocol | None = None,
     create_service: CreateStudentServiceProtocol | None = None,
+    update_service: UpdateStudentServiceProtocol | None = None,
 ) -> None:
     @app.post("/students")
     def create_student() -> Response[dict[str, object]]:
@@ -111,6 +135,64 @@ def register_student_routes(
                 409,
                 "STUDENT_UNIQUENESS_CONFLICT",
                 "Student uniqueness conflict",
+                correlation_id,
+            )
+        except IdempotencyKeyReusedError:
+            return _canonical_error_response(
+                409, "IDEMPOTENCY_KEY_REUSED", "Idempotency key reused", correlation_id
+            )
+        except OperationInProgressError:
+            return _canonical_error_response(
+                409, "OPERATION_IN_PROGRESS", "Operation in progress", correlation_id
+            )
+        except Exception:
+            return _canonical_error_response(
+                500, "INTERNAL_ERROR", "Unexpected internal error", correlation_id
+            )
+
+    @app.patch("/students/<student_id>")
+    def update_student(student_id: str) -> Response[dict[str, object]]:
+        event = app.current_event.raw_event
+        correlation_id = _request_id(event)
+        try:
+            cognito_sub, key, patch = _parse_update_request(event)
+            active_service = (
+                update_service if update_service is not None else get_update_student_service()
+            )
+            result = active_service.update_student(
+                cognito_sub=cognito_sub,
+                idempotency_key=key,
+                request_id=correlation_id,
+                student_id=student_id,
+                patch=patch,
+            )
+            return Response(
+                status_code=200,
+                content_type=content_types.APPLICATION_JSON,
+                body=result,
+            )
+        except InvalidUpdateStudentRequestError:
+            return _canonical_error_response(
+                400, "INVALID_REQUEST", "Invalid student update request", correlation_id
+            )
+        except ForbiddenError:
+            return _canonical_error_response(403, "FORBIDDEN", "Forbidden", correlation_id)
+        except StudentNotFoundError:
+            return _canonical_error_response(
+                404, "STUDENT_NOT_FOUND", "Student not found", correlation_id
+            )
+        except StudentVersionConflictError:
+            return _canonical_error_response(
+                409,
+                "STUDENT_VERSION_CONFLICT",
+                "Student version conflict",
+                correlation_id,
+            )
+        except StudentEmailAlreadyExistsError:
+            return _canonical_error_response(
+                409,
+                "STUDENT_EMAIL_ALREADY_EXISTS",
+                "Student email already exists",
                 correlation_id,
             )
         except IdempotencyKeyReusedError:
@@ -240,6 +322,30 @@ def _parse_create_request(
     if not isinstance(body, str):
         raise InvalidCreateStudentRequestError
     return _authenticated_access_sub(event), key, parse_create_student_body(body)
+
+
+def _parse_update_request(
+    event: dict[str, Any],
+) -> tuple[str | None, str, UpdateStudentInput]:
+    if event.get("rawQueryString") not in {None, ""} or event.get("isBase64Encoded") is True:
+        raise InvalidUpdateStudentRequestError
+    headers = event.get("headers")
+    if not isinstance(headers, dict):
+        raise InvalidUpdateStudentRequestError
+    normalized_headers = {str(name).lower(): value for name, value in headers.items()}
+    content_type = normalized_headers.get("content-type")
+    if (
+        not isinstance(content_type, str)
+        or content_type.split(";", 1)[0].strip().lower() != "application/json"
+    ):
+        raise InvalidUpdateStudentRequestError
+    key = normalized_headers.get("idempotency-key")
+    if not isinstance(key, str) or not _is_canonical_uuid(key):
+        raise InvalidUpdateStudentRequestError
+    body = event.get("body")
+    if not isinstance(body, str):
+        raise InvalidUpdateStudentRequestError
+    return _authenticated_access_sub(event), key, parse_update_student_body(body)
 
 
 def _authenticated_access_sub(event: dict[str, Any]) -> str | None:

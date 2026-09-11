@@ -64,6 +64,11 @@ variables {
       integration_key    = "students"
       authorization_type = "JWT"
     }
+    update_student = {
+      route_key          = "PATCH /students/{studentId}"
+      integration_key    = "students"
+      authorization_type = "JWT"
+    }
     activate_current_user = {
       route_key          = "POST /users/me/activation"
       integration_key    = "users"
@@ -82,6 +87,7 @@ variables {
 
   cors_allow_methods = [
     "GET",
+    "PATCH",
     "POST",
     "PUT",
     "DELETE",
@@ -154,6 +160,14 @@ run "plans_http_api" {
       "POST"
     )
     error_message = "The HTTP API CORS configuration must allow POST."
+  }
+
+  assert {
+    condition = contains(
+      one(aws_apigatewayv2_api.this.cors_configuration).allow_methods,
+      "PATCH"
+    )
+    error_message = "The HTTP API CORS configuration must allow PATCH."
   }
 
   assert {
@@ -288,6 +302,16 @@ run "plans_http_api" {
   }
 
   assert {
+    condition     = aws_apigatewayv2_route.this["update_student"].route_key == "PATCH /students/{studentId}"
+    error_message = "The update-student route key is incorrect."
+  }
+
+  assert {
+    condition     = aws_apigatewayv2_route.this["update_student"].authorization_type == "JWT"
+    error_message = "The update-student route must use JWT authorization."
+  }
+
+  assert {
     condition     = aws_apigatewayv2_route.this["activate_current_user"].route_key == "POST /users/me/activation"
     error_message = "The activation route key is incorrect."
   }
@@ -419,6 +443,22 @@ run "wires_computed_references" {
       == "integrations/${aws_apigatewayv2_integration.lambda["students"].id}"
     )
     error_message = "The create-student route must use the students integration."
+  }
+
+  assert {
+    condition = (
+      aws_apigatewayv2_route.this["update_student"].authorizer_id
+      == aws_apigatewayv2_authorizer.jwt.id
+    )
+    error_message = "The update-student route must use the configured JWT authorizer."
+  }
+
+  assert {
+    condition = (
+      aws_apigatewayv2_route.this["update_student"].target
+      == "integrations/${aws_apigatewayv2_integration.lambda["students"].id}"
+    )
+    error_message = "The update-student route must use the students integration."
   }
 
   assert {

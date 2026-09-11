@@ -376,8 +376,20 @@ Administrators and Operators shall be able to update mutable student data.
 - `studentId` and registration number cannot be changed.
 - Duplicate email is rejected.
 - Validation rules are reapplied.
-- Audit fields and record version are updated.
+- Effective changes update audit fields and increment the record version exactly once.
+- A no-op preserves version and update timestamps and produces no update audit event.
 - Silent overwriting of a newer version is prevented.
+- Partial updates use `PATCH /students/{studentId}` with mandatory integer
+  `expectedVersion >= 1` and at least one mutable field. Active and inactive
+  students may be corrected; identity, registration and status cannot be patched.
+- Completed idempotent replay returns the original response before checking the
+  current version. New requests with stale versions return 409 before no-op evaluation.
+- Effective updates atomically persist profile, email reservation changes and
+  STUDENT_UPDATED/SUCCESS audit. Audit changes contain field names and version
+  transition only, without personal values or their hashes.
+
+The approved contract details are recorded in [ADR-032](../decisions/adr/adr-032-student-update.md),
+whose lifecycle status remains Proposed pending implementation/review.
 
 ### RF-ALU-008 — Deactivate student
 
@@ -710,7 +722,7 @@ Reactivation preserves the previous deactivation history.
 Each student record shall contain a version number.
 
 - Initial value: `1`.
-- Every update increments the version.
+- Every effective update increments the version; a version-matching no-op preserves it.
 - An outdated version returns HTTP `409 Conflict`.
 
 #### RN-ALU-011 — Data minimization

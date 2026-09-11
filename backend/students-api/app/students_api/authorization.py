@@ -35,6 +35,12 @@ class AuthorizationService:
             raise ForbiddenError
 
     def authorize_create_student(self, cognito_sub: str | None) -> str:
+        return self._authorize_student_write(cognito_sub)
+
+    def authorize_update_student(self, cognito_sub: str | None) -> str:
+        return self._authorize_student_write(cognito_sub)
+
+    def _authorize_student_write(self, cognito_sub: str | None) -> str:
         if not cognito_sub:
             raise ForbiddenError
 
