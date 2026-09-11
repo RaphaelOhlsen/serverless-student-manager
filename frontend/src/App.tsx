@@ -8,14 +8,17 @@ import {
 } from 'aws-amplify/auth'
 
 import { CreateStudentForm } from '@/components/CreateStudentForm'
+import { EditStudentForm } from '@/components/EditStudentForm'
 import { Button } from '@/components/ui/button'
 import {
   authenticatedPost,
   AuthSessionUnavailableError,
   fetchCurrentUserProfile,
+  fetchStudent,
   fetchStudents,
   type StudentSummary,
   type CreatedStudent,
+  type StudentDetail,
   type UserProfile,
 } from '@/lib/api'
 
@@ -106,8 +109,13 @@ function App() {
   const activationInFlight = useRef(false)
   const sessionGeneration = useRef(0)
   const listGeneration = useRef(0)
+  const editGeneration = useRef(0)
   const [showCreate, setShowCreate] = useState(false)
   const [creationMessage, setCreationMessage] = useState<string | null>(null)
+  const [editingStudent, setEditingStudent] = useState<StudentDetail | null>(null)
+  const [editingStudentId, setEditingStudentId] = useState<string | null>(null)
+  const [editError, setEditError] = useState<string | null>(null)
+  const [updateMessage, setUpdateMessage] = useState<string | null>(null)
 
   const loadStudents = useCallback(async () => {
     const generation = ++listGeneration.current
@@ -131,8 +139,13 @@ function App() {
   ) => {
     const session = ++sessionGeneration.current
     ++listGeneration.current
+    ++editGeneration.current
     setShowCreate(false)
     setCreationMessage(null)
+    setEditingStudent(null)
+    setEditingStudentId(null)
+    setEditError(null)
+    setUpdateMessage(null)
     const isSessionCurrent = () => isCurrent() && session === sessionGeneration.current
     setAuthView('profile-resolution')
     setProfileError(null)
@@ -165,6 +178,7 @@ function App() {
   const invalidateRequests = useCallback(() => {
     ++sessionGeneration.current
     ++listGeneration.current
+    ++editGeneration.current
   }, [])
 
   useEffect(() => {
@@ -365,7 +379,10 @@ function App() {
   async function handleSignOut() {
     ++sessionGeneration.current
     ++listGeneration.current
+    ++editGeneration.current
     setShowCreate(false)
+    setEditingStudent(null)
+    setEditingStudentId(null)
     setIsStudentsLoading(false)
     setIsActivationLoading(false)
     activationInFlight.current = false
@@ -381,6 +398,8 @@ function App() {
       setProfileError(null)
       setStudents([])
       setCreationMessage(null)
+      setEditError(null)
+      setUpdateMessage(null)
       setStudentsError(null)
       setActivationMessage(null)
       setIsActivationError(false)
@@ -718,6 +737,47 @@ function App() {
       setShowCreate(false)
       setCreationMessage('Aluno criado com sucesso.')
     }
+    async function beginEdit(studentId: string) {
+      const generation = ++editGeneration.current
+      const activeSession = sessionGeneration.current
+      setShowCreate(false)
+      setCreationMessage(null)
+      setUpdateMessage(null)
+      setEditError(null)
+      setEditingStudent(null)
+      setEditingStudentId(studentId)
+      try {
+        const detail = await fetchStudent(studentId)
+        if (generation !== editGeneration.current ||
+            activeSession !== sessionGeneration.current) return
+        setEditingStudent(detail)
+      } catch {
+        if (generation === editGeneration.current &&
+            activeSession === sessionGeneration.current) {
+          setEditError('Não foi possível carregar os dados do aluno. Tente novamente.')
+        }
+      } finally {
+        if (generation === editGeneration.current &&
+            activeSession === sessionGeneration.current) setEditingStudentId(null)
+      }
+    }
+    function studentUpdated(student: StudentDetail) {
+      if (session !== sessionGeneration.current) return
+      ++listGeneration.current
+      ++editGeneration.current
+      const summary: StudentSummary = {
+        studentId: student.studentId,
+        fullName: student.fullName,
+        registrationNumber: student.registrationNumber,
+        status: student.status,
+      }
+      setStudents((current) => current.map((item) =>
+        item.studentId === summary.studentId ? summary : item))
+      setEditingStudent(null)
+      setEditingStudentId(null)
+      setEditError(null)
+      setUpdateMessage('Aluno atualizado com sucesso.')
+    }
     return (
       <main className="operational-page">
         <section className="operational-card" aria-labelledby="students-title">
@@ -739,17 +799,30 @@ function App() {
             </Button>
           </header>
 
-          {!showCreate ? (
-            <Button type="button" disabled={isLoading} onClick={() => {
-              setCreationMessage(null)
-              setShowCreate(true)
-            }}>Novo aluno</Button>
-          ) : (
+          {showCreate ? (
             <CreateStudentForm key={session} disabled={isLoading}
               onCancel={() => setShowCreate(false)} onCreated={studentCreated} />
+          ) : editingStudent ? (
+            <EditStudentForm key={`${session}-${editingStudent.studentId}`}
+              student={editingStudent} disabled={isLoading}
+              onCancel={() => {
+                ++editGeneration.current
+                setEditingStudent(null)
+              }} onUpdated={studentUpdated} />
+          ) : editingStudentId ? (
+            <p className="auth-notice" role="status">Carregando dados do aluno…</p>
+          ) : (
+            <Button type="button" disabled={isLoading} onClick={() => {
+              setCreationMessage(null)
+              setUpdateMessage(null)
+              setEditError(null)
+              setShowCreate(true)
+            }}>Novo aluno</Button>
           )}
           {creationMessage ? <p className="auth-notice" role="status">{creationMessage}</p> : null}
-          {!showCreate ? <>
+          {updateMessage ? <p className="auth-notice" role="status">{updateMessage}</p> : null}
+          {editError ? <p className="auth-error" role="alert">{editError}</p> : null}
+          {!showCreate && !editingStudent ? <>
           {activationMessage ? (
             <p className="auth-notice" role="status">
               {activationMessage}
@@ -785,7 +858,14 @@ function App() {
                     <h2>{student.fullName}</h2>
                     <p>Matrícula: {student.registrationNumber}</p>
                   </div>
-                  <span className="student-status">{student.status}</span>
+                  <div className="student-card-actions">
+                    <span className="student-status">{student.status}</span>
+                    <Button type="button" variant="outline"
+                      disabled={editingStudentId !== null || isLoading}
+                      onClick={() => void beginEdit(student.studentId)}>
+                      Editar
+                    </Button>
+                  </div>
                 </li>
               ))}
             </ul>

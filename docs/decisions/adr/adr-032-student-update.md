@@ -1,6 +1,6 @@
 # ADR-032 — Atualização parcial de aluno
 
-**Status:** Proposed
+**Status:** Approved
 **Data:** 2026-09-10
 
 ## Contexto
@@ -9,8 +9,8 @@ RF-ALU-007, RF-ALU-011–013 e UC-004 exigem correção de dados, matrícula
 imutável, unicidade de e-mail e proteção contra sobrescrita concorrente.
 As ADR-005, ADR-012, ADR-021 e ADR-026 definem persistência, idempotência,
 auditoria e índices; a ADR-030 fornece o precedente transacional de criação.
-As decisões deste contrato foram aprovadas pelo responsável; o ADR permanece
-Proposed durante a documentação e implementação, sem autorizar publicação ou operação.
+As decisões deste contrato foram aprovadas pelo responsável e implementadas nos
+gates próprios, sem que o status deste ADR autorize publicação ou operação.
 
 ## Decisão e contrato HTTP
 
@@ -190,8 +190,22 @@ Não expor PII, detalhes internos ou cancellation reasons nos erros.
 
 ## Consequências
 
-Implementação exige rota PATCH, CORS correspondente, autorização funcional,
+A implementação inclui rota PATCH, CORS correspondente, autorização funcional,
 serviço transacional, idempotência isolada, UI de edição e testes de concorrência,
-replay, no-op e unicidade. IAM deverá conceder somente ações necessárias às
-operações transacionais aprovadas. Essas mudanças não são implementadas por este ADR.
-Publicação, aplicação de infraestrutura e validação real em dev exigem gates próprios.
+replay, no-op e unicidade. O IAM concede somente as ações necessárias às operações
+transacionais aprovadas. Publicação, infraestrutura e validações reais em `dev`
+foram executadas em gates próprios.
+
+## Validação e encerramento
+
+Evidências de encerramento:
+
+- `UPDATE_STUDENT_BACKEND_E2E=PASS`;
+- UI detail-before-edit, happy path, conflito de versão, no-op, conflito de e-mail e
+  auditoria sem valores ou hashes de PII: `PASS`;
+- code guard, evidência unitária e teste de regressão de double-submit: `PASS`;
+- `LIVE_VISUAL_EVIDENCE=NOT_PRESERVED` para double-submit;
+- `DOUBLE_SUBMIT_ACCEPTANCE=PASS_BY_AUTOMATED_EVIDENCE`;
+- `UPDATE_STUDENT_MILESTONE=CLOSED`.
+
+A aceitação automatizada não representa observação visual de double-submit.

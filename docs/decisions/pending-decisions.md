@@ -4,10 +4,8 @@
 **Data:** 2026-09-04
 **Status:** Engenharia em andamento
 
-As ADR-001 a ADR-031 estão aprovadas.
-A [ADR-032](adr/adr-032-student-update.md) registra o contrato de Update Student
-com decisões aprovadas pelo responsável; permanece Proposed, pendente de
-implementação e revisão, sem autorizar operações.
+As ADR-001 a ADR-032 estão aprovadas. O milestone Update Student foi implementado,
+validado e encerrado; não há decisão pendente específica desse milestone.
 
 ## Detalhamento operacional pendente
 

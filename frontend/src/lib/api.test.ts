@@ -12,6 +12,8 @@ vi.mock('@/config/env', () => ({ env: { apiBaseUrl: 'https://api.example.test/' 
 import {
   ApiResponseError,
   createStudent,
+  fetchStudent,
+  updateStudent,
   authenticatedPost,
   fetchCurrentUserProfile,
   fetchStudents,
@@ -144,5 +146,68 @@ describe('create student contract', () => {
   it('extracts only the error code and status', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ code: 'IDEMPOTENCY_KEY_REUSED', message: 'sensitive' }), { status: 409 }))
     await expect(createStudent(body, 'key')).rejects.toMatchObject({ status: 409, code: 'IDEMPOTENCY_KEY_REUSED', message: 'API request failed with status 409' })
+  })
+})
+
+describe('update student contract', () => {
+  const detail = {
+    fullName: 'Aluno Teste', registrationNumber: 'MAT-001',
+    studentEmail: 'a@example.com', phone: '+15555550123', birthDate: '2000-01-15',
+    studentId: '00000000-0000-4000-8000-000000000100', status: 'INACTIVE', version: 3,
+    createdAt: '2026-09-06T10:28:53.080Z', updatedAt: '2026-09-07T10:28:53.080Z',
+  }
+  beforeEach(() => authMocks.fetchAuthSession.mockResolvedValue({
+    tokens: { accessToken: { toString: () => 'fake-access-token' } },
+  }))
+  afterEach(() => { vi.restoreAllMocks(); vi.clearAllMocks() })
+
+  it('gets and validates the full student detail before editing', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(detail), { status: 200 }),
+    )
+    await expect(fetchStudent(detail.studentId)).resolves.toEqual(detail)
+    expect(fetchMock).toHaveBeenCalledWith(
+      `https://api.example.test/students/${detail.studentId}`,
+      { method: 'GET', headers: { Authorization: 'Bearer fake-access-token' } },
+    )
+  })
+
+  it('patches only the supplied fields with access token and idempotency key', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ ...detail, fullName: 'Novo Nome', version: 4 }), { status: 200 }),
+    )
+    const request = { expectedVersion: 3, fullName: 'Novo Nome' }
+    await updateStudent(detail.studentId, request, '00000000-0000-4000-8000-000000000001')
+    expect(fetchMock).toHaveBeenCalledWith(
+      `https://api.example.test/students/${detail.studentId}`,
+      {
+        method: 'PATCH',
+        headers: {
+          Authorization: 'Bearer fake-access-token',
+          'Content-Type': 'application/json',
+          'Idempotency-Key': '00000000-0000-4000-8000-000000000001',
+        },
+        body: JSON.stringify(request),
+      },
+    )
+  })
+
+  it('preserves canonical update error status and code', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      code: 'STUDENT_VERSION_CONFLICT', message: 'not exposed',
+    }), { status: 409 }))
+    await expect(updateStudent(detail.studentId, {
+      expectedVersion: 3, fullName: 'Novo Nome',
+    }, 'key')).rejects.toMatchObject({ status: 409, code: 'STUDENT_VERSION_CONFLICT' })
+  })
+
+  it('rejects incomplete or internally extended detail responses', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
+      ...detail, version: '3',
+    }), { status: 200 })).mockResolvedValueOnce(new Response(JSON.stringify({
+      ...detail, updatedBy: 'internal',
+    }), { status: 200 }))
+    await expect(fetchStudent(detail.studentId)).rejects.toBeInstanceOf(ApiResponseError)
+    await expect(fetchStudent(detail.studentId)).rejects.toBeInstanceOf(ApiResponseError)
   })
 })

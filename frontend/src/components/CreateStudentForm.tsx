@@ -2,42 +2,26 @@ import { type FormEvent, useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { ApiResponseError, AuthSessionUnavailableError, createStudent,
   type CreatedStudent, type CreateStudentRequest } from '@/lib/api'
+import {
+  normalizeMutableStudentFields,
+  normalizeRegistrationNumber,
+  validateMutableStudentFields,
+  validateRegistrationNumber,
+} from '@/lib/studentFields'
 
 const empty: CreateStudentRequest = {
   fullName: '', registrationNumber: '', studentEmail: '', phone: '', birthDate: '',
 }
-// Python str.isspace() (used by strip/split), including the C0 separators.
-// eslint-disable-next-line no-control-regex -- Required to mirror Python whitespace exactly.
-const whitespace = /[\u0009-\u000d\u001c-\u0020\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+/u
-const trim = (value: string) => value.replace(new RegExp(`^${whitespace.source}|${whitespace.source}$`, 'gu'), '')
-const controls = /\p{C}/u
-
 function normalize(input: CreateStudentRequest): CreateStudentRequest {
   return {
-    ...input,
-    fullName: trim(input.fullName).split(whitespace).join(' '),
-    registrationNumber: trim(input.registrationNumber).toUpperCase(),
-    studentEmail: trim(input.studentEmail).toLowerCase(),
+    ...normalizeMutableStudentFields(input),
+    registrationNumber: normalizeRegistrationNumber(input.registrationNumber),
   }
 }
 
 function validate(raw: CreateStudentRequest, value: CreateStudentRequest): string | null {
-  if (controls.test(raw.fullName) || [...value.fullName].length < 3 || [...value.fullName].length > 150)
-    return 'Informe um nome de 3 a 150 caracteres, sem caracteres de controle.'
-  if (!/^[A-Z0-9-]{4,20}$/.test(value.registrationNumber))
-    return 'Informe uma matrícula de 4 a 20 letras, números ou hífens.'
-  if (!value.studentEmail || [...value.studentEmail].length > 254 ||
-      whitespace.test(value.studentEmail) || controls.test(value.studentEmail))
-    return 'Informe um e-mail de até 254 caracteres, sem espaços ou caracteres de controle.'
-  if (!/^\+[1-9][0-9]{7,14}$/.test(value.phone))
-    return 'Informe o telefone com +, código do país e números (E.164).'
-  const date = value.birthDate
-  const parsed = new Date(date + 'T00:00:00.000Z')
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date < '0001-01-01' ||
-      !Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date ||
-      date > new Date().toISOString().slice(0, 10))
-    return 'Informe uma data de nascimento válida, não futura.'
-  return null
+  return validateMutableStudentFields(raw, value) ??
+    validateRegistrationNumber(value.registrationNumber)
 }
 
 function messageFor(error: unknown): string {

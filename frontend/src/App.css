@@ -102,6 +102,26 @@
   font-weight: 600;
 }
 
+.student-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.student-readonly-fields {
+  display: grid;
+  gap: 0.35rem;
+  border-radius: var(--radius-md);
+  background: var(--muted);
+  padding: 0.75rem;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+}
+
+.student-readonly-fields strong {
+  color: var(--foreground);
+}
+
 .auth-heading {
   display: grid;
   gap: 0.5rem;
@@ -241,5 +261,9 @@
   .student-card {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .student-card-actions {
+    justify-content: space-between;
   }
 }
