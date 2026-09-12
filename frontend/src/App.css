@@ -108,6 +108,74 @@
   gap: 0.75rem;
 }
 
+.student-status-filter {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.student-status-filter label {
+  font-size: 0.875rem;
+  font-weight: 550;
+}
+
+.student-status-filter select,
+.form-field textarea {
+  border: 1px solid var(--input);
+  border-radius: var(--radius-md);
+  background: var(--background);
+  padding: 0.6rem 0.75rem;
+  color: var(--foreground);
+  outline: none;
+}
+
+.student-status-filter select:focus-visible,
+.form-field textarea:focus-visible {
+  border-color: var(--ring);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--ring) 25%, transparent);
+}
+
+.form-field textarea {
+  min-height: 7rem;
+  resize: vertical;
+}
+
+.field-guidance {
+  color: var(--muted-foreground);
+  font-size: 0.8rem;
+}
+
+.dialog-backdrop {
+  position: fixed;
+  z-index: 20;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+  background: oklch(0.15 0.02 250 / 45%);
+}
+
+.lifecycle-dialog {
+  width: min(100%, 30rem);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--card);
+  padding: 1.5rem;
+  color: var(--card-foreground);
+  box-shadow: 0 1.5rem 4rem oklch(0.1 0.02 250 / 25%);
+}
+
+.lifecycle-dialog h2 {
+  font-size: 1.25rem;
+  font-weight: 650;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+}
+
 .student-readonly-fields {
   display: grid;
   gap: 0.35rem;
