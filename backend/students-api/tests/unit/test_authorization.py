@@ -100,6 +100,41 @@ def test_other_role_cannot_update_student() -> None:
         AuthorizationService(table).authorize_update_student("subject-123")
 
 
+def test_active_admin_can_manage_student_lifecycle() -> None:
+    table = FakeUsersTable(
+        {
+            "PK": "COGNITO#subject-123",
+            "SK": "AUTHORIZATION",
+            "userId": "user-1",
+            "status": "ACTIVE",
+            "role": "ADMIN",
+            "authVersion": 1,
+        }
+    )
+
+    assert AuthorizationService(table).authorize_student_lifecycle("subject-123") == "user-1"
+
+
+@pytest.mark.parametrize(
+    ("role", "status"),
+    [("OPERATOR", "ACTIVE"), ("VIEWER", "ACTIVE"), ("ADMIN", "INACTIVE")],
+)
+def test_non_admin_or_inactive_user_cannot_manage_student_lifecycle(role: str, status: str) -> None:
+    table = FakeUsersTable(
+        {
+            "PK": "COGNITO#subject-123",
+            "SK": "AUTHORIZATION",
+            "userId": "user-1",
+            "status": status,
+            "role": role,
+            "authVersion": 1,
+        }
+    )
+
+    with pytest.raises(ForbiddenError):
+        AuthorizationService(table).authorize_student_lifecycle("subject-123")
+
+
 def test_integral_dynamodb_number_preserves_integer_value() -> None:
     normalized = normalize_dynamodb_value(Decimal("2"))
 

@@ -35,12 +35,15 @@ class AuthorizationService:
             raise ForbiddenError
 
     def authorize_create_student(self, cognito_sub: str | None) -> str:
-        return self._authorize_student_write(cognito_sub)
+        return self._authorize_student_write(cognito_sub, {"ADMIN", "OPERATOR"})
 
     def authorize_update_student(self, cognito_sub: str | None) -> str:
-        return self._authorize_student_write(cognito_sub)
+        return self._authorize_student_write(cognito_sub, {"ADMIN", "OPERATOR"})
 
-    def _authorize_student_write(self, cognito_sub: str | None) -> str:
+    def authorize_student_lifecycle(self, cognito_sub: str | None) -> str:
+        return self._authorize_student_write(cognito_sub, {"ADMIN"})
+
+    def _authorize_student_write(self, cognito_sub: str | None, allowed_roles: set[str]) -> str:
         if not cognito_sub:
             raise ForbiddenError
 
@@ -58,7 +61,7 @@ class AuthorizationService:
             raise ForbiddenError
         if authorization.get("status") != "ACTIVE":
             raise ForbiddenError
-        if authorization.get("role") not in {"ADMIN", "OPERATOR"}:
+        if authorization.get("role") not in allowed_roles:
             raise ForbiddenError
         auth_version = normalize_dynamodb_value(authorization.get("authVersion"))
         if not isinstance(auth_version, int) or isinstance(auth_version, bool) or auth_version < 1:
