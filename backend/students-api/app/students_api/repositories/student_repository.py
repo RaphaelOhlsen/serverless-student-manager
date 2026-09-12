@@ -8,8 +8,13 @@ from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 
 from students_api.config import SERVICE_NAME
 from students_api.cursor import CursorPosition
-from students_api.errors import StudentUpdateUnresolvedError
+from students_api.errors import StudentLifecycleUnresolvedError, StudentUpdateUnresolvedError
 from students_api.repositories.dynamodb_values import normalize_dynamodb_value
+from students_api.repositories.lifecycle_transaction import (
+    LifecycleTransition,
+    build_lifecycle_transaction,
+    classify_lifecycle_failure,
+)
 from students_api.repositories.update_transaction import (
     UpdateTransactionContext,
     build_update_transaction,
@@ -176,6 +181,30 @@ class StudentRepository:
             classify_update_failure(error, email_changed=email_changed)
         except Exception as error:
             raise StudentUpdateUnresolvedError from error
+
+    def transition_student_lifecycle(
+        self,
+        *,
+        transition: LifecycleTransition,
+        idempotency_table_name: str,
+    ) -> None:
+        """Persist one effective lifecycle transition and replay response atomically."""
+        client, students_table, audit_table = self._write_dependencies()
+        items = build_lifecycle_transaction(
+            transition,
+            students_table=students_table,
+            audit_table=audit_table,
+            idempotency_table=idempotency_table_name,
+        )
+        try:
+            client.transact_write_items(
+                TransactItems=items,
+                ClientRequestToken=transition.idempotency.client_request_token,
+            )
+        except ClientError as error:
+            classify_lifecycle_failure(error)
+        except Exception as error:
+            raise StudentLifecycleUnresolvedError from error
 
     def get_registration_reservation(self, registration_number: str) -> dict[str, object] | None:
         return self._get_consistent(
