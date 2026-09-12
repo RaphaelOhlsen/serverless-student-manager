@@ -428,6 +428,18 @@ module "http_api" {
       authorization_type = "JWT"
     }
 
+    deactivate_student = {
+      route_key          = "POST /students/{studentId}/deactivation"
+      integration_key    = "students"
+      authorization_type = "JWT"
+    }
+
+    reactivate_student = {
+      route_key          = "POST /students/{studentId}/reactivation"
+      integration_key    = "students"
+      authorization_type = "JWT"
+    }
+
     activate_current_user = {
       route_key          = "POST /users/me/activation"
       integration_key    = "users"
