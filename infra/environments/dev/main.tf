@@ -228,6 +228,19 @@ module "students_api" {
 
 data "aws_iam_policy_document" "users_api" {
   statement {
+    sid    = "ListAdministrativeUsers"
+    effect = "Allow"
+
+    actions = [
+      "dynamodb:Query",
+    ]
+
+    resources = [
+      "${module.user_store.table_arn}/index/${module.user_store.gsi_all_users_name}",
+    ]
+  }
+
+  statement {
     sid    = "ReadActivationIdentity"
     effect = "Allow"
 
@@ -448,6 +461,18 @@ module "http_api" {
 
     get_current_user = {
       route_key          = "GET /users/me"
+      integration_key    = "users"
+      authorization_type = "JWT"
+    }
+
+    list_users = {
+      route_key          = "GET /users"
+      integration_key    = "users"
+      authorization_type = "JWT"
+    }
+
+    get_user = {
+      route_key          = "GET /users/{userId}"
       integration_key    = "users"
       authorization_type = "JWT"
     }

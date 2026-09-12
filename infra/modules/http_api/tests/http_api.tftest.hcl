@@ -89,6 +89,16 @@ variables {
       integration_key    = "users"
       authorization_type = "JWT"
     }
+    list_users = {
+      route_key          = "GET /users"
+      integration_key    = "users"
+      authorization_type = "JWT"
+    }
+    get_user = {
+      route_key          = "GET /users/{userId}"
+      integration_key    = "users"
+      authorization_type = "JWT"
+    }
   }
 
   cors_allow_origins = [
@@ -362,6 +372,26 @@ run "plans_http_api" {
   }
 
   assert {
+    condition     = aws_apigatewayv2_route.this["list_users"].route_key == "GET /users"
+    error_message = "The administrative users list route key is incorrect."
+  }
+
+  assert {
+    condition     = aws_apigatewayv2_route.this["list_users"].authorization_type == "JWT"
+    error_message = "The administrative users list route must use JWT authorization."
+  }
+
+  assert {
+    condition     = aws_apigatewayv2_route.this["get_user"].route_key == "GET /users/{userId}"
+    error_message = "The administrative user detail route key is incorrect."
+  }
+
+  assert {
+    condition     = aws_apigatewayv2_route.this["get_user"].authorization_type == "JWT"
+    error_message = "The administrative user detail route must use JWT authorization."
+  }
+
+  assert {
     condition     = aws_apigatewayv2_stage.default.name == "$default"
     error_message = "The HTTP API must use the default stage."
   }
@@ -559,6 +589,40 @@ run "wires_computed_references" {
       == "integrations/${aws_apigatewayv2_integration.lambda["users"].id}"
     )
     error_message = "The self-profile route must use the users integration."
+  }
+
+  assert {
+    condition = alltrue([
+      for route_name in ["list_users", "get_user"] :
+      aws_apigatewayv2_route.this[route_name].authorizer_id == aws_apigatewayv2_authorizer.jwt.id
+    ])
+    error_message = "Administrative user read routes must use the configured JWT authorizer."
+  }
+
+  assert {
+    condition = alltrue([
+      for route_name in ["list_users", "get_user"] :
+      aws_apigatewayv2_route.this[route_name].target == "integrations/${aws_apigatewayv2_integration.lambda["users"].id}"
+    ])
+    error_message = "Administrative user read routes must reuse the users integration."
+  }
+
+  assert {
+    condition     = length(aws_apigatewayv2_integration.lambda) == 2
+    error_message = "Administrative user read routes must not create another integration."
+  }
+
+  assert {
+    condition = alltrue([
+      for route in values(aws_apigatewayv2_route.this) : !contains([
+        "POST /users",
+        "POST /users/{userId}/role-change",
+        "POST /users/{userId}/deactivation",
+        "POST /users/{userId}/reactivation",
+        "POST /users/{userId}/invitation/resend",
+      ], route.route_key)
+    ])
+    error_message = "This gate must not provision administrative user write routes."
   }
 
   assert {

@@ -25,8 +25,9 @@ override_module {
 override_module {
   target = module.user_store
   outputs = {
-    table_name = "serverless-student-manager-dev-users"
-    table_arn  = "arn:aws:dynamodb:us-east-1:123456789012:table/serverless-student-manager-dev-users"
+    table_name         = "serverless-student-manager-dev-users"
+    table_arn          = "arn:aws:dynamodb:us-east-1:123456789012:table/serverless-student-manager-dev-users"
+    gsi_all_users_name = "gsi-all-users-name"
   }
 }
 
@@ -913,8 +914,35 @@ run "plans_user_activation_api_access" {
   command = plan
 
   assert {
-    condition     = length(data.aws_iam_policy_document.users_api.statement) == 6
-    error_message = "The users-api policy must contain exactly six semantic statements."
+    condition     = length(data.aws_iam_policy_document.users_api.statement) == 7
+    error_message = "The users-api policy must contain exactly seven semantic statements."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.users_api.statement : statement.actions
+      if statement.sid == "ListAdministrativeUsers"
+    ])) == toset(["dynamodb:Query"])
+    error_message = "Administrative user listing must contain only DynamoDB Query."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.users_api.statement : statement.resources
+      if statement.sid == "ListAdministrativeUsers"
+      ])) == toset([
+      "${module.user_store.table_arn}/index/gsi-all-users-name",
+    ])
+    error_message = "Administrative user listing must target only gsi-all-users-name."
+  }
+
+  assert {
+    condition = alltrue(flatten([
+      for statement in data.aws_iam_policy_document.users_api.statement : [
+        for action in statement.actions : action != "dynamodb:Scan"
+      ]
+    ]))
+    error_message = "The users-api policy must not allow DynamoDB Scan."
   }
 
   assert {
