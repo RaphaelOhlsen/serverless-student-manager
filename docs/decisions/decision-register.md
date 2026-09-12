@@ -17,6 +17,7 @@
 | PROD-006 | Produto | Telefone obrigatório e não único | Approved |
 | PROD-007 | Produto | Acesso do aluno fora do MVP | Approved |
 | PROD-008 | Futuro | Login futuro do aluno por `studentEmail`, identidade por Cognito `sub` | Deferred |
+| PROD-009 | Produto | Exclusão física de Student fora da v1; desativação é a remoção operacional canônica | Approved |
 | CON-001 | Restrição | React + TypeScript | Approved |
 | CON-002 | Restrição | Python + Lambda | Approved |
 | CON-003 | Restrição | API Gateway HTTP API | Approved |
@@ -67,6 +68,7 @@
 | [ADR-031](adr/adr-031-agentic-development-harness.md) | Agentic Development Harness v1 documental | Approved |
 | [ADR-032](adr/adr-032-student-update.md) | Atualização parcial de aluno | Approved |
 | [ADR-033](adr/adr-033-student-lifecycle.md) | Ciclo de vida do aluno: desativação e reativação | Approved |
+| [ADR-034](adr/adr-034-student-physical-deletion-policy.md) | Política de exclusão física de aluno | Approved |
 
 ## 3. Modelos de dados aprovados
 
@@ -94,10 +96,11 @@
 
 ## 5. Situação arquitetural
 
-As ADR-001 a ADR-033 estão aprovadas. O milestone Student Lifecycle foi
-implementado, publicado, validado e encerrado. Delete Student permanece deferido.
+As ADR-001 a ADR-034 estão aprovadas. O milestone Student Lifecycle foi
+implementado, publicado, validado e encerrado. A exclusão física de Student está
+fora da v1; Deactivate Student é a remoção operacional canônica.
 
-Novas decisões relevantes surgidas durante a engenharia devem ser registradas em ADR-034 ou posterior.
+Novas decisões relevantes surgidas durante a engenharia devem ser registradas em ADR-035 ou posterior.
 
 ## 6. Regra de manutenção
 

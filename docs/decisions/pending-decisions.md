@@ -4,10 +4,10 @@
 **Data:** 2026-09-04
 **Status:** Engenharia em andamento
 
-As ADR-001 a ADR-033 estão aprovadas. Os milestones Update Student e Student
+As ADR-001 a ADR-034 estão aprovadas. Os milestones Update Student e Student
 Lifecycle foram implementados, publicados, validados e encerrados; não há decisão
-pendente específica desses milestones. Delete Student permanece deferido e fora do
-contrato de lifecycle.
+pendente específica desses milestones. A ADR-034 retirou a exclusão física de
+Student do escopo da v1; Deactivate Student é a remoção operacional canônica.
 
 ## Detalhamento operacional pendente
 
@@ -23,9 +23,12 @@ compensações, reconciliação e alertas continua pendente.
 
 ## Próximas atividades de engenharia
 
-1. manter Delete Student deferido para milestone próprio;
-2. definir hard/soft delete, retenção, reservas e recuperação somente nesse futuro
-   milestone, mediante decisão explícita.
+1. avançar para o bloco funcional Users / Admin CRUD;
+2. tratar exclusão física de Student apenas como possibilidade futura fora da v1.
+
+Caso essa capacidade futura seja reaberta, ela exige revisão explícita do SRS e
+nova decisão sobre retenção ou anonimização, reservas de e-mail e matrícula,
+auditoria e recuperação. Esses pontos não são pendências de implementação da v1.
 
 ## Itens que podem gerar novas ADRs
 
