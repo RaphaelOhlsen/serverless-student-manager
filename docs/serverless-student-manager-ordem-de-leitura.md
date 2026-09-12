@@ -89,6 +89,7 @@ Para tarefas conduzidas pelo Harness, consultar também:
 
 - [ADR-031 — Agentic Development Harness v1](decisions/adr/adr-031-agentic-development-harness.md) — Approved.
 - [Protocolo canônico do Harness v1](operations/agentic-development-harness-v1.md).
+- [Guia de uso local do Harness](operations/agentic-development-harness-local.md).
 
 ## Leitura rápida para orientação
 

@@ -7,6 +7,11 @@ Para fluxo, gates, evidências, checkpoints e autorizações, leia e siga o
 Este arquivo preserva a governança existente do projeto e as instruções específicas
 necessárias ao ambiente Codex/projeto; não copie para cá as regras comuns do Harness.
 
+Este `AGENTS.md` permanece a autoridade canônica; o
+[guia local do Harness](docs/operations/agentic-development-harness-local.md)
+apenas operacionaliza suas regras. Antes de uma implementação relevante, trabalhe
+na branch aprovada e execute `make agentic-preflight`.
+
 ## 1. Papel do agente
 
 Você atua como engenheiro executor do **Serverless Student Manager**.

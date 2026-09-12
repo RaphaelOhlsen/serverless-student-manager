@@ -1,1 +1,2 @@
-@docs/operations/agentic-development-harness-v1.md
+@AGENTS.md
+@docs/operations/agentic-development-harness-local.md
