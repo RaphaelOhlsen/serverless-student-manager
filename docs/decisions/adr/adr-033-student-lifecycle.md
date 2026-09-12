@@ -1,6 +1,6 @@
 # ADR-033 — Ciclo de vida do aluno
 
-**Status:** Proposed
+**Status:** Approved
 **Data:** 2026-09-11
 
 ## Contexto
@@ -142,6 +142,28 @@ antes da operação para obter `expectedVersion`, usa chave idempotente por tent
 impede double-submit, trata `STUDENT_VERSION_CONFLICT` e atualiza a lista após
 sucesso. Status continua não editável no `EditStudentForm`.
 
+## Evidências de encerramento
+
+O backend foi publicado na Students Lambda v8 e as duas rotas foram provisionadas
+com Terraform (`2 add / 0 change / 0 destroy`). O E2E real em `dev` validou
+desativação e reativação efetivas, replay, versão obsoleta, no-op, conflito de
+idempotência, auditoria, privacidade do motivo, preservação das reservas e ausência
+de `INPROGRESS` residual. A fixture terminou `ACTIVE`.
+
+No frontend, 128 testes, lint e build/typecheck passaram. O E2E manual-assisted
+validou filtros `ACTIVE`/`INACTIVE`/`ALL`, detail antes da transição,
+`expectedVersion`, Idempotency-Key, desativação, reativação, mensagens de sucesso e
+proteção visual contra double-submit, com somente um POST por ação.
+
+As evidências não executadas visualmente permanecem registradas sem reclassificação:
+
+- `VERSION_CONFLICT_LIVE_VISUAL=NOT_RUN`; aceitação
+  `PASS_BY_BACKEND_E2E_AND_FRONTEND_AUTOMATION`;
+- `OPERATOR_FRONTEND_LIVE_TEST=NOT_RUN`; aceitação
+  `PASS_BY_AUTOMATED_AUTHORIZATION_AND_ROLE_VISIBILITY_EVIDENCE`.
+
+`STUDENT_LIFECYCLE_MILESTONE=CLOSED`
+
 ## Alternativas rejeitadas
 
 - PATCH genérico de status: mistura lifecycle com edição de dados da ADR-032.
@@ -152,10 +174,9 @@ sucesso. Status continua não editável no `EditStudentForm`.
 
 ## Consequências
 
-A implementação futura adicionará duas rotas à Students Lambda existente. Como são
-POST, o CORS atual já contempla o método. As permissões transacionais atuais parecem
-suficientes, mas infraestrutura e IAM serão confirmados em gate próprio. Este ADR
-não autoriza implementação, publicação ou mutação cloud.
+As duas rotas reutilizam a Students Lambda, o JWT Authorizer, a integração e as
+permissões existentes. O CORS já contempla POST; nenhuma mudança de IAM, tabela,
+índice ou configuração da Lambda foi necessária.
 
 Delete Student permanece separado e deferido; hard/soft delete, retenção, liberação
 de reservas e recuperação não são decididos aqui.

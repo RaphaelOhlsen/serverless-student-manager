@@ -66,12 +66,7 @@
 | ADR-030 | Criação transacional e idempotente de aluno | Approved |
 | [ADR-031](adr/adr-031-agentic-development-harness.md) | Agentic Development Harness v1 documental | Approved |
 | [ADR-032](adr/adr-032-student-update.md) | Atualização parcial de aluno | Approved |
-
-## 2.1 ADR proposta
-
-| ID | Decisão | Status |
-|---|---|---|
-| [ADR-033](adr/adr-033-student-lifecycle.md) | Ciclo de vida do aluno: desativação e reativação | Proposed |
+| [ADR-033](adr/adr-033-student-lifecycle.md) | Ciclo de vida do aluno: desativação e reativação | Approved |
 
 ## 3. Modelos de dados aprovados
 
@@ -99,9 +94,10 @@
 
 ## 5. Situação arquitetural
 
-As ADR-001 a ADR-032 estão aprovadas.
+As ADR-001 a ADR-033 estão aprovadas. O milestone Student Lifecycle foi
+implementado, publicado, validado e encerrado. Delete Student permanece deferido.
 
-Novas decisões relevantes surgidas durante a engenharia devem ser registradas em ADR-034 ou posterior. A ADR-033 permanece Proposed até implementação e validação.
+Novas decisões relevantes surgidas durante a engenharia devem ser registradas em ADR-034 ou posterior.
 
 ## 6. Regra de manutenção
 
