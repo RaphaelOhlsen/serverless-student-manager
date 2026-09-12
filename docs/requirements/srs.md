@@ -388,8 +388,7 @@ Administrators and Operators shall be able to update mutable student data.
   STUDENT_UPDATED/SUCCESS audit. Audit changes contain field names and version
   transition only, without personal values or their hashes.
 
-The approved contract details are recorded in [ADR-032](../decisions/adr/adr-032-student-update.md),
-whose lifecycle status remains Proposed pending implementation/review.
+The approved contract details are recorded in [ADR-032](../decisions/adr/adr-032-student-update.md).
 
 ### RF-ALU-008 — Deactivate student
 
@@ -399,10 +398,30 @@ Only Administrators shall be able to deactivate a student.
 - Status becomes `INACTIVE`.
 - Reason, date and responsible user are recorded.
 - Operators receive HTTP `403 Forbidden`.
+- The contract is `POST /students/{studentId}/deactivation`, with a mandatory
+  canonical UUID `Idempotency-Key` and a strict body containing integer
+  `expectedVersion >= 1` and `reason` trimmed to 5–300 characters.
+- An effective transition increments version exactly once. Deactivating an
+  already inactive student with the current version is a `200` no-op.
 
 ### RF-ALU-009 — Reactivate student
 
 Only Administrators shall be able to reactivate a student.
+
+- The contract is `POST /students/{studentId}/reactivation`, with a mandatory
+  canonical UUID `Idempotency-Key` and a strict body containing only integer
+  `expectedVersion >= 1`.
+- An effective transition increments version exactly once. Reactivating an
+  already active student with the current version is a `200` no-op.
+- Both lifecycle operations resolve completed replay before validating the
+  current version; a new request with a stale version returns
+  `409 STUDENT_VERSION_CONFLICT` before no-op evaluation.
+- PROFILE, lifecycle audit and durable idempotency completion are atomic for an
+  effective transition. Registration and email reservations remain unchanged.
+
+The lifecycle contract is defined by
+[ADR-033](../decisions/adr/adr-033-student-lifecycle.md), initially Proposed
+pending implementation and validation.
 
 ### RF-ALU-010 — Consult student audit history
 
@@ -711,11 +730,14 @@ Every new student is created as `ACTIVE`.
 
 #### RN-ALU-008 — Deactivation
 
-Deactivation requires a reason between 5 and 300 characters and records the date and responsible Administrator.
+Deactivation requires a reason between 5 and 300 characters after external trim
+and records the date and responsible Administrator in the immutable audit event.
+The reason is not duplicated in PROFILE, public responses or operational logs.
 
 #### RN-ALU-009 — Reactivation
 
-Reactivation preserves the previous deactivation history.
+Reactivation preserves the previous deactivation history in audit events. It does
+not reacquire email or registration reservations.
 
 #### RN-ALU-010 — Concurrency
 
@@ -784,15 +806,16 @@ At least one active Administrator shall always remain.
 | `studentEmail` | String | Yes | Yes | Yes |
 | `phone` | String | Yes | No | Yes |
 | `birthDate` | Date | Yes | No | Yes |
-| `status` | Enum | Yes | No | Administrator |
+| `status` | Enum | Yes | No | Administrator, only through lifecycle operations |
 | `createdAt` | DateTime | Yes | No | No |
 | `createdBy` | String | Yes | No | No |
 | `updatedAt` | DateTime | Yes | No | Backend |
 | `updatedBy` | String | Yes | No | Backend |
-| `deactivatedAt` | DateTime | No | No | Backend |
-| `deactivatedBy` | String | No | No | Backend |
-| `deactivationReason` | String | No | No | Administrator |
 | `version` | Integer | Yes | No | Backend |
+
+Student lifecycle history, including deactivation date, responsible Administrator
+and reason, is stored only in immutable audit events and is not duplicated in the
+Student PROFILE or public response.
 
 ### 9.2 Administrative user
 

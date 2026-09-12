@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from typing import Any, Protocol
 from urllib.parse import parse_qsl
 from uuid import UUID, uuid4
@@ -10,6 +11,7 @@ from aws_lambda_powertools.event_handler import (
 
 from students_api.dependencies import (
     get_create_student_service,
+    get_student_lifecycle_service,
     get_student_service,
     get_update_student_service,
 )
@@ -18,6 +20,7 @@ from students_api.errors import (
     IdempotencyKeyReusedError,
     InvalidCreateStudentRequestError,
     InvalidListRequestError,
+    InvalidStudentLifecycleRequestError,
     InvalidUpdateStudentRequestError,
     OperationInProgressError,
     RegistrationNumberAlreadyExistsError,
@@ -30,8 +33,12 @@ from students_api.repositories.dynamodb_values import normalize_dynamodb_value
 from students_api.repositories.update_transaction import PUBLIC_FIELDS
 from students_api.validation import (
     CreateStudentInput,
+    DeactivateStudentInput,
+    ReactivateStudentInput,
     UpdateStudentInput,
     parse_create_student_body,
+    parse_deactivate_student_body,
+    parse_reactivate_student_body,
     parse_update_student_body,
 )
 
@@ -73,6 +80,28 @@ class UpdateStudentServiceProtocol(Protocol):
     ) -> dict[str, object]: ...
 
 
+class StudentLifecycleServiceProtocol(Protocol):
+    def deactivate_student(
+        self,
+        *,
+        cognito_sub: str | None,
+        idempotency_key: str,
+        request_id: str | None,
+        student_id: str,
+        request: DeactivateStudentInput,
+    ) -> dict[str, object]: ...
+
+    def reactivate_student(
+        self,
+        *,
+        cognito_sub: str | None,
+        idempotency_key: str,
+        request_id: str | None,
+        student_id: str,
+        request: ReactivateStudentInput,
+    ) -> dict[str, object]: ...
+
+
 def _public_student_response(student: dict[str, Any]) -> dict[str, Any]:
     response = {field: student[field] for field in PUBLIC_FIELDS}
     version = normalize_dynamodb_value(response["version"])
@@ -87,6 +116,7 @@ def register_student_routes(
     service: StudentServiceProtocol | None = None,
     create_service: CreateStudentServiceProtocol | None = None,
     update_service: UpdateStudentServiceProtocol | None = None,
+    lifecycle_service: StudentLifecycleServiceProtocol | None = None,
 ) -> None:
     @app.post("/students")
     def create_student() -> Response[dict[str, object]]:
@@ -191,6 +221,116 @@ def register_student_routes(
                 409,
                 "STUDENT_EMAIL_ALREADY_EXISTS",
                 "Student email already exists",
+                correlation_id,
+            )
+        except IdempotencyKeyReusedError:
+            return _canonical_error_response(
+                409, "IDEMPOTENCY_KEY_REUSED", "Idempotency key reused", correlation_id
+            )
+        except OperationInProgressError:
+            return _canonical_error_response(
+                409, "OPERATION_IN_PROGRESS", "Operation in progress", correlation_id
+            )
+        except Exception:
+            return _canonical_error_response(
+                500, "INTERNAL_ERROR", "Unexpected internal error", correlation_id
+            )
+
+    @app.post("/students/<student_id>/deactivation")
+    def deactivate_student(student_id: str) -> Response[dict[str, object]]:
+        event = app.current_event.raw_event
+        correlation_id = _request_id(event)
+        try:
+            cognito_sub, key, request = _parse_lifecycle_request(
+                event, parse_deactivate_student_body
+            )
+            active_service = (
+                lifecycle_service
+                if lifecycle_service is not None
+                else get_student_lifecycle_service()
+            )
+            result = active_service.deactivate_student(
+                cognito_sub=cognito_sub,
+                idempotency_key=key,
+                request_id=correlation_id,
+                student_id=student_id,
+                request=request,
+            )
+            return Response(
+                status_code=200,
+                content_type=content_types.APPLICATION_JSON,
+                body=result,
+            )
+        except InvalidStudentLifecycleRequestError:
+            return _canonical_error_response(
+                400, "INVALID_REQUEST", "Invalid student lifecycle request", correlation_id
+            )
+        except ForbiddenError:
+            return _canonical_error_response(403, "FORBIDDEN", "Forbidden", correlation_id)
+        except StudentNotFoundError:
+            return _canonical_error_response(
+                404, "STUDENT_NOT_FOUND", "Student not found", correlation_id
+            )
+        except StudentVersionConflictError:
+            return _canonical_error_response(
+                409,
+                "STUDENT_VERSION_CONFLICT",
+                "Student version conflict",
+                correlation_id,
+            )
+        except IdempotencyKeyReusedError:
+            return _canonical_error_response(
+                409, "IDEMPOTENCY_KEY_REUSED", "Idempotency key reused", correlation_id
+            )
+        except OperationInProgressError:
+            return _canonical_error_response(
+                409, "OPERATION_IN_PROGRESS", "Operation in progress", correlation_id
+            )
+        except Exception:
+            return _canonical_error_response(
+                500, "INTERNAL_ERROR", "Unexpected internal error", correlation_id
+            )
+
+    @app.post("/students/<student_id>/reactivation")
+    def reactivate_student(student_id: str) -> Response[dict[str, object]]:
+        event = app.current_event.raw_event
+        correlation_id = _request_id(event)
+        try:
+            cognito_sub, key, request = _parse_lifecycle_request(
+                event, parse_reactivate_student_body
+            )
+            active_service = (
+                lifecycle_service
+                if lifecycle_service is not None
+                else get_student_lifecycle_service()
+            )
+            result = active_service.reactivate_student(
+                cognito_sub=cognito_sub,
+                idempotency_key=key,
+                request_id=correlation_id,
+                student_id=student_id,
+                request=request,
+            )
+            return Response(
+                status_code=200,
+                content_type=content_types.APPLICATION_JSON,
+                body=result,
+            )
+        except InvalidStudentLifecycleRequestError:
+            return _canonical_error_response(
+                400, "INVALID_REQUEST", "Invalid student lifecycle request", correlation_id
+            )
+        except ForbiddenError:
+            return _canonical_error_response(403, "FORBIDDEN", "Forbidden", correlation_id)
+        except StudentNotFoundError:
+            return _canonical_error_response(
+                404, "STUDENT_NOT_FOUND", "Student not found", correlation_id
+            )
+        except StudentVersionConflictError:
+            return _canonical_error_response(
+                409,
+                "STUDENT_VERSION_CONFLICT",
+                "Student version conflict",
                 correlation_id,
             )
         except IdempotencyKeyReusedError:
@@ -344,6 +484,30 @@ def _parse_update_request(
     if not isinstance(body, str):
         raise InvalidUpdateStudentRequestError
     return _authenticated_access_sub(event), key, parse_update_student_body(body)
+
+
+def _parse_lifecycle_request[T](
+    event: dict[str, Any], parser: Callable[[str], T]
+) -> tuple[str | None, str, T]:
+    if event.get("rawQueryString") not in {None, ""} or event.get("isBase64Encoded") is True:
+        raise InvalidStudentLifecycleRequestError
+    headers = event.get("headers")
+    if not isinstance(headers, dict):
+        raise InvalidStudentLifecycleRequestError
+    normalized_headers = {str(name).lower(): value for name, value in headers.items()}
+    content_type = normalized_headers.get("content-type")
+    if (
+        not isinstance(content_type, str)
+        or content_type.split(";", 1)[0].strip().lower() != "application/json"
+    ):
+        raise InvalidStudentLifecycleRequestError
+    key = normalized_headers.get("idempotency-key")
+    if not isinstance(key, str) or not _is_canonical_uuid(key):
+        raise InvalidStudentLifecycleRequestError
+    body = event.get("body")
+    if not isinstance(body, str):
+        raise InvalidStudentLifecycleRequestError
+    return _authenticated_access_sub(event), key, parser(body)
 
 
 def _authenticated_access_sub(event: dict[str, Any]) -> str | None:

@@ -69,6 +69,16 @@ variables {
       integration_key    = "students"
       authorization_type = "JWT"
     }
+    deactivate_student = {
+      route_key          = "POST /students/{studentId}/deactivation"
+      integration_key    = "students"
+      authorization_type = "JWT"
+    }
+    reactivate_student = {
+      route_key          = "POST /students/{studentId}/reactivation"
+      integration_key    = "students"
+      authorization_type = "JWT"
+    }
     activate_current_user = {
       route_key          = "POST /users/me/activation"
       integration_key    = "users"
@@ -312,6 +322,26 @@ run "plans_http_api" {
   }
 
   assert {
+    condition     = aws_apigatewayv2_route.this["deactivate_student"].route_key == "POST /students/{studentId}/deactivation"
+    error_message = "The deactivate-student route key is incorrect."
+  }
+
+  assert {
+    condition     = aws_apigatewayv2_route.this["deactivate_student"].authorization_type == "JWT"
+    error_message = "The deactivate-student route must use JWT authorization."
+  }
+
+  assert {
+    condition     = aws_apigatewayv2_route.this["reactivate_student"].route_key == "POST /students/{studentId}/reactivation"
+    error_message = "The reactivate-student route key is incorrect."
+  }
+
+  assert {
+    condition     = aws_apigatewayv2_route.this["reactivate_student"].authorization_type == "JWT"
+    error_message = "The reactivate-student route must use JWT authorization."
+  }
+
+  assert {
     condition     = aws_apigatewayv2_route.this["activate_current_user"].route_key == "POST /users/me/activation"
     error_message = "The activation route key is incorrect."
   }
@@ -459,6 +489,43 @@ run "wires_computed_references" {
       == "integrations/${aws_apigatewayv2_integration.lambda["students"].id}"
     )
     error_message = "The update-student route must use the students integration."
+  }
+
+  assert {
+    condition = (
+      aws_apigatewayv2_route.this["deactivate_student"].authorizer_id
+      == aws_apigatewayv2_authorizer.jwt.id
+    )
+    error_message = "The deactivate-student route must use the configured JWT authorizer."
+  }
+
+  assert {
+    condition = (
+      aws_apigatewayv2_route.this["deactivate_student"].target
+      == "integrations/${aws_apigatewayv2_integration.lambda["students"].id}"
+    )
+    error_message = "The deactivate-student route must use the students integration."
+  }
+
+  assert {
+    condition = (
+      aws_apigatewayv2_route.this["reactivate_student"].authorizer_id
+      == aws_apigatewayv2_authorizer.jwt.id
+    )
+    error_message = "The reactivate-student route must use the configured JWT authorizer."
+  }
+
+  assert {
+    condition = (
+      aws_apigatewayv2_route.this["reactivate_student"].target
+      == "integrations/${aws_apigatewayv2_integration.lambda["students"].id}"
+    )
+    error_message = "The reactivate-student route must use the students integration."
+  }
+
+  assert {
+    condition     = length(aws_apigatewayv2_integration.lambda) == 2
+    error_message = "Lifecycle routes must reuse the existing students integration."
   }
 
   assert {

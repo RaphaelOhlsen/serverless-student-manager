@@ -13,9 +13,14 @@ from students_api.config import (
     get_students_table_name,
     get_users_table_name,
 )
-from students_api.idempotency import CreateStudentIdempotency, UpdateStudentIdempotency
+from students_api.idempotency import (
+    CreateStudentIdempotency,
+    StudentLifecycleIdempotency,
+    UpdateStudentIdempotency,
+)
 from students_api.repositories.student_repository import StudentRepository
 from students_api.services.create_student_service import CreateStudentService
+from students_api.services.student_lifecycle_service import StudentLifecycleService
 from students_api.services.student_service import StudentService
 from students_api.services.update_student_service import UpdateStudentService
 
@@ -74,6 +79,29 @@ def get_update_student_service() -> UpdateStudentService:
         repository,
         AuthorizationService(users_table),
         UpdateStudentIdempotency(dynamodb_client, idempotency_table_name),
+        environment=get_environment(),
+        audit_retention_days=get_audit_retention_days(),
+        idempotency_table_name=idempotency_table_name,
+    )
+
+
+@lru_cache
+def get_student_lifecycle_service() -> StudentLifecycleService:
+    dynamodb_client = boto3.client("dynamodb")
+    dynamodb_resource = boto3.resource("dynamodb")
+    students_table: Any = dynamodb_resource.Table(get_students_table_name())
+    users_table: Any = dynamodb_resource.Table(get_users_table_name())
+    idempotency_table_name = get_idempotency_table_name()
+    repository = StudentRepository(
+        students_table,
+        client=dynamodb_client,
+        students_table_name=get_students_table_name(),
+        audit_table_name=get_audit_table_name(),
+    )
+    return StudentLifecycleService(
+        repository,
+        AuthorizationService(users_table),
+        StudentLifecycleIdempotency(dynamodb_client, idempotency_table_name),
         environment=get_environment(),
         audit_retention_days=get_audit_retention_days(),
         idempotency_table_name=idempotency_table_name,

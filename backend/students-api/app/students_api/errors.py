@@ -38,6 +38,10 @@ class InvalidUpdateStudentRequestError(Exception):
     """Raised when a partial update request violates the public contract."""
 
 
+class InvalidStudentLifecycleRequestError(Exception):
+    """Raised when a student lifecycle request violates the public contract."""
+
+
 class StudentVersionConflictError(Exception):
     """Represents STUDENT_VERSION_CONFLICT for an outdated expected version."""
 
@@ -48,3 +52,15 @@ class StudentUpdateInvariantError(RuntimeError):
 
 class StudentUpdateUnresolvedError(RuntimeError):
     """Transaction evidence is insufficient; caller must resolve durable idempotency."""
+
+
+class StudentLifecycleConditionError(RuntimeError):
+    """PROFILE condition failed; the caller must distinguish version from status."""
+
+
+class StudentLifecycleInvariantError(RuntimeError):
+    """A lifecycle persistence invariant failed; never expose it as a functional conflict."""
+
+
+class StudentLifecycleUnresolvedError(RuntimeError):
+    """Lifecycle transaction outcome is uncertain; resolve durable idempotency first."""

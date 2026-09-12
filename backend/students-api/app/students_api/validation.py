@@ -1,12 +1,16 @@
 import json
 import re
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from typing import Any
 
 from students_api.cursor import normalize_name
-from students_api.errors import InvalidCreateStudentRequestError, InvalidUpdateStudentRequestError
+from students_api.errors import (
+    InvalidCreateStudentRequestError,
+    InvalidStudentLifecycleRequestError,
+    InvalidUpdateStudentRequestError,
+)
 
 _FIELDS = {"fullName", "registrationNumber", "studentEmail", "phone", "birthDate"}
 _REGISTRATION_PATTERN = re.compile(r"[A-Z0-9-]{4,20}\Z")
@@ -122,6 +126,62 @@ def parse_update_student_body(body: str, *, today: date | None = None) -> Update
         raise InvalidUpdateStudentRequestError from None
 
 
+@dataclass(frozen=True)
+class DeactivateStudentInput:
+    expected_version: int
+    reason: str = field(repr=False)
+
+    def payload(self) -> dict[str, str | int]:
+        return {"expectedVersion": self.expected_version, "reason": self.reason}
+
+
+@dataclass(frozen=True)
+class ReactivateStudentInput:
+    expected_version: int
+
+    def payload(self) -> dict[str, int]:
+        return {"expectedVersion": self.expected_version}
+
+
+def parse_deactivate_student_body(body: str) -> DeactivateStudentInput:
+    value = _parse_lifecycle_object(body)
+    if (
+        set(value) != {"expectedVersion", "reason"}
+        or type(value["expectedVersion"]) is not int
+        or value["expectedVersion"] < 1
+        or not isinstance(value["reason"], str)
+        or any(_is_unsafe_reason_character(character) for character in value["reason"])
+    ):
+        raise InvalidStudentLifecycleRequestError
+    reason = value["reason"].strip()
+    if not 5 <= len(reason) <= 300:
+        raise InvalidStudentLifecycleRequestError
+    return DeactivateStudentInput(expected_version=value["expectedVersion"], reason=reason)
+
+
+def parse_reactivate_student_body(body: str) -> ReactivateStudentInput:
+    value = _parse_lifecycle_object(body)
+    if (
+        set(value) != {"expectedVersion"}
+        or type(value["expectedVersion"]) is not int
+        or value["expectedVersion"] < 1
+    ):
+        raise InvalidStudentLifecycleRequestError
+    return ReactivateStudentInput(expected_version=value["expectedVersion"])
+
+
+def _parse_lifecycle_object(body: str) -> dict[str, Any]:
+    if not isinstance(body, str):
+        raise InvalidStudentLifecycleRequestError
+    try:
+        value = json.loads(body, object_pairs_hook=_unique_object)
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+        raise InvalidStudentLifecycleRequestError from None
+    if not isinstance(value, dict):
+        raise InvalidStudentLifecycleRequestError
+    return value
+
+
 def _normalize_email(value: str) -> str:
     normalized = value.strip().lower()
     if (
@@ -160,6 +220,13 @@ def _normalize_full_name(value: str) -> str:
 
 def _is_control(character: str) -> bool:
     return unicodedata.category(character).startswith("C")
+
+
+def _is_unsafe_reason_character(character: str) -> bool:
+    return unicodedata.category(character).startswith("C") or unicodedata.category(character) in {
+        "Zl",
+        "Zp",
+    }
 
 
 def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
