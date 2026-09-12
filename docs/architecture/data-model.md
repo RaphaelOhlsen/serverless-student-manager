@@ -438,7 +438,7 @@ nomes dos campos alterados e transição de versão, sem valores pessoais ou has
 
 ## Ciclo de vida do aluno
 
-A [ADR-033](../decisions/adr/adr-033-student-lifecycle.md) (Proposed) define
+A [ADR-033](../decisions/adr/adr-033-student-lifecycle.md) (Approved) define
 desativação e reativação. Uma transição efetiva usa três operações na mesma
 `TransactWriteItems`: Update do PROFILE condicionado à existência, versão e status
 de origem; Put do evento de auditoria; e Update da idempotência para COMPLETED com

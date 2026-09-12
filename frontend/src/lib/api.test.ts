@@ -12,11 +12,13 @@ vi.mock('@/config/env', () => ({ env: { apiBaseUrl: 'https://api.example.test/' 
 import {
   ApiResponseError,
   createStudent,
+  deactivateStudent,
   fetchStudent,
   updateStudent,
   authenticatedPost,
   fetchCurrentUserProfile,
   fetchStudents,
+  reactivateStudent,
 } from '@/lib/api'
 
 const profile = {
@@ -85,6 +87,20 @@ describe('authenticated API requests', () => {
     )
     await expect(fetchStudents()).rejects.toBeInstanceOf(ApiResponseError)
   })
+
+  it.each(['ACTIVE', 'INACTIVE', 'ALL'] as const)(
+    'sends the %s status filter to the students list',
+    async (status) => {
+      const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response(JSON.stringify(studentsPage), { status: 200 }),
+      )
+      await fetchStudents(status)
+      expect(fetchMock).toHaveBeenCalledWith(
+        `https://api.example.test/students?status=${status}`,
+        { method: 'GET', headers: { Authorization: 'Bearer fake-access-token' } },
+      )
+    },
+  )
 
   it('sends activation with authentication, idempotency and no body', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
@@ -209,5 +225,70 @@ describe('update student contract', () => {
     }), { status: 200 }))
     await expect(fetchStudent(detail.studentId)).rejects.toBeInstanceOf(ApiResponseError)
     await expect(fetchStudent(detail.studentId)).rejects.toBeInstanceOf(ApiResponseError)
+  })
+})
+
+describe('student lifecycle contract', () => {
+  const detail = {
+    fullName: 'Aluno Sintético', registrationNumber: 'MAT-001',
+    studentEmail: 'student@example.invalid', phone: '+15555550123', birthDate: '2000-01-15',
+    studentId: '00000000-0000-4000-8000-000000000100', status: 'ACTIVE' as const, version: 3,
+    createdAt: '2026-09-06T10:28:53.080Z', updatedAt: '2026-09-07T10:28:53.080Z',
+  }
+  beforeEach(() => authMocks.fetchAuthSession.mockResolvedValue({
+    tokens: { accessToken: { toString: () => 'fake-access-token' } },
+  }))
+  afterEach(() => { vi.restoreAllMocks(); vi.clearAllMocks() })
+
+  it('posts deactivation with auth, JSON and idempotency headers', async () => {
+    const updated = { ...detail, status: 'INACTIVE', version: 4 }
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(updated), { status: 200 }),
+    )
+    const body = { expectedVersion: 3, reason: 'Motivo sintético' }
+    await expect(deactivateStudent(detail.studentId, body, '00000000-0000-4000-8000-000000000003'))
+      .resolves.toEqual(updated)
+    expect(fetchMock).toHaveBeenCalledWith(
+      `https://api.example.test/students/${detail.studentId}/deactivation`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer fake-access-token',
+          'Content-Type': 'application/json',
+          'Idempotency-Key': '00000000-0000-4000-8000-000000000003',
+        },
+        body: JSON.stringify(body),
+      },
+    )
+  })
+
+  it('posts reactivation with only expectedVersion', async () => {
+    const inactive = { ...detail, status: 'INACTIVE' as const }
+    const updated = { ...detail, version: 4 }
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(updated), { status: 200 }),
+    )
+    const body = { expectedVersion: inactive.version }
+    await expect(reactivateStudent(inactive.studentId, body, '00000000-0000-4000-8000-000000000004'))
+      .resolves.toEqual(updated)
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      method: 'POST',
+      body: JSON.stringify(body),
+    })
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      `https://api.example.test/students/${inactive.studentId}/reactivation`,
+    )
+  })
+
+  it('preserves lifecycle error status and code without its message', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      code: 'STUDENT_VERSION_CONFLICT', message: 'not exposed',
+    }), { status: 409 }))
+    await expect(reactivateStudent(detail.studentId, { expectedVersion: 3 }, 'key'))
+      .rejects.toMatchObject({
+        status: 409,
+        code: 'STUDENT_VERSION_CONFLICT',
+        message: 'API request failed with status 409',
+      })
   })
 })

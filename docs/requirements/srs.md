@@ -420,8 +420,8 @@ Only Administrators shall be able to reactivate a student.
   effective transition. Registration and email reservations remain unchanged.
 
 The lifecycle contract is defined by
-[ADR-033](../decisions/adr/adr-033-student-lifecycle.md), initially Proposed
-pending implementation and validation.
+[ADR-033](../decisions/adr/adr-033-student-lifecycle.md), Approved after
+implementation and validation in `dev`.
 
 ### RF-ALU-010 — Consult student audit history
 

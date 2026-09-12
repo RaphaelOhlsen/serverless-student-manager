@@ -31,6 +31,8 @@ export type StudentsPage = {
   hasMore: boolean
 }
 
+export type StudentStatusFilter = 'ACTIVE' | 'INACTIVE' | 'ALL'
+
 export class ApiResponseError extends Error {
   readonly status: number
   readonly code?: string
@@ -80,7 +82,7 @@ export async function authenticatedGet(path: string): Promise<Response> {
 export async function authenticatedPost(
   path: string,
   idempotencyKey: string,
-  body?: CreateStudentRequest,
+  body?: object,
 ): Promise<Response> {
   const accessToken = await getAccessToken()
 
@@ -127,8 +129,12 @@ export async function fetchCurrentUserProfile(): Promise<UserProfile> {
   return value
 }
 
-export async function fetchStudents(): Promise<StudentsPage> {
-  const response = await authenticatedGet('/students')
+export async function fetchStudents(
+  status?: StudentStatusFilter,
+): Promise<StudentsPage> {
+  const response = await authenticatedGet(
+    status ? `/students?status=${encodeURIComponent(status)}` : '/students',
+  )
   if (!response.ok) {
     throw new ApiResponseError(response.status)
   }
@@ -218,6 +224,15 @@ export type UpdateStudentRequest = {
   birthDate?: string
 }
 
+export type DeactivateStudentRequest = {
+  expectedVersion: number
+  reason: string
+}
+
+export type ReactivateStudentRequest = {
+  expectedVersion: number
+}
+
 export async function createStudent(
   body: CreateStudentRequest,
   idempotencyKey: string,
@@ -283,6 +298,53 @@ export async function updateStudent(
     )
   }
   return value
+}
+
+async function lifecycleStudentRequest(
+  path: string,
+  body: DeactivateStudentRequest | ReactivateStudentRequest,
+  idempotencyKey: string,
+): Promise<StudentDetail> {
+  const response = await authenticatedPost(path, idempotencyKey, body)
+  let value: unknown
+  try {
+    value = await response.json()
+  } catch {
+    throw new ApiResponseError(response.status)
+  }
+  if (response.status !== 200 || !isStudentDetail(value)) {
+    throw new ApiResponseError(
+      response.status,
+      response.status !== 200 && isRecord(value) && typeof value.code === 'string'
+        ? value.code
+        : undefined,
+    )
+  }
+  return value
+}
+
+export function deactivateStudent(
+  studentId: string,
+  body: DeactivateStudentRequest,
+  idempotencyKey: string,
+): Promise<StudentDetail> {
+  return lifecycleStudentRequest(
+    `/students/${encodeURIComponent(studentId)}/deactivation`,
+    body,
+    idempotencyKey,
+  )
+}
+
+export function reactivateStudent(
+  studentId: string,
+  body: ReactivateStudentRequest,
+  idempotencyKey: string,
+): Promise<StudentDetail> {
+  return lifecycleStudentRequest(
+    `/students/${encodeURIComponent(studentId)}/reactivation`,
+    body,
+    idempotencyKey,
+  )
 }
 
 function isCreatedStudent(value: unknown): value is CreatedStudent {

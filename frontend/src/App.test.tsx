@@ -13,9 +13,11 @@ const authMocks = vi.hoisted(() => ({
 const apiMocks = vi.hoisted(() => ({
   authenticatedPost: vi.fn(),
   createStudent: vi.fn(),
+  deactivateStudent: vi.fn(),
   fetchCurrentUserProfile: vi.fn(),
   fetchStudent: vi.fn(),
   fetchStudents: vi.fn(),
+  reactivateStudent: vi.fn(),
   updateStudent: vi.fn(),
 }))
 
@@ -29,6 +31,7 @@ vi.mock('aws-amplify/auth', () => ({
 vi.mock('@/lib/api', () => ({
   authenticatedPost: apiMocks.authenticatedPost,
   createStudent: apiMocks.createStudent,
+  deactivateStudent: apiMocks.deactivateStudent,
   ApiResponseError: class ApiResponseError extends Error {
     status: number
     code?: string
@@ -41,6 +44,7 @@ vi.mock('@/lib/api', () => ({
   fetchCurrentUserProfile: apiMocks.fetchCurrentUserProfile,
   fetchStudent: apiMocks.fetchStudent,
   fetchStudents: apiMocks.fetchStudents,
+  reactivateStudent: apiMocks.reactivateStudent,
   updateStudent: apiMocks.updateStudent,
   AuthSessionUnavailableError: class AuthSessionUnavailableError extends Error {},
 }))
@@ -430,5 +434,109 @@ describe('student update integration', () => {
     expect(screen.getByText('Aluno Atualizado')).toBeTruthy()
     expect(screen.queryByText('Aluno Exemplo')).toBeNull()
     expect(apiMocks.fetchStudents).toHaveBeenCalledOnce()
+  })
+})
+
+describe('student lifecycle integration', () => {
+  const inactiveSummary = { ...studentsPage.items[0], status: 'INACTIVE' }
+  const inactivePage = { ...studentsPage, items: [inactiveSummary] }
+  const inactiveDetail = { ...studentDetail, status: 'INACTIVE' }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    authMocks.getCurrentUser.mockResolvedValue({})
+    authMocks.signOut.mockResolvedValue(undefined)
+    apiMocks.fetchCurrentUserProfile.mockResolvedValue(activeProfile)
+    apiMocks.fetchStudents.mockResolvedValue(studentsPage)
+    apiMocks.fetchStudent.mockResolvedValue(studentDetail)
+    apiMocks.deactivateStudent.mockResolvedValue({
+      ...studentDetail,
+      status: 'INACTIVE',
+      version: 4,
+      updatedAt: '2026-09-08T10:28:53.080Z',
+    })
+    apiMocks.reactivateStudent.mockResolvedValue({
+      ...inactiveDetail,
+      status: 'ACTIVE',
+      version: 4,
+      updatedAt: '2026-09-08T10:28:53.080Z',
+    })
+  })
+
+  afterEach(() => {
+    cleanup()
+    vi.restoreAllMocks()
+    vi.clearAllMocks()
+  })
+
+  it('loads ACTIVE by default and reloads for INACTIVE and ALL filters', async () => {
+    apiMocks.fetchStudents.mockImplementation(async (status: string) =>
+      status === 'INACTIVE' ? inactivePage : studentsPage)
+    render(<App />)
+    await screen.findByText('Aluno Exemplo')
+    const filter = screen.getByLabelText('Status')
+    expect((filter as HTMLSelectElement).value).toBe('ACTIVE')
+    expect(apiMocks.fetchStudents).toHaveBeenLastCalledWith('ACTIVE')
+
+    fireEvent.change(filter, { target: { value: 'INACTIVE' } })
+    await waitFor(() => expect(apiMocks.fetchStudents).toHaveBeenLastCalledWith('INACTIVE'))
+    expect(await screen.findByText('INACTIVE')).toBeTruthy()
+
+    fireEvent.change(filter, { target: { value: 'ALL' } })
+    await waitFor(() => expect(apiMocks.fetchStudents).toHaveBeenLastCalledWith('ALL'))
+  })
+
+  it('shows lifecycle actions only to ADMIN and according to status', async () => {
+    render(<App />)
+    expect(await screen.findByRole('button', { name: 'Desativar' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Reativar' })).toBeNull()
+    cleanup()
+    vi.clearAllMocks()
+    apiMocks.fetchCurrentUserProfile.mockResolvedValue({ ...activeProfile, role: 'OPERATOR' })
+    apiMocks.fetchStudents.mockResolvedValue(studentsPage)
+    render(<App />)
+    await screen.findByText('Aluno Exemplo')
+    expect(screen.queryByRole('button', { name: 'Desativar' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Reativar' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Editar' })).toBeTruthy()
+  })
+
+  it('loads detail before deactivation and removes the student from ACTIVE after success', async () => {
+    let resolveDetail!: (value: typeof studentDetail) => void
+    apiMocks.fetchStudent.mockReturnValueOnce(new Promise((resolve) => { resolveDetail = resolve }))
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Desativar' }))
+    expect(screen.getByText('Carregando dados do aluno…')).toBeTruthy()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(apiMocks.deactivateStudent).not.toHaveBeenCalled()
+    await act(async () => resolveDetail(studentDetail))
+    expect(await screen.findByRole('dialog', { name: 'Desativar aluno' })).toBeTruthy()
+    fireEvent.change(screen.getByLabelText('Motivo'), { target: { value: 'Motivo sintético' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar desativação' }))
+    expect(await screen.findByText('Aluno desativado com sucesso.')).toBeTruthy()
+    expect(screen.queryByText('Aluno Exemplo')).toBeNull()
+    expect(screen.getByText('Nenhum aluno encontrado.')).toBeTruthy()
+    expect(apiMocks.fetchStudent.mock.invocationCallOrder[0]).toBeLessThan(
+      apiMocks.deactivateStudent.mock.invocationCallOrder[0] ?? 0,
+    )
+  })
+
+  it('loads fresh detail before reactivation and removes the student from INACTIVE', async () => {
+    apiMocks.fetchStudents.mockImplementation(async (status: string) =>
+      status === 'INACTIVE' ? inactivePage : studentsPage)
+    apiMocks.fetchStudent.mockResolvedValue(inactiveDetail)
+    render(<App />)
+    await screen.findByText('Aluno Exemplo')
+    fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'INACTIVE' } })
+    const reactivate = await screen.findByRole('button', { name: 'Reativar' })
+    fireEvent.click(reactivate)
+    expect(await screen.findByRole('dialog', { name: 'Reativar aluno' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar reativação' }))
+    expect(await screen.findByText('Aluno reativado com sucesso.')).toBeTruthy()
+    expect(screen.queryByText('Aluno Exemplo')).toBeNull()
+    expect(apiMocks.fetchStudent).toHaveBeenCalledWith(inactiveDetail.studentId)
+    expect(apiMocks.fetchStudent.mock.invocationCallOrder[0]).toBeLessThan(
+      apiMocks.reactivateStudent.mock.invocationCallOrder[0] ?? 0,
+    )
   })
 })

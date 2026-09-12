@@ -9,6 +9,10 @@ import {
 
 import { CreateStudentForm } from '@/components/CreateStudentForm'
 import { EditStudentForm } from '@/components/EditStudentForm'
+import {
+  StudentLifecycleDialog,
+  type StudentLifecycleAction,
+} from '@/components/StudentLifecycleDialog'
 import { Button } from '@/components/ui/button'
 import {
   authenticatedPost,
@@ -19,6 +23,7 @@ import {
   type StudentSummary,
   type CreatedStudent,
   type StudentDetail,
+  type StudentStatusFilter,
   type UserProfile,
 } from '@/lib/api'
 
@@ -110,14 +115,24 @@ function App() {
   const sessionGeneration = useRef(0)
   const listGeneration = useRef(0)
   const editGeneration = useRef(0)
+  const lifecycleGeneration = useRef(0)
+  const statusFilterRef = useRef<StudentStatusFilter>('ACTIVE')
   const [showCreate, setShowCreate] = useState(false)
   const [creationMessage, setCreationMessage] = useState<string | null>(null)
   const [editingStudent, setEditingStudent] = useState<StudentDetail | null>(null)
   const [editingStudentId, setEditingStudentId] = useState<string | null>(null)
   const [editError, setEditError] = useState<string | null>(null)
   const [updateMessage, setUpdateMessage] = useState<string | null>(null)
+  const [statusFilter, setStatusFilter] = useState<StudentStatusFilter>('ACTIVE')
+  const [lifecycleStudent, setLifecycleStudent] = useState<StudentDetail | null>(null)
+  const [lifecycleAction, setLifecycleAction] = useState<StudentLifecycleAction | null>(null)
+  const [lifecycleLoadingStudentId, setLifecycleLoadingStudentId] = useState<string | null>(null)
+  const [lifecycleError, setLifecycleError] = useState<string | null>(null)
+  const [lifecycleMessage, setLifecycleMessage] = useState<string | null>(null)
 
-  const loadStudents = useCallback(async () => {
+  const loadStudents = useCallback(async (
+    status: StudentStatusFilter = statusFilterRef.current,
+  ) => {
     const generation = ++listGeneration.current
     const session = sessionGeneration.current
     const isCurrent = () => generation === listGeneration.current && session === sessionGeneration.current
@@ -125,7 +140,7 @@ function App() {
     setIsStudentsLoading(true)
 
     try {
-      const page = await fetchStudents()
+      const page = await fetchStudents(status)
       if (isCurrent()) setStudents(page.items)
     } catch {
       if (isCurrent()) setStudentsError(STUDENTS_LOAD_ERROR)
@@ -140,12 +155,20 @@ function App() {
     const session = ++sessionGeneration.current
     ++listGeneration.current
     ++editGeneration.current
+    ++lifecycleGeneration.current
     setShowCreate(false)
     setCreationMessage(null)
     setEditingStudent(null)
     setEditingStudentId(null)
     setEditError(null)
     setUpdateMessage(null)
+    statusFilterRef.current = 'ACTIVE'
+    setStatusFilter('ACTIVE')
+    setLifecycleStudent(null)
+    setLifecycleAction(null)
+    setLifecycleLoadingStudentId(null)
+    setLifecycleError(null)
+    setLifecycleMessage(null)
     const isSessionCurrent = () => isCurrent() && session === sessionGeneration.current
     setAuthView('profile-resolution')
     setProfileError(null)
@@ -179,6 +202,7 @@ function App() {
     ++sessionGeneration.current
     ++listGeneration.current
     ++editGeneration.current
+    ++lifecycleGeneration.current
   }, [])
 
   useEffect(() => {
@@ -731,7 +755,9 @@ function App() {
         studentId: student.studentId, fullName: student.fullName,
         registrationNumber: student.registrationNumber, status: student.status,
       }
-      setStudents((current) => [summary, ...current.filter((item) => item.studentId !== summary.studentId)])
+      setStudents((current) => statusFilterRef.current === 'INACTIVE'
+        ? current.filter((item) => item.studentId !== summary.studentId)
+        : [summary, ...current.filter((item) => item.studentId !== summary.studentId)])
       setIsStudentsLoading(false)
       setStudentsError(null)
       setShowCreate(false)
@@ -744,6 +770,11 @@ function App() {
       setCreationMessage(null)
       setUpdateMessage(null)
       setEditError(null)
+      ++lifecycleGeneration.current
+      setLifecycleStudent(null)
+      setLifecycleAction(null)
+      setLifecycleLoadingStudentId(null)
+      setLifecycleError(null)
       setEditingStudent(null)
       setEditingStudentId(studentId)
       try {
@@ -777,6 +808,79 @@ function App() {
       setEditingStudentId(null)
       setEditError(null)
       setUpdateMessage('Aluno atualizado com sucesso.')
+    }
+    async function beginLifecycle(studentId: string, action: StudentLifecycleAction) {
+      const generation = ++lifecycleGeneration.current
+      const activeSession = sessionGeneration.current
+      ++editGeneration.current
+      setShowCreate(false)
+      setCreationMessage(null)
+      setUpdateMessage(null)
+      setEditingStudent(null)
+      setEditingStudentId(null)
+      setEditError(null)
+      setLifecycleMessage(null)
+      setLifecycleError(null)
+      setLifecycleStudent(null)
+      setLifecycleAction(action)
+      setLifecycleLoadingStudentId(studentId)
+      try {
+        const detail = await fetchStudent(studentId)
+        if (generation !== lifecycleGeneration.current ||
+            activeSession !== sessionGeneration.current) return
+        setLifecycleStudent(detail)
+      } catch {
+        if (generation === lifecycleGeneration.current &&
+            activeSession === sessionGeneration.current) {
+          setLifecycleError('Não foi possível carregar os dados do aluno. Tente novamente.')
+          setLifecycleAction(null)
+        }
+      } finally {
+        if (generation === lifecycleGeneration.current &&
+            activeSession === sessionGeneration.current) setLifecycleLoadingStudentId(null)
+      }
+    }
+    function lifecycleCompleted(student: StudentDetail, action: StudentLifecycleAction) {
+      if (session !== sessionGeneration.current) return
+      ++listGeneration.current
+      ++lifecycleGeneration.current
+      const summary: StudentSummary = {
+        studentId: student.studentId,
+        fullName: student.fullName,
+        registrationNumber: student.registrationNumber,
+        status: student.status,
+      }
+      setStudents((current) => {
+        const withoutStudent = current.filter((item) => item.studentId !== summary.studentId)
+        const visible = statusFilterRef.current === 'ALL' || statusFilterRef.current === summary.status
+        return visible ? current.map((item) => item.studentId === summary.studentId ? summary : item) : withoutStudent
+      })
+      setLifecycleStudent(null)
+      setLifecycleAction(null)
+      setLifecycleLoadingStudentId(null)
+      setLifecycleError(null)
+      setLifecycleMessage(action === 'deactivate'
+        ? 'Aluno desativado com sucesso.'
+        : 'Aluno reativado com sucesso.')
+    }
+    function changeStatusFilter(next: StudentStatusFilter) {
+      if (next === statusFilterRef.current) return
+      statusFilterRef.current = next
+      setStatusFilter(next)
+      ++editGeneration.current
+      ++lifecycleGeneration.current
+      setShowCreate(false)
+      setEditingStudent(null)
+      setEditingStudentId(null)
+      setLifecycleStudent(null)
+      setLifecycleAction(null)
+      setLifecycleLoadingStudentId(null)
+      setCreationMessage(null)
+      setUpdateMessage(null)
+      setLifecycleMessage(null)
+      setEditError(null)
+      setLifecycleError(null)
+      void loadStudents(next)
     }
     return (
       <main className="operational-page">
@@ -822,6 +926,24 @@ function App() {
           {creationMessage ? <p className="auth-notice" role="status">{creationMessage}</p> : null}
           {updateMessage ? <p className="auth-notice" role="status">{updateMessage}</p> : null}
           {editError ? <p className="auth-error" role="alert">{editError}</p> : null}
+          {lifecycleLoadingStudentId ? (
+            <p className="auth-notice" role="status">Carregando dados do aluno…</p>
+          ) : null}
+          {lifecycleMessage ? <p className="auth-notice" role="status">{lifecycleMessage}</p> : null}
+          {lifecycleError ? <p className="auth-error" role="alert">{lifecycleError}</p> : null}
+          <div className="student-status-filter">
+            <label htmlFor="student-status-filter">Status</label>
+            <select
+              id="student-status-filter"
+              value={statusFilter}
+              disabled={isStudentsLoading || isLoading}
+              onChange={(event) => changeStatusFilter(event.target.value as StudentStatusFilter)}
+            >
+              <option value="ACTIVE">Ativos</option>
+              <option value="INACTIVE">Inativos</option>
+              <option value="ALL">Todos</option>
+            </select>
+          </div>
           {!showCreate && !editingStudent ? <>
           {activationMessage ? (
             <p className="auth-notice" role="status">
@@ -861,16 +983,39 @@ function App() {
                   <div className="student-card-actions">
                     <span className="student-status">{student.status}</span>
                     <Button type="button" variant="outline"
-                      disabled={editingStudentId !== null || isLoading}
+                      disabled={editingStudentId !== null || lifecycleLoadingStudentId !== null || isLoading}
                       onClick={() => void beginEdit(student.studentId)}>
                       Editar
                     </Button>
+                    {userProfile?.role === 'ADMIN' ? (
+                      <Button type="button" variant="outline"
+                        disabled={editingStudentId !== null || lifecycleLoadingStudentId !== null || isLoading}
+                        onClick={() => void beginLifecycle(
+                          student.studentId,
+                          student.status === 'ACTIVE' ? 'deactivate' : 'reactivate',
+                        )}>
+                        {student.status === 'ACTIVE' ? 'Desativar' : 'Reativar'}
+                      </Button>
+                    ) : null}
                   </div>
                 </li>
               ))}
             </ul>
           ) : null}
           </> : null}
+          {lifecycleStudent && lifecycleAction ? (
+            <StudentLifecycleDialog
+              key={`${session}-${lifecycleStudent.studentId}-${lifecycleAction}`}
+              student={lifecycleStudent}
+              action={lifecycleAction}
+              onCompleted={lifecycleCompleted}
+              onCancel={() => {
+                ++lifecycleGeneration.current
+                setLifecycleStudent(null)
+                setLifecycleAction(null)
+              }}
+            />
+          ) : null}
         </section>
       </main>
     )
