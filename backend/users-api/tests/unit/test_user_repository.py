@@ -17,6 +17,8 @@ class FakeClient:
         self.get_calls: list[dict[str, object]] = []
         self.transaction: dict[str, object] | None = None
         self.transaction_error: ClientError | None = None
+        self.query_responses: list[dict[str, Any]] = []
+        self.query_calls: list[dict[str, object]] = []
 
     def get_item(self, **kwargs: object) -> dict[str, Any]:
         self.get_calls.append(kwargs)
@@ -27,6 +29,10 @@ class FakeClient:
         if self.transaction_error is not None:
             raise self.transaction_error
         return {}
+
+    def query(self, **kwargs: object) -> dict[str, Any]:
+        self.query_calls.append(kwargs)
+        return self.query_responses.pop(0)
 
 
 def serialized(item: dict[str, object]) -> dict[str, object]:
@@ -109,6 +115,52 @@ def test_missing_item_returns_none() -> None:
     client = FakeClient()
     client.responses = [{}]
     assert UserRepository(client, "users", "audit").get_profile("user-1") is None
+
+
+def test_email_reservation_is_read_consistently() -> None:
+    client = FakeClient()
+    client.responses = [{"Item": serialized({"userId": "user-1"})}]
+
+    assert UserRepository(client, "users", "audit").get_email_reservation("user@example.test") == {
+        "userId": "user-1"
+    }
+    assert client.get_calls == [
+        {
+            "TableName": "users",
+            "Key": serialized({"PK": "UNIQUE#EMAIL#user@example.test", "SK": "UNIQUE"}),
+            "ConsistentRead": True,
+        }
+    ]
+
+
+def test_lists_profiles_through_name_index_with_opaque_position() -> None:
+    client = FakeClient()
+    last_key: dict[str, object] = {
+        "PK": "USER#user-2",
+        "SK": "PROFILE",
+        "GSI1PK": "USERS",
+        "GSI1SK": "NAME#ana#USER#user-2",
+    }
+    client.query_responses = [
+        {
+            "Items": [serialized({"PK": "USER#user-1", "SK": "PROFILE"})],
+            "LastEvaluatedKey": serialized(last_key),
+        }
+    ]
+
+    page = UserRepository(client, "users", "audit").list_profiles(
+        name_prefix="ana", limit=20, position=None
+    )
+
+    assert page.items == [{"PK": "USER#user-1", "SK": "PROFILE"}]
+    assert page.next_position is not None
+    assert page.next_position.user_id == "user-2"
+    assert page.next_position.normalized_name == "ana"
+    query = client.query_calls[0]
+    assert query["IndexName"] == "gsi-all-users-name"
+    assert query["Limit"] == 20
+    assert "begins_with" in str(query["KeyConditionExpression"])
+    assert "FilterExpression" not in query
 
 
 def test_admin_transaction_has_counter_and_audit_once() -> None:

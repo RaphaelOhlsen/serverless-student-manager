@@ -15,6 +15,7 @@ from users_api.repositories.cognito_repository import CognitoRepository
 from users_api.repositories.idempotency_repository import IdempotencyRepository
 from users_api.repositories.user_repository import UserRepository
 from users_api.services.activation_service import ActivationService
+from users_api.services.admin_user_service import AdminUserService
 from users_api.services.self_profile_service import SelfProfileService
 
 
@@ -42,6 +43,18 @@ def get_activation_service() -> ActivationService:
 def get_self_profile_service() -> SelfProfileService:
     dynamodb_client = boto3.client("dynamodb")
     return SelfProfileService(
+        UserRepository(
+            dynamodb_client,
+            get_users_table_name(),
+            get_audit_table_name(),
+        )
+    )
+
+
+@lru_cache
+def get_admin_user_service() -> AdminUserService:
+    dynamodb_client = boto3.client("dynamodb")
+    return AdminUserService(
         UserRepository(
             dynamodb_client,
             get_users_table_name(),
