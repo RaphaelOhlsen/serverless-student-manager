@@ -112,6 +112,11 @@ Responsible for routine student operations, including:
 
 The frontend may hide controls according to the user's role, but authorization must always be enforced by the backend.
 
+Physical Student deletion is explicitly out of scope for v1. Deactivation is
+the canonical operational-removal mechanism. Introducing physical deletion in a
+future version requires an explicit SRS revision and a new architectural decision
+covering retention or anonymization, uniqueness reservations, audit and recovery.
+
 ---
 
 ## 4. Functional Requirements — Authentication and Authorization
@@ -1388,6 +1393,9 @@ The detailed exceptional recovery sequence for the sole active Administrator is 
 ### 17.1 Product
 
 - Retention period and future disposal/anonymization policy for inactive students.
+- Physical Student deletion remains a future capability outside v1 and is not
+  pending implementation. It may be reconsidered only with the requirements and
+  policy decisions defined by ADR-034.
 - Whether Administrators may edit their own display name.
 - Future student access.
 - Future guardian registration.

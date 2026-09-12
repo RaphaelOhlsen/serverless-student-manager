@@ -56,6 +56,9 @@ Para Update Student, consultar também a
 Para Student Lifecycle, consultar também a
 [ADR-033 — Ciclo de vida do aluno](decisions/adr/adr-033-student-lifecycle.md) — Approved.
 
+Para a política de exclusão física de Student, consultar também a
+[ADR-034 — Política de exclusão física de aluno](decisions/adr/adr-034-student-physical-deletion-policy.md) — Approved.
+
 ## 4. Arquitetura consolidada
 
 38. `architecture/architecture-overview.md`
