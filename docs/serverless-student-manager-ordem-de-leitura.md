@@ -59,6 +59,9 @@ Para Student Lifecycle, consultar também a
 Para a política de exclusão física de Student, consultar também a
 [ADR-034 — Política de exclusão física de aluno](decisions/adr/adr-034-student-physical-deletion-policy.md) — Approved.
 
+Para Users / Admin CRUD, consultar também a
+[ADR-035 — Gerenciamento administrativo de usuários](decisions/adr/adr-035-administrative-user-management.md) — Proposed.
+
 ## 4. Arquitetura consolidada
 
 38. `architecture/architecture-overview.md`

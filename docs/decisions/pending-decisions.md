@@ -4,10 +4,17 @@
 **Data:** 2026-09-04
 **Status:** Engenharia em andamento
 
-As ADR-001 a ADR-034 estão aprovadas. Os milestones Update Student e Student
+As ADR-001 a ADR-034 estão aprovadas. A ADR-035 está `Proposed`. Os milestones Update Student e Student
 Lifecycle foram implementados, publicados, validados e encerrados; não há decisão
 pendente específica desses milestones. A ADR-034 retirou a exclusão física de
 Student do escopo da v1; Deactivate Student é a remoção operacional canônica.
+
+As decisões de contrato do bloco Users / Admin CRUD foram formalizadas na
+ADR-035. Não permanecem pendentes: separação de `version` e `authVersion`, seus
+incrementos, superfície HTTP, proibições de self-administration, proteção do último
+Admin, ordem das sagas de lifecycle, princípios de replay/reconciliação, preservação
+da identidade Cognito, paginação filtrada, representação pública e manutenção de
+UC-018 como fluxo operacional.
 
 ## Detalhamento operacional pendente
 
@@ -23,7 +30,8 @@ compensações, reconciliação e alertas continua pendente.
 
 ## Próximas atividades de engenharia
 
-1. avançar para o bloco funcional Users / Admin CRUD;
+1. implementar incrementalmente o contrato Users / Admin CRUD da ADR-035 após sua
+   revisão e gates próprios;
 2. tratar exclusão física de Student apenas como possibilidade futura fora da v1.
 
 Caso essa capacidade futura seja reaberta, ela exige revisão explícita do SRS e

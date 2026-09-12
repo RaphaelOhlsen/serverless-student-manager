@@ -557,6 +557,34 @@ The first Administrator shall be created through the controlled bootstrap proced
 - The procedure records audit information and handles Cognito/DynamoDB inconsistency according to the approved operational compensation procedure.
 - No public bootstrap endpoint exists.
 
+### Administrative Users HTTP contract
+
+The v1 administrative surface is limited to:
+
+```http
+GET  /users
+GET  /users/{userId}
+POST /users
+POST /users/{userId}/role-change
+POST /users/{userId}/deactivation
+POST /users/{userId}/reactivation
+POST /users/{userId}/invitation/resend
+```
+
+All administrative routes require an `ACTIVE ADMIN`. Self role change and
+self-deactivation are prohibited. Writes require a UUID `Idempotency-Key`; writes
+against an existing User also require `expectedVersion`, except creation.
+
+The administrative public User representation contains only `userId`, `fullName`,
+`email`, `role`, `status`, `version`, `createdAt` and `updatedAt`. It does not
+expose `cognitoSub`, `authVersion`, Cognito/MFA internals, physical keys, control
+records or idempotency metadata.
+
+The following are outside the v1 administrative surface: generic User PATCH,
+administrative email change, generic profile editing, physical User deletion and
+an MFA recovery API/UI. UC-018 remains governed by the operational procedure in
+ADR-019.
+
 ---
 
 ## 7. Audit, Errors and Observability
@@ -776,6 +804,13 @@ The only permitted replacement of `cognitoSub` is the controlled break-glass pro
 - `authVersion` is incremented;
 - the identity replacement is audited.
 
+Administrative Users also have an independent `version` integer for optimistic
+concurrency. `version` is public in the administrative API; `authVersion` remains
+an internal authorization/identity epoch. New profiles start both at `1`.
+Historical profiles without `version` have logical version `1`; their first
+effective administrative mutation with `expectedVersion = 1` atomically
+materializes `version = 2`, without requiring a backfill.
+
 #### RN-USR-003 — Status
 
 Allowed states:
@@ -787,6 +822,11 @@ Allowed states:
 The only normal first-access transition is `INVITED → ACTIVE`, through the
 server-side reconciliation and atomic transaction defined by ADR-027.
 `INACTIVE` cannot use this transition.
+
+Effective activation, role change, deactivation and reactivation increment both
+the resource `version` and `authVersion`. Read operations, invitation resend and
+no-op do not increment either value. `DISABLED` is a Cognito technical state and
+is not a domain status.
 
 #### RN-USR-004 — Passwords
 
@@ -832,6 +872,8 @@ Student PROFILE or public response.
 | `email` | String | Yes | Yes |
 | `role` | Enum | Yes | No |
 | `status` | Enum | Yes | No |
+| `version` | Integer | Yes for new profiles; logical `1` for historical profiles without the attribute | No |
+| `authVersion` | Integer | Yes | No |
 | `createdAt` | DateTime | Yes | No |
 | `createdBy` | String | Yes | No |
 | `updatedAt` | DateTime | Yes | No |
