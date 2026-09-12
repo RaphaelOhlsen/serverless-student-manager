@@ -8,9 +8,12 @@ TERRAFORM_DIR := infra/bootstrap
 
 PYTHON_DIRS := backend tools
 
-.PHONY: setup format format-check lint typecheck test coverage security check \
+.PHONY: agentic-preflight setup format format-check lint typecheck test coverage security check \
 	terraform-init terraform-format terraform-format-check terraform-validate \
 	terraform-test tflint-init terraform-lint terraform-check
+
+agentic-preflight:
+	./scripts/agentic-preflight.sh
 
 setup:
 	@$(PYTHON) -c 'import sys; assert sys.version_info[:2] == (3, 13), "Python 3.13 is required"'

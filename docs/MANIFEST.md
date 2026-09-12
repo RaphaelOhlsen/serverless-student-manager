@@ -3,7 +3,7 @@
 **Projeto:** Serverless Student Manager
 **Versão:** 2.9
 **Data:** 2026-09-04
-**Arquivos listados:** 61
+**Arquivos listados:** 62
 
 O próprio `MANIFEST.md` não é listado para evitar hash autorreferencial.
 
@@ -11,8 +11,8 @@ O próprio `MANIFEST.md` não é listado para evitar hash autorreferencial.
 
 | Arquivo | SHA-256 |
 |---|---|
-| `AGENTS.md` | `204161a60f6fbd185cc5a9aeef09290eab5bdc39d77f700e8a60e04680544c01` |
-| `CLAUDE.md` | `53ecda846a33f286e01e9205dd5687cd641a8449d895b1037dd6b375705b920e` |
+| `AGENTS.md` | `0cf5c4dd70b78169739178e1e3c8688cb22ba3b81488d20eedd6eb674d9fd1fc` |
+| `CLAUDE.md` | `8d0c661384c9b8c101c9a64e688576ad6a08ac187c984d0ff114ca44cf410260` |
 | `RESTORE-INSTRUCTIONS.md` | `9f7d55d96f112e2bb50f73995f2ca42fbb5a4bbb5ba4b32fb54ba2beb6438e8d` |
 | `docs/AUDIT-REPORT.md` | `60eb194a127c553fcf6b9ebe991ab8ba403deebeead4bd49c284b00794e7e13f` |
 | `docs/DOCUMENTATION-VERSION.md` | `c720a20ab35e8b64456ec8697e42fdfbe6c03f44c4f1783921b6b5a61e2f0eee` |
@@ -57,6 +57,7 @@ O próprio `MANIFEST.md` não é listado para evitar hash autorreferencial.
 | `docs/decisions/decision-register.md` | `75f32ac7d26931380a6dcd05599011b1a9d930de64a17b3810069ce2edc05b53` |
 | `docs/decisions/pending-decisions.md` | `58c1f6f2c6f7aea553196d99873de8e8ca9c855874baadc9c96e2518da5a144c` |
 | `docs/operations/cognito-dynamodb-compensation.md` | `d2914292047679b7858e6b130f4baf04440913f9fb0809b243df22323d448807` |
+| `docs/operations/agentic-development-harness-local.md` | `1173905952d69713fbbffc491f476c3bffdcedf0d4acffde1e1116bde3804b06` |
 | `docs/operations/first-admin-email-verification.md` | `f067eb2b1bbea6d453d542b67fbf6d9d8a86504c2c293f5e035786518480150d` |
 | `docs/operations/first-admin-invitation-resume.md` | `33213a038e5f7400b09cb88cba7f19c75be248ac860b1bccd6af762153f6679a` |
 | `docs/operations/non-http-idempotency.md` | `3734ceb6968b2c6ee998bcfbb690bb3899c5dd86551a309b05b21b72bb4d6a96` |
@@ -65,7 +66,7 @@ O próprio `MANIFEST.md` não é listado para evitar hash autorreferencial.
 | `docs/overview.md` | `99c0311d0a7f4993b3bf5e715e3da7e455b20959dc33d0e1d8f6968ca7e29e97` |
 | `docs/references.md` | `f86b0ea29df69ea0ba5e6bad78e6dc661cad6ee24dc45bcc63222fd6735ff236` |
 | `docs/requirements/srs.md` | `030f1cb76fb15805aa0bc04f8beabee87b30ba59ce1d09c96875729c9cee9fd6` |
-| `docs/serverless-student-manager-ordem-de-leitura.md` | `8107f5ed6252331ce711521b27dbc3f01045ea60e422d967217f7bdb6ba01f6e` |
+| `docs/serverless-student-manager-ordem-de-leitura.md` | `a2657b4ec8aead8d366ff3dccd04f93c82b5d8d4480bb9b25f69147d26dea59f` |
 | `docs/serverless-student-manager-ordem-de-leitura.png` | `0243000a218ca8860a10c45b0eeb21a02195664f9c4da1eacb1f8abf9ceed611` |
 | `docs/decisions/adr/adr-031-agentic-development-harness.md` | `6d0215e41b58547365c7ceb7dd0c9724f1c28f71a9ac43ded7ecb0cbec7e0e5a` |
 | `docs/operations/agentic-development-harness-v1.md` | `34aad1c59d448d5070ae2d9bbe1941bee110bec340e53d790e69f5c1323ece98` |
