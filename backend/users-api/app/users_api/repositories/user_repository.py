@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 from aws_lambda_powertools import Logger
@@ -5,6 +6,7 @@ from boto3.dynamodb.types import TypeDeserializer, TypeSerializer  # type: ignor
 from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 
 from users_api.config import SERVICE_NAME
+from users_api.cursor import UserCursorPosition
 from users_api.repositories.dynamodb_values import normalize_dynamodb_value
 
 logger = Logger(service=SERVICE_NAME)
@@ -13,7 +15,15 @@ logger = Logger(service=SERVICE_NAME)
 class DynamoDBClient(Protocol):
     def get_item(self, **kwargs: object) -> dict[str, Any]: ...
 
+    def query(self, **kwargs: object) -> dict[str, Any]: ...
+
     def transact_write_items(self, **kwargs: object) -> dict[str, Any]: ...
+
+
+@dataclass(frozen=True)
+class UserPage:
+    items: list[dict[str, object]]
+    next_position: UserCursorPosition | None
 
 
 class UserRepository:
@@ -29,6 +39,52 @@ class UserRepository:
 
     def get_profile(self, user_id: str) -> dict[str, object] | None:
         return self._get_user_item(f"USER#{user_id}", "PROFILE")
+
+    def get_email_reservation(self, normalized_email: str) -> dict[str, object] | None:
+        return self._get_user_item(f"UNIQUE#EMAIL#{normalized_email}", "UNIQUE")
+
+    def list_profiles(
+        self,
+        *,
+        name_prefix: str | None,
+        limit: int,
+        position: UserCursorPosition | None,
+    ) -> UserPage:
+        expression = "#gsi_pk = :users"
+        names = {"#gsi_pk": "GSI1PK", "#gsi_sk": "GSI1SK"}
+        values: dict[str, object] = {":users": "USERS"}
+        if name_prefix is not None:
+            expression += " AND begins_with(#gsi_sk, :prefix)"
+            values[":prefix"] = f"NAME#{name_prefix}"
+        query: dict[str, object] = {
+            "TableName": self._users_table,
+            "IndexName": "gsi-all-users-name",
+            "KeyConditionExpression": expression,
+            "ExpressionAttributeNames": names,
+            "ExpressionAttributeValues": self._serialize_values(values),
+            "Limit": limit,
+            "ScanIndexForward": True,
+        }
+        if position is not None:
+            query["ExclusiveStartKey"] = self._serialize_item(
+                {
+                    "PK": f"USER#{position.user_id}",
+                    "SK": "PROFILE",
+                    "GSI1PK": "USERS",
+                    "GSI1SK": (f"NAME#{position.normalized_name}#USER#{position.user_id}"),
+                }
+            )
+        response = self._client.query(**query)
+        raw_items = response.get("Items", [])
+        if not isinstance(raw_items, list):
+            raise RuntimeError("DynamoDB Query returned invalid Items")
+        items = [self._deserialize_item(item) for item in raw_items if isinstance(item, dict)]
+        if len(items) != len(raw_items):
+            raise RuntimeError("DynamoDB Query returned invalid item")
+        return UserPage(
+            items=items,
+            next_position=self._position_from_last_key(response.get("LastEvaluatedKey")),
+        )
 
     def activate(
         self,
@@ -171,10 +227,35 @@ class UserRepository:
         item = response.get("Item")
         if not isinstance(item, dict):
             return None
+        return self._deserialize_item(item)
+
+    def _deserialize_item(self, item: dict[str, Any]) -> dict[str, object]:
         return {
             name: normalize_dynamodb_value(self._deserializer.deserialize(value))
             for name, value in item.items()
         }
+
+    def _position_from_last_key(self, value: object) -> UserCursorPosition | None:
+        if value is None:
+            return None
+        if not isinstance(value, dict):
+            raise RuntimeError("DynamoDB Query returned invalid LastEvaluatedKey")
+        key = self._deserialize_item(value)
+        user_id = key.get("PK")
+        sort_key = key.get("GSI1SK")
+        if (
+            not isinstance(user_id, str)
+            or not user_id.startswith("USER#")
+            or not isinstance(sort_key, str)
+            or not sort_key.startswith("NAME#")
+        ):
+            raise RuntimeError("DynamoDB Query returned invalid LastEvaluatedKey")
+        actual_user_id = user_id.removeprefix("USER#")
+        suffix = f"#USER#{actual_user_id}"
+        if not sort_key.endswith(suffix):
+            raise RuntimeError("DynamoDB Query returned invalid LastEvaluatedKey")
+        normalized_name = sort_key.removeprefix("NAME#")[: -len(suffix)]
+        return UserCursorPosition(actual_user_id, normalized_name)
 
     def _serialize_item(self, item: dict[str, object]) -> dict[str, object]:
         return {name: self._serializer.serialize(value) for name, value in item.items()}

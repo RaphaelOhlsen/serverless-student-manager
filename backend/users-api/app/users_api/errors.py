@@ -20,3 +20,23 @@ class SelfProfileUnauthorizedError(RuntimeError):
 
 class SelfProfileForbiddenError(RuntimeError):
     pass
+
+
+class InvalidAdminUserListRequestError(ValueError):
+    pass
+
+
+class AdminUserUnauthorizedError(RuntimeError):
+    pass
+
+
+class AdminUserForbiddenError(RuntimeError):
+    pass
+
+
+class AdminUserNotFoundError(RuntimeError):
+    pass
+
+
+class AdminUserDataInvariantError(RuntimeError):
+    pass
