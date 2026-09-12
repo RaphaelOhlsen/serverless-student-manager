@@ -122,12 +122,23 @@ normalizedName
 email
 role
 status
+version
 authVersion
 createdAt
 createdBy
 updatedAt
 updatedBy
 ```
+
+`version` é o contador de concorrência otimista exposto pela API administrativa
+de Users. `authVersion` é o epoch interno de autorização e identidade. Novos
+perfis persistem ambos com valor `1`.
+
+Para compatibilidade, a ausência de `version` em PROFILE histórico significa
+versão lógica `1`. Sua primeira mutação administrativa efetiva com
+`expectedVersion = 1` usa condição equivalente a
+`attribute_not_exists(version) OR version = 1` e materializa `version = 2`.
+A escrita condicional impede duas mutações concorrentes de vencer; não há backfill.
 
 ### Unicidade de e-mail
 
@@ -155,6 +166,10 @@ authVersion
 ```
 
 Essa projeção é utilizada para autorização por Cognito `sub`.
+
+Role, status e `authVersion` devem coincidir com o PROFILE. Ativação, troca de
+role, desativação e reativação efetivas atualizam os dois itens atomicamente e
+incrementam `authVersion`; o `version` público existe somente no PROFILE.
 
 ### Controle de Administradores ativos
 
@@ -188,6 +203,31 @@ duplicado e auditoria de sucesso sem ativação.
 
 Replay ou usuário já `ACTIVE` integralmente reconciliado retorna sucesso sem
 nova transação, incremento ou evento. A idempotência HTTP segue a ADR-012.
+
+ADR-035 refina a implementação futura da ativação: uma transição efetiva
+`INVITED -> ACTIVE` também incrementa o `version` do PROFILE e o `authVersion`
+compartilhado. No-op continua preservando ambos.
+
+### Lifecycle administrativo e troca de role
+
+Troca de role atualiza PROFILE e AUTHORIZATION atomicamente, ajusta opcionalmente
+`CONTROL#ACTIVE_ADMIN_COUNT`, insere a auditoria e conclui a idempotência. A troca
+de `ACTIVE ADMIN` para `OPERATOR` condiciona o contador a
+`activeAdminCount > 1`; promover Operator ativo para Admin o incrementa.
+
+A desativação primeiro transaciona PROFILE/AUTHORIZATION para `INACTIVE`,
+incrementa version/authVersion, decrementa condicionalmente o contador, insere a
+auditoria e registra uma fase durável da saga. A aplicação fica fail-closed antes
+da conclusão de global sign-out e disable no Cognito.
+
+A reativação reconcilia e habilita a identidade Cognito preservada antes de uma
+transação mudar PROFILE/AUTHORIZATION para `ACTIVE`, incrementar
+version/authVersion e opcionalmente o contador, inserir a auditoria e registrar a
+conclusão da saga. Uma identidade Cognito habilitada com projeção AUTHORIZATION
+`INACTIVE` permanece funcionalmente bloqueada até a transação vencer.
+
+Cada transação usa no máximo cinco ações, abaixo do limite transacional do
+DynamoDB. Este contrato não adiciona tabela ou GSI.
 
 ### Trava singleton do primeiro Administrador
 

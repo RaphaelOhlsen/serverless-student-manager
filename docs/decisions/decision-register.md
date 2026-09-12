@@ -31,7 +31,7 @@
 | SEC-004 | Segurança | Senha: 12+ caracteres, maiúscula, minúscula, número e especial | Approved |
 | TECH-001 | Terraform | Seguir HashiCorp Style Guide | Approved |
 
-## 2. ADRs aprovadas
+## 2. ADRs
 
 | ID | Decisão | Status |
 |---|---|---|
@@ -69,6 +69,7 @@
 | [ADR-032](adr/adr-032-student-update.md) | Atualização parcial de aluno | Approved |
 | [ADR-033](adr/adr-033-student-lifecycle.md) | Ciclo de vida do aluno: desativação e reativação | Approved |
 | [ADR-034](adr/adr-034-student-physical-deletion-policy.md) | Política de exclusão física de aluno | Approved |
+| [ADR-035](adr/adr-035-administrative-user-management.md) | Gerenciamento administrativo de usuários | Proposed |
 
 ## 3. Modelos de dados aprovados
 
@@ -96,11 +97,12 @@
 
 ## 5. Situação arquitetural
 
-As ADR-001 a ADR-034 estão aprovadas. O milestone Student Lifecycle foi
+As ADR-001 a ADR-034 estão aprovadas. A ADR-035 está `Proposed` e formaliza o
+contrato do próximo milestone, Users / Admin CRUD. O milestone Student Lifecycle foi
 implementado, publicado, validado e encerrado. A exclusão física de Student está
 fora da v1; Deactivate Student é a remoção operacional canônica.
 
-Novas decisões relevantes surgidas durante a engenharia devem ser registradas em ADR-035 ou posterior.
+Novas decisões relevantes surgidas durante a engenharia devem ser registradas em ADR-036 ou posterior.
 
 ## 6. Regra de manutenção
 

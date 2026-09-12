@@ -3,7 +3,7 @@
 **Projeto:** Serverless Student Manager
 **Versão:** 2.9
 **Data:** 2026-09-04
-**Arquivos listados:** 62
+**Arquivos listados:** 63
 
 O próprio `MANIFEST.md` não é listado para evitar hash autorreferencial.
 
@@ -19,7 +19,7 @@ O próprio `MANIFEST.md` não é listado para evitar hash autorreferencial.
 | `docs/ENGINEERING-READINESS.md` | `1a890640dbd850a116d57311e9afc5b2197b0b3c1bd6b6f8e30bfab90ebac36a` |
 | `docs/README.md` | `a6bd38ae75fe56ce43f4a3cc27f95d41639367dda36a9e21b588e3546aea6d54` |
 | `docs/architecture/architecture-overview.md` | `2d07a3425ba5896f04bd570fcd3ca6050e0492f1693e0a0e0eb640ccf382fefb` |
-| `docs/architecture/data-model.md` | `0e946e846f2bff96394c685bd2f195cfe2dacf9612962a89283d2d125279e7f3` |
+| `docs/architecture/data-model.md` | `d1ad9aad9f8a6f2fc9370023f125f85f3861a96532e578324ce85da26232c9b1` |
 | `docs/architecture/deployment-and-cicd.md` | `5a34bde2310a274fb62557a007695bddb8f73fe9a65b9ad6681fde6df3358b21` |
 | `docs/architecture/diagrams.md` | `c6d18b9af0cb28f495bb1e86fb785b73da81a63cf508a13716dd9d706b1965cc` |
 | `docs/architecture/observability.md` | `164ea0d7a1c1a0e4005f58c6cb7d68e175b39d3b0f1d7bb65ad5c94f6f143f0b` |
@@ -54,8 +54,8 @@ O próprio `MANIFEST.md` não é listado para evitar hash autorreferencial.
 | `docs/decisions/adr/adr-028-lambda-application-release-via-github-actions.md` | `dec580a6979c144ee660af14e33a182e75431f386931dea5682a12a5cabd0924` |
 | `docs/decisions/adr/adr-029-self-profile-resolution.md` | `a265176f4c28d21541b326d6dc9904856082206bddf4030ff520c43ab373769f` |
 | `docs/decisions/adr/adr-030-student-creation.md` | `a8038803c0baf6b56f4e01eb0e7592fb4907af0b53916aaa057f375bfad56891` |
-| `docs/decisions/decision-register.md` | `75f32ac7d26931380a6dcd05599011b1a9d930de64a17b3810069ce2edc05b53` |
-| `docs/decisions/pending-decisions.md` | `58c1f6f2c6f7aea553196d99873de8e8ca9c855874baadc9c96e2518da5a144c` |
+| `docs/decisions/decision-register.md` | `224686b5f583fbd2afe16ec0bffd9f13f15caf79ca30a7df186e80ac24e73026` |
+| `docs/decisions/pending-decisions.md` | `3877f4dcdb6bfd6d367696e0b3b473bbf10c78bf9c81ee357c35b05375e5daea` |
 | `docs/operations/cognito-dynamodb-compensation.md` | `d2914292047679b7858e6b130f4baf04440913f9fb0809b243df22323d448807` |
 | `docs/operations/agentic-development-harness-local.md` | `1173905952d69713fbbffc491f476c3bffdcedf0d4acffde1e1116bde3804b06` |
 | `docs/operations/first-admin-email-verification.md` | `f067eb2b1bbea6d453d542b67fbf6d9d8a86504c2c293f5e035786518480150d` |
@@ -65,11 +65,12 @@ O próprio `MANIFEST.md` não é listado para evitar hash autorreferencial.
 | `docs/operations/sole-admin-mfa-recovery.md` | `30dce5d37c002be252e16509fd43afa0e26f38ad2e05453eb0656cee0ff24797` |
 | `docs/overview.md` | `99c0311d0a7f4993b3bf5e715e3da7e455b20959dc33d0e1d8f6968ca7e29e97` |
 | `docs/references.md` | `f86b0ea29df69ea0ba5e6bad78e6dc661cad6ee24dc45bcc63222fd6735ff236` |
-| `docs/requirements/srs.md` | `030f1cb76fb15805aa0bc04f8beabee87b30ba59ce1d09c96875729c9cee9fd6` |
-| `docs/serverless-student-manager-ordem-de-leitura.md` | `a2657b4ec8aead8d366ff3dccd04f93c82b5d8d4480bb9b25f69147d26dea59f` |
+| `docs/requirements/srs.md` | `10ac58e28fa2ba7f54998c05f6a79153f11b8c860b1886cae09baf4ca160b32a` |
+| `docs/serverless-student-manager-ordem-de-leitura.md` | `29291eb773a6aa986a7c596048ac3bbc165d30f92f9ec785a2ee0840d114d6f0` |
 | `docs/serverless-student-manager-ordem-de-leitura.png` | `0243000a218ca8860a10c45b0eeb21a02195664f9c4da1eacb1f8abf9ceed611` |
 | `docs/decisions/adr/adr-031-agentic-development-harness.md` | `6d0215e41b58547365c7ceb7dd0c9724f1c28f71a9ac43ded7ecb0cbec7e0e5a` |
 | `docs/operations/agentic-development-harness-v1.md` | `34aad1c59d448d5070ae2d9bbe1941bee110bec340e53d790e69f5c1323ece98` |
 | `docs/decisions/adr/adr-032-student-update.md` | `f07e204c9bcd405493b24bfe54fba5415eefe877fbbcdc9034c7a2d340c6ae99` |
 | `docs/decisions/adr/adr-033-student-lifecycle.md` | `05388a5d59a66996468b049b3acecfc3596885c776e9d42672d2d20dc454ab0d` |
 | `docs/decisions/adr/adr-034-student-physical-deletion-policy.md` | `5158870d552c0a1d87cd59dfc33d7daf1c861c2e881777a1b2d105a031cb2c02` |
+| `docs/decisions/adr/adr-035-administrative-user-management.md` | `20efe05172dca8d071f0d370b51e78148578423a071d19a7c54b496d62688fae` |
