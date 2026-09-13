@@ -159,8 +159,31 @@ def test_lists_profiles_through_name_index_with_opaque_position() -> None:
     query = client.query_calls[0]
     assert query["IndexName"] == "gsi-all-users-name"
     assert query["Limit"] == 20
-    assert "begins_with" in str(query["KeyConditionExpression"])
+    assert query["KeyConditionExpression"] == ("#gsi_pk = :users AND begins_with(#gsi_sk, :prefix)")
+    assert query["ExpressionAttributeNames"] == {
+        "#gsi_pk": "GSI1PK",
+        "#gsi_sk": "GSI1SK",
+    }
+    expression_values = query["ExpressionAttributeValues"]
+    assert isinstance(expression_values, dict)
+    assert set(expression_values) == {":users", ":prefix"}
     assert "FilterExpression" not in query
+
+
+def test_list_without_name_prefix_omits_unused_sort_key_alias() -> None:
+    client = FakeClient()
+    client.query_responses = [{"Items": []}]
+
+    UserRepository(client, "users", "audit").list_profiles(
+        name_prefix=None, limit=20, position=None
+    )
+
+    query = client.query_calls[0]
+    assert query["KeyConditionExpression"] == "#gsi_pk = :users"
+    assert query["ExpressionAttributeNames"] == {"#gsi_pk": "GSI1PK"}
+    expression_values = query["ExpressionAttributeValues"]
+    assert isinstance(expression_values, dict)
+    assert set(expression_values) == {":users"}
 
 
 def test_admin_transaction_has_counter_and_audit_once() -> None:
