@@ -40,3 +40,23 @@ class AdminUserNotFoundError(RuntimeError):
 
 class AdminUserDataInvariantError(RuntimeError):
     pass
+
+
+class InvalidAdminUserWriteRequestError(ValueError):
+    pass
+
+
+class IdempotencyKeyReusedError(RuntimeError):
+    pass
+
+
+class OperationInProgressError(RuntimeError):
+    pass
+
+
+class InvitationSagaInvariantError(RuntimeError):
+    pass
+
+
+class InvitationSagaConcurrentTransitionError(RuntimeError):
+    pass
