@@ -9,6 +9,10 @@ class FakeCognitoClient:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, object]]] = []
 
+    def admin_create_user(self, **kwargs: object) -> dict[str, Any]:
+        self.calls.append(("create", kwargs))
+        return {}
+
     def admin_get_user(self, **kwargs: object) -> dict[str, Any]:
         self.calls.append(("user", kwargs))
         return {"Username": "user-1"}

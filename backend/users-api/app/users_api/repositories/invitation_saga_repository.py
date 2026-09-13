@@ -19,6 +19,8 @@ from users_api.services.invitation_saga import (
     INVITATION_DELIVERY_FAILED,
     INVITATION_DELIVERY_UNCERTAIN,
     RESEND_INVITATION_OPERATION,
+    CognitoIdentityEvidence,
+    CognitoReconciliationReason,
     CreateSagaState,
     ResendSagaState,
     SagaClaim,
@@ -152,6 +154,14 @@ class InvitationSagaRepository:
 
     def transition(self, *, record: dict[str, object], next_state: str) -> None:
         record_id, operation, current_state, request_hash = self._transition_context(record)
+        if (
+            operation == CREATE_USER_OPERATION
+            and current_state == CreateSagaState.CLAIMED.value
+            and next_state == CreateSagaState.COGNITO_CREATED.value
+        ):
+            raise InvitationSagaInvariantError(
+                "COGNITO_CREATED requires a reconciled identity transition"
+            )
         validate_transition(operation=operation, current_state=current_state, next_state=next_state)
         now = self._now_seconds()
         try:
@@ -178,6 +188,41 @@ class InvitationSagaRepository:
                     next_state=next_state,
                 )
             raise
+
+    def store_cognito_created(
+        self,
+        *,
+        record: dict[str, object],
+        cognito_sub: str,
+        evidence: CognitoIdentityEvidence,
+    ) -> None:
+        _, operation, current_state, _ = self._transition_context(record)
+        if (
+            operation != CREATE_USER_OPERATION
+            or current_state != CreateSagaState.CLAIMED.value
+            or not self._is_canonical_uuid(cognito_sub)
+        ):
+            raise InvitationSagaInvariantError("invalid reconciled Cognito identity transition")
+        self._state_update(
+            record=record,
+            next_state=CreateSagaState.COGNITO_CREATED.value,
+            assignments={"cognitoSub": cognito_sub, "cognitoEvidence": evidence.value},
+        )
+
+    def store_cognito_reconciliation_required(
+        self,
+        *,
+        record: dict[str, object],
+        reason: CognitoReconciliationReason,
+    ) -> None:
+        _, operation, current_state, _ = self._transition_context(record)
+        if operation != CREATE_USER_OPERATION or current_state != CreateSagaState.CLAIMED.value:
+            raise InvitationSagaInvariantError("invalid Cognito reconciliation transition")
+        self._state_update(
+            record=record,
+            next_state=CreateSagaState.RECONCILIATION_REQUIRED.value,
+            assignments={"errorCode": reason.value},
+        )
 
     def build_transaction_transition(
         self,
@@ -231,7 +276,7 @@ class InvitationSagaRepository:
                 raise InvitationSagaInvariantError("resend completion cannot store response")
         else:
             raise InvitationSagaInvariantError("unsupported invitation completion status")
-        self._terminal_update(
+        self._state_update(
             record=record,
             next_state="COMPLETED",
             assignments={
@@ -274,13 +319,13 @@ class InvitationSagaRepository:
         )
         if error_code != expected_code:
             raise InvitationSagaInvariantError("delivery failure state and code mismatch")
-        self._terminal_update(
+        self._state_update(
             record=record,
             next_state=retryable_state,
             assignments={"httpStatus": 503, "errorCode": error_code},
         )
 
-    def _terminal_update(
+    def _state_update(
         self,
         *,
         record: dict[str, object],
@@ -392,7 +437,7 @@ class InvitationSagaRepository:
             raise InvitationSagaInvariantError("idempotency claim TTL is invalid")
         try:
             if operation == CREATE_USER_OPERATION:
-                CreateSagaState(str(state))
+                create_state = CreateSagaState(str(state))
                 user_id = record.get("userId")
                 event_id = record.get("eventId")
                 if (
@@ -405,6 +450,24 @@ class InvitationSagaRepository:
                     raise InvitationSagaInvariantError(
                         "create-user claim has invalid stable identifiers"
                     )
+                if create_state in {
+                    CreateSagaState.COGNITO_CREATED,
+                    CreateSagaState.DDB_COMMITTED,
+                    CreateSagaState.INVITATION_DISPATCHING,
+                    CreateSagaState.INVITATION_RETRYABLE,
+                    CreateSagaState.INVITATION_SENT,
+                    CreateSagaState.COMPLETED,
+                }:
+                    cognito_sub = record.get("cognitoSub")
+                    evidence = record.get("cognitoEvidence")
+                    if (
+                        not isinstance(cognito_sub, str)
+                        or not InvitationSagaRepository._is_canonical_uuid(cognito_sub)
+                        or evidence not in {item.value for item in CognitoIdentityEvidence}
+                    ):
+                        raise InvitationSagaInvariantError(
+                            "create-user claim has invalid Cognito identity evidence"
+                        )
                 return
             if operation == RESEND_INVITATION_OPERATION:
                 ResendSagaState(str(state))

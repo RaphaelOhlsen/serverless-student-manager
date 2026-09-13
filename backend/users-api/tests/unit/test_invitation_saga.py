@@ -21,6 +21,8 @@ from users_api.services.invitation_saga import (
     INVITATION_DELIVERY_UNCERTAIN,
     RESEND_INVITATION_OPERATION,
     RESEND_TRANSITIONS,
+    CognitoIdentityEvidence,
+    CognitoReconciliationReason,
     CreateSagaState,
     ResendSagaState,
     create_request_hash,
@@ -191,8 +193,18 @@ def test_create_transitions_and_invalid_transition() -> None:
     table = FakeTable()
     repo = repository(table)
     record = claim_create(repo).record
+    cognito_sub = "55555555-5555-4555-8555-555555555555"
+    repo.store_cognito_created(
+        record=record,
+        cognito_sub=cognito_sub,
+        evidence=CognitoIdentityEvidence.CREATE_SUCCESS,
+    )
+    record.update(
+        state=CreateSagaState.COGNITO_CREATED.value,
+        cognitoSub=cognito_sub,
+        cognitoEvidence=CognitoIdentityEvidence.CREATE_SUCCESS.value,
+    )
     for state in (
-        CreateSagaState.COGNITO_CREATED,
         CreateSagaState.DDB_COMMITTED,
         CreateSagaState.INVITATION_DISPATCHING,
         CreateSagaState.INVITATION_SENT,
@@ -235,9 +247,18 @@ def test_completed_concurrent_cas_is_recoverable_but_not_silent() -> None:
     table = FakeTable()
     repo = repository(table)
     record = claim_create(repo).record
-    table.items[str(record["id"])]["state"] = CreateSagaState.COGNITO_CREATED.value
+    cognito_sub = "55555555-5555-4555-8555-555555555555"
+    table.items[str(record["id"])].update(
+        state=CreateSagaState.COGNITO_CREATED.value,
+        cognitoSub=cognito_sub,
+        cognitoEvidence=CognitoIdentityEvidence.CREATE_SUCCESS.value,
+    )
     with pytest.raises(InvitationSagaConcurrentTransitionError):
-        repo.transition(record=record, next_state=CreateSagaState.COGNITO_CREATED.value)
+        repo.store_cognito_created(
+            record=record,
+            cognito_sub=cognito_sub,
+            evidence=CognitoIdentityEvidence.CREATE_SUCCESS,
+        )
 
 
 def test_incompatible_stale_cas_is_an_invariant_error() -> None:
@@ -246,14 +267,22 @@ def test_incompatible_stale_cas_is_an_invariant_error() -> None:
     record = claim_create(repo).record
     table.items[str(record["id"])]["state"] = CreateSagaState.DDB_COMMITTED.value
     with pytest.raises(InvitationSagaInvariantError, match="CAS mismatch"):
-        repo.transition(record=record, next_state=CreateSagaState.COGNITO_CREATED.value)
+        repo.store_cognito_created(
+            record=record,
+            cognito_sub="55555555-5555-4555-8555-555555555555",
+            evidence=CognitoIdentityEvidence.CREATE_SUCCESS,
+        )
 
 
 def test_ddb_committed_transition_can_join_domain_transaction() -> None:
     table = FakeTable()
     repo = repository(table)
     record = claim_create(repo).record
-    record["state"] = CreateSagaState.COGNITO_CREATED.value
+    record.update(
+        state=CreateSagaState.COGNITO_CREATED.value,
+        cognitoSub="55555555-5555-4555-8555-555555555555",
+        cognitoEvidence=CognitoIdentityEvidence.CREATE_SUCCESS.value,
+    )
     item = repo.build_transaction_transition(
         record=record, next_state=CreateSagaState.DDB_COMMITTED.value
     )
@@ -282,6 +311,22 @@ def test_existing_create_claim_rejects_corrupted_stable_identity() -> None:
     table.items[str(record["id"])]["inProgressExpiration"] = NOW * 1000
     with pytest.raises(InvitationSagaInvariantError, match="stable identifiers"):
         claim_create(repo)
+
+
+def test_cognito_transition_requires_identity_and_reconciliation_is_durable() -> None:
+    table = FakeTable()
+    repo = repository(table)
+    record = claim_create(repo).record
+    with pytest.raises(InvitationSagaInvariantError, match="reconciled identity"):
+        repo.transition(record=record, next_state=CreateSagaState.COGNITO_CREATED.value)
+
+    repo.store_cognito_reconciliation_required(
+        record=record,
+        reason=CognitoReconciliationReason.IDENTITY_INCOMPATIBLE,
+    )
+    stored = table.items[str(record["id"])]
+    assert stored["state"] == CreateSagaState.RECONCILIATION_REQUIRED.value
+    assert stored["errorCode"] == CognitoReconciliationReason.IDENTITY_INCOMPATIBLE.value
 
 
 def test_create_retryable_and_uncertain_states_are_distinct() -> None:

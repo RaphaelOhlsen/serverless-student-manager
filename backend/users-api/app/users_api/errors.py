@@ -60,3 +60,31 @@ class InvitationSagaInvariantError(RuntimeError):
 
 class InvitationSagaConcurrentTransitionError(RuntimeError):
     pass
+
+
+class CognitoUserNotFoundError(RuntimeError):
+    pass
+
+
+class CognitoUsernameExistsError(RuntimeError):
+    pass
+
+
+class CognitoAliasExistsError(RuntimeError):
+    pass
+
+
+class CognitoResultAmbiguousError(RuntimeError):
+    pass
+
+
+class CognitoCreateDeterministicError(RuntimeError):
+    pass
+
+
+class CognitoServiceError(RuntimeError):
+    pass
+
+
+class CognitoIdentityInvariantError(RuntimeError):
+    pass
