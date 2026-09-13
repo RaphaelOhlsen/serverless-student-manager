@@ -51,10 +51,11 @@ class UserRepository:
         position: UserCursorPosition | None,
     ) -> UserPage:
         expression = "#gsi_pk = :users"
-        names = {"#gsi_pk": "GSI1PK", "#gsi_sk": "GSI1SK"}
+        names = {"#gsi_pk": "GSI1PK"}
         values: dict[str, object] = {":users": "USERS"}
         if name_prefix is not None:
             expression += " AND begins_with(#gsi_sk, :prefix)"
+            names["#gsi_sk"] = "GSI1SK"
             values[":prefix"] = f"NAME#{name_prefix}"
         query: dict[str, object] = {
             "TableName": self._users_table,
