@@ -15,6 +15,10 @@ Esta decisão formaliza as operações administrativas restantes. Ela permanece
 `Proposed` até implementação e validação dos fluxos; sua aprovação futura não
 autoriza deploy, mutação cloud ou execução de recuperação operacional.
 
+As decisões de contrato, consistência e falha de Create/Invite e Resend estão
+fechadas nesta proposta. O status somente será promovido conforme a política do
+projeto depois da implementação e validação do milestone completo.
+
 ## Escopo e superfície HTTP
 
 Todas as rotas administrativas exigem JWT válido e ator `ADMIN` com status
@@ -160,14 +164,16 @@ Idempotency-Key: <UUID>
 ```
 
 Sucesso retorna HTTP 201 com o User público em `INVITED`, `version = 1` e
-`authVersion = 1` interno. O fluxo segue ADR-017:
+`authVersion = 1` interno. Esse sucesso somente é retornado quando a identidade
+Cognito foi reconciliada, a transação DynamoDB foi confirmada, o `RESEND`
+retornou sucesso conhecido e a saga chegou a `COMPLETED`. O fluxo segue ADR-017:
 
 1. claim idempotente e `userId` estável;
 2. `AdminCreateUser` com `Username=userId`, `SUPPRESS` e
    `ForceAliasCreation=false`;
 3. reconciliação do `cognitoSub` por `AdminGetUser` quando necessário;
-4. transação com PROFILE, `UNIQUE#EMAIL`, AUTHORIZATION, `USER_INVITED` e fase
-   durável da saga;
+4. uma única transação com PROFILE, `UNIQUE#EMAIL`, AUTHORIZATION,
+   `USER_INVITED` e avanço durável da saga para `DDB_COMMITTED`;
 5. convite por `RESEND`;
 6. conclusão idempotente somente quando o resultado permitido estiver definido.
 
@@ -176,17 +182,77 @@ O contrato de futuras criações da ADR-025 é preservado: `email` normalizado e
 remove `NEW_PASSWORD_REQUIRED` ou MFA. A operação normal não usa a trava singleton
 do primeiro Admin e não altera `ACTIVE_ADMIN_COUNT`.
 
-O body é um objeto estrito: os três campos são obrigatórios; campos extras,
-chaves JSON duplicadas, null e tipos inválidos são rejeitados. Nome e e-mail
-seguem a validação e normalização já aprovadas no SRS e na ADR-023. O hash
-idempotente usa os valores validados e normalizados, sem guardar PII bruta no
-registro técnico.
+O body é um objeto estrito: `fullName`, `email` e `role` são os três campos
+obrigatórios; campos extras, chaves JSON duplicadas, null e tipos inválidos são
+rejeitados. `role` aceita somente `ADMIN` ou `OPERATOR`.
+
+`fullName` aceita Unicode e é normalizado por NFKC, trim e redução de whitespace
+interno a um espaço. O valor após essa normalização deve conter de 2 a 150
+caracteres, não pode ser vazio nem conter caracteres de controle. A representação
+pública preserva a capitalização do valor normalizado; case folding é aplicado
+somente ao campo técnico de busca `normalizedName`.
+
+`email` é submetido ao validador sintático genérico da aplicação, sem tornar
+regras específicas de Student autoridade para User. Depois de trim, sua forma
+normalizada em lowercase deve ser válida, não vazia e possuir no máximo 254
+caracteres. Nenhuma nova dependência é exigida por esta decisão. O hash idempotente
+usa operação, `fullName` normalizado, e-mail normalizado e role, sem guardar PII
+bruta no registro técnico.
 
 Timeout de `AdminCreateUser` exige `AdminGetUser` antes de repetir. Não se cria
 segunda identidade. Falha DynamoDB definitivamente conhecida após criação
 Cognito usa apenas a compensação aprovada na ADR-017: não envia convite, tenta
 `AdminDeleteUser` e, se necessário, `AdminDisableUser` com alerta/reconciliação.
 `AdminDeleteUser` não é capacidade funcional do produto.
+
+### Saga e atomicidade de Create/Invite
+
+As fases semânticas mínimas são:
+
+```text
+CLAIMED
+COGNITO_CREATED
+DDB_COMMITTED
+INVITATION_DISPATCHING
+INVITATION_SENT
+COMPLETED
+RECONCILIATION_REQUIRED
+```
+
+Um estado interno retryable pode representar falha comprovadamente não aplicada,
+sem ampliar a máquina pública. O claim preserva `userId`, `eventId` e
+`correlationId` para todos os retries da mesma operação.
+
+O avanço `COGNITO_CREATED -> DDB_COMMITTED` integra a mesma
+`TransactWriteItems` que grava, com condições de ownership/não existência:
+
+1. PROFILE;
+2. `UNIQUE#EMAIL`;
+3. `COGNITO#<sub> / AUTHORIZATION`;
+4. auditoria `USER_INVITED`;
+5. transição idempotente da saga para `DDB_COMMITTED`, protegida por CAS.
+
+Não se usa CAS posterior como arquitetura principal, evitando que o domínio esteja
+committed enquanto o estado durável ainda indique a fase anterior.
+`CONTROL#ACTIVE_ADMIN_COUNT` não participa dessa transação.
+
+Antes de chamar externamente o `RESEND`, a saga deve avançar por CAS para
+`INVITATION_DISPATCHING`. Sucesso conhecido permite avançar para
+`INVITATION_SENT` e então `COMPLETED`. Quando tecnicamente viável, auditoria do
+sucesso de envio e conclusão idempotente são persistidas atomicamente depois de
+`INVITATION_SENT`, sem repetir o side effect Cognito.
+
+Falha determinística com evidência de que o `RESEND` não foi aplicado mantém o
+User `INVITED`, registra estado retryable seguro e retorna HTTP 503
+`INVITATION_DELIVERY_FAILED`. A mesma `Idempotency-Key` pode retomar apenas a etapa
+de convite; não repete Cognito create nem a transação de domínio.
+
+Timeout, conexão interrompida, resposta inconclusiva ou processo retomado em
+`INVITATION_DISPATCHING` representam resultado potencialmente aplicado. A saga
+vai para `RECONCILIATION_REQUIRED` e retorna HTTP 503
+`INVITATION_DELIVERY_UNCERTAIN`. A mesma chave reproduz semanticamente esse estado
+e nunca executa outro `RESEND`. O User permanece `INVITED` e a operação não promete
+entrega exactly-once.
 
 ## Role change
 
@@ -278,6 +344,38 @@ ambíguo de `RESEND` não autoriza envio automático adicional. A operação per
 estado de reconciliação/resultado incerto e registra auditoria honesta; não afirma
 entrega que não possa provar.
 
+O body é um objeto estrito contendo somente `expectedVersion`, que deve ser JSON
+integer >= 1; boolean, null, float e string são inválidos. A saga possui as fases
+semânticas mínimas:
+
+```text
+CLAIMED
+DISPATCHING
+SENT
+COMPLETED
+RECONCILIATION_REQUIRED
+```
+
+Um estado interno retryable é permitido para falha comprovadamente não aplicada.
+Depois de autorizar o ator e resolver replay, a operação lê consistentemente o
+target, valida versão e estado `INVITED` e reconcilia a identidade. Antes do side
+effect, executa CAS para `DISPATCHING`; sucesso conhecido permite CAS para `SENT`
+e depois auditoria/conclusão durável.
+
+Falha determinística comprovadamente não aplicada retorna HTTP 503
+`INVITATION_DELIVERY_FAILED`. A mesma chave pode retomar com segurança, mas deve
+revalidar target, versão, estado e identidade antes da nova tentativa. Resultado
+ambíguo ou retomada em `DISPATCHING` avança para `RECONCILIATION_REQUIRED`, retorna
+HTTP 503 `INVITATION_DELIVERY_UNCERTAIN` e a mesma chave não dispara novo
+`RESEND`.
+
+Replay `COMPLETED` retorna HTTP 204 antes de nova leitura de target/version e não
+repete o side effect. Uma chamada posterior a este endpoint com nova
+`Idempotency-Key` é uma nova intenção administrativa e, se as precondições ainda
+forem válidas, pode executar outro `RESEND`, mesmo após uma intenção anterior ter
+terminado incerta. Mais de uma mensagem é aceitável apenas como consequência
+dessa nova intenção explícita, nunca de retry automático.
+
 ## Idempotência e resultados incertos
 
 Todas as writes usam `Idempotency-Key` UUID, TTL de 24 horas e namespaces:
@@ -288,8 +386,9 @@ Todas as writes usam `Idempotency-Key` UUID, TTL de 24 horas e namespaces:
 - `reactivate-user`;
 - `resend-user-invitation`.
 
-O hash canônico inclui operação, alvo, expectedVersion e payload normalizado
-aplicável. Mesma chave/request `COMPLETED` retorna status/body original; request
+Para `create-user`, o hash inclui operação, `fullName` normalizado, e-mail
+normalizado e role. Para `resend-user-invitation`, inclui operação, target userId e
+expectedVersion. Mesma chave/request `COMPLETED` retorna status/body original; request
 diferente usa `IDEMPOTENCY_KEY_REUSED`; execução em andamento usa
 `OPERATION_IN_PROGRESS`. Cleanup ocorre apenas quando o efeito é definitivamente
 não aplicado.
@@ -335,9 +434,22 @@ Eventos finais de sucesso:
 Seguem ADR-021, com target userId, ator, correlationId, timestamp, result e
 transições de role/status/version quando aplicáveis. Não contêm senha temporária,
 email completo desnecessário, token, segredo TOTP, código MFA ou hash de PII.
-Falhas, compensações e reconciliation devem manter semântica observável honesta.
+`USER_INVITED` integra a transação de criação do domínio e significa somente que
+o User foi criado em `INVITED`; não afirma entrega do e-mail.
+`USER_INVITATION_RESENT` é gravado somente após sucesso conhecido do `RESEND` e
+inclui actorId, target userId, correlationId, timestamp/result e a versão observada
+quando aplicável. Falhas, compensações e reconciliation devem manter semântica
+observável honesta.
 Tentativas administrativas negadas exigidas por RF-USR-011 são registradas pelo
 mecanismo operacional sem revelar se um alvo inacessível existe.
+
+Falhas técnicas e reconciliation não exigem novos eventos de auditoria de domínio.
+A observabilidade existente deve emitir logs estruturados sem PII e métricas para,
+no mínimo, Create/Invite em reconciliation, Resend em reconciliation e falha de
+compensação de Create. Não se registram request body, e-mail completo, senha
+temporária, resposta Cognito bruta, Authorization ou access/ID/refresh tokens.
+Este milestone não cria SNS, e-mail ou novo canal de alerta; a ausência desse novo
+transporte não bloqueia sua conclusão.
 
 ## Erros
 
@@ -355,6 +467,8 @@ nomes específicos somente onde a distinção é funcional:
 | Self-deactivation | 403 | `FORBIDDEN` |
 | Remoção do último Admin ativo | 409 | `LAST_ACTIVE_ADMIN_CONFLICT` |
 | Estado alvo incompatível | 409 | `USER_STATE_CONFLICT` |
+| Entrega conclusivamente não realizada | 503 | `INVITATION_DELIVERY_FAILED` |
+| Resultado de entrega potencialmente aplicado | 503 | `INVITATION_DELIVERY_UNCERTAIN` |
 | Reconciliação necessária/falha técnica | 500 | `INTERNAL_ERROR` |
 
 Nenhum erro expõe Cognito, chaves físicas, cancellation reasons ou PII.

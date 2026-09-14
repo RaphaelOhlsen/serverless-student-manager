@@ -133,6 +133,73 @@ def test_email_reservation_is_read_consistently() -> None:
     ]
 
 
+def test_provisioning_transaction_has_exactly_five_atomic_operations() -> None:
+    client = FakeClient()
+    repository = UserRepository(client, "users", "audit")
+    saga: dict[str, object] = {
+        "Update": {
+            "TableName": "idempotency",
+            "Key": serialized({"id": "operation"}),
+            "UpdateExpression": "SET #state = :next",
+        }
+    }
+    repository.provision_invited_user(
+        profile={"PK": "USER#user-1", "SK": "PROFILE"},
+        unique_email={"PK": "UNIQUE#EMAIL#admin@example.test", "SK": "UNIQUE"},
+        authorization={"PK": "COGNITO#sub-1", "SK": "AUTHORIZATION"},
+        audit={"PK": "RESOURCE#USER#user-1", "SK": "TS#time#EVENT#event-1"},
+        saga_transition=saga,
+        client_request_token="44444444-4444-4444-8444-444444444444",
+    )
+
+    assert client.transaction is not None
+    items = client.transaction["TransactItems"]
+    assert isinstance(items, list) and len(items) == 5
+    assert [item["Put"]["TableName"] for item in items[:4]] == [
+        "users",
+        "users",
+        "users",
+        "audit",
+    ]
+    assert items[4] == saga
+    assert all(
+        item["Put"]["ConditionExpression"]
+        == "attribute_not_exists(PK) AND attribute_not_exists(SK)"
+        for item in items[:4]
+    )
+    assert client.transaction["ClientRequestToken"] == ("44444444-4444-4444-8444-444444444444")
+    assert "CONTROL#ACTIVE_ADMIN_COUNT" not in repr(client.transaction)
+
+
+def test_resend_completion_atomically_writes_audit_and_saga_only() -> None:
+    client = FakeClient()
+    repository = UserRepository(client, "users", "audit")
+    saga: dict[str, object] = {
+        "Update": {
+            "TableName": "idempotency",
+            "Key": serialized({"id": "resend-operation"}),
+            "UpdateExpression": "SET #state = :completed",
+        }
+    }
+
+    repository.complete_invitation_resend(
+        audit={"PK": "RESOURCE#USER#user-1", "SK": "TS#time#EVENT#event-1"},
+        saga_transition=saga,
+        client_request_token="44444444-4444-4444-8444-444444444444",
+    )
+
+    assert client.transaction is not None
+    items = client.transaction["TransactItems"]
+    assert isinstance(items, list) and len(items) == 2
+    assert items[0]["Put"]["TableName"] == "audit"
+    assert items[0]["Put"]["ConditionExpression"] == (
+        "attribute_not_exists(PK) AND attribute_not_exists(SK)"
+    )
+    assert items[1] == saga
+    assert client.transaction["ClientRequestToken"] == ("44444444-4444-4444-8444-444444444444")
+    assert "CONTROL#ACTIVE_ADMIN_COUNT" not in repr(client.transaction)
+
+
 def test_lists_profiles_through_name_index_with_opaque_position() -> None:
     client = FakeClient()
     last_key: dict[str, object] = {

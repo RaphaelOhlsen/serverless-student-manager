@@ -9,6 +9,10 @@ class FakeCognitoClient:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, object]]] = []
 
+    def admin_create_user(self, **kwargs: object) -> dict[str, Any]:
+        self.calls.append(("create", kwargs))
+        return {}
+
     def admin_get_user(self, **kwargs: object) -> dict[str, Any]:
         self.calls.append(("user", kwargs))
         return {"Username": "user-1"}
@@ -16,6 +20,14 @@ class FakeCognitoClient:
     def admin_get_user_auth_factors(self, **kwargs: object) -> dict[str, Any]:
         self.calls.append(("factors", kwargs))
         return {"ConfiguredUserAuthFactors": ["SOFTWARE_TOKEN"]}
+
+    def admin_delete_user(self, **kwargs: object) -> dict[str, Any]:
+        self.calls.append(("delete", kwargs))
+        return {}
+
+    def admin_disable_user(self, **kwargs: object) -> dict[str, Any]:
+        self.calls.append(("disable", kwargs))
+        return {}
 
 
 class FakeTable:

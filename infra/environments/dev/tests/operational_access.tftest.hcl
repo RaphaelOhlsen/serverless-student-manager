@@ -910,12 +910,12 @@ run "plans_students_list_api_access" {
   }
 }
 
-run "plans_user_activation_api_access" {
+run "plans_users_api_access" {
   command = plan
 
   assert {
-    condition     = length(data.aws_iam_policy_document.users_api.statement) == 7
-    error_message = "The users-api policy must contain exactly seven semantic statements."
+    condition     = length(data.aws_iam_policy_document.users_api.statement) == 11
+    error_message = "The users-api policy must contain exactly eleven semantic statements."
   }
 
   assert {
@@ -962,6 +962,43 @@ run "plans_user_activation_api_access" {
       if statement.sid == "ReadActivationIdentity"
     ])) == toset([module.identity.user_pool_arn])
     error_message = "The activation Cognito statement must target only the dev user pool."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.users_api.statement : statement.actions
+      if statement.sid == "ManageAdministrativeUserInvitations"
+      ])) == toset([
+      "cognito-idp:AdminCreateUser",
+      "cognito-idp:AdminDeleteUser",
+      "cognito-idp:AdminDisableUser",
+      "cognito-idp:AdminGetUser",
+    ])
+    error_message = "Administrative user invitation management must contain only the required Cognito actions."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.users_api.statement : statement.resources
+      if statement.sid == "ManageAdministrativeUserInvitations"
+    ])) == toset([module.identity.user_pool_arn])
+    error_message = "Administrative user invitation management must target only the dev user pool."
+  }
+
+  assert {
+    condition = length(setintersection(
+      toset(flatten([
+        for statement in data.aws_iam_policy_document.users_api.statement : statement.actions
+      ])),
+      toset([
+        "cognito-idp:AdminEnableUser",
+        "cognito-idp:AdminResetUserPassword",
+        "cognito-idp:AdminSetUserPassword",
+        "cognito-idp:AdminUpdateUserAttributes",
+        "cognito-idp:AdminUserGlobalSignOut",
+      ])
+    )) == 0
+    error_message = "The users-api policy must not grant unrelated Cognito administration actions."
   }
 
   assert {
@@ -1019,6 +1056,39 @@ run "plans_user_activation_api_access" {
   assert {
     condition = toset(one([
       for statement in data.aws_iam_policy_document.users_api.statement : statement.actions
+      if statement.sid == "PutUserProvisioningInTransaction"
+    ])) == toset(["dynamodb:PutItem"])
+    error_message = "Administrative user provisioning must contain only PutItem on users."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.users_api.statement : statement.resources
+      if statement.sid == "PutUserProvisioningInTransaction"
+    ])) == toset([module.user_store.table_arn])
+    error_message = "Administrative user provisioning must target only users."
+  }
+
+  assert {
+    condition = length(one([
+      for statement in data.aws_iam_policy_document.users_api.statement : statement.condition
+      if statement.sid == "PutUserProvisioningInTransaction"
+      ])) == 1 && one(one([
+      for statement in data.aws_iam_policy_document.users_api.statement : statement.condition
+      if statement.sid == "PutUserProvisioningInTransaction"
+      ])).test == "StringEquals" && one(one([
+      for statement in data.aws_iam_policy_document.users_api.statement : statement.condition
+      if statement.sid == "PutUserProvisioningInTransaction"
+      ])).variable == "dynamodb:EnclosingOperation" && toset(one(one([
+        for statement in data.aws_iam_policy_document.users_api.statement : statement.condition
+        if statement.sid == "PutUserProvisioningInTransaction"
+    ])).values) == toset(["TransactWriteItems"])
+    error_message = "PutItem on users must require EnclosingOperation TransactWriteItems."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.users_api.statement : statement.actions
       if statement.sid == "AppendActivationAudit"
     ])) == toset(["dynamodb:TransactWriteItems"])
     error_message = "The audit statement must contain only TransactWriteItems."
@@ -1066,6 +1136,22 @@ run "plans_user_activation_api_access" {
   }
 
   assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.users_api.statement : statement.actions
+      if statement.sid == "ReadUserInvitationAuditReconciliation"
+    ])) == toset(["dynamodb:GetItem"])
+    error_message = "Administrative user audit reconciliation must contain only GetItem."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.users_api.statement : statement.resources
+      if statement.sid == "ReadUserInvitationAuditReconciliation"
+    ])) == toset([module.audit_store.table_arn])
+    error_message = "Administrative user audit reconciliation must target only audit-events."
+  }
+
+  assert {
     condition = alltrue([
       for statement in data.aws_iam_policy_document.users_api.statement :
       length(setintersection(
@@ -1095,6 +1181,22 @@ run "plans_user_activation_api_access" {
       if statement.sid == "ManageActivationIdempotency"
     ])) == toset([module.idempotency_store.table_arn])
     error_message = "The activation idempotency statement targets an unexpected resource."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.users_api.statement : statement.actions
+      if statement.sid == "TransactUserInvitationSagaState"
+    ])) == toset(["dynamodb:TransactWriteItems"])
+    error_message = "Administrative user invitation saga transactions must contain only TransactWriteItems."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.users_api.statement : statement.resources
+      if statement.sid == "TransactUserInvitationSagaState"
+    ])) == toset([module.idempotency_store.table_arn])
+    error_message = "Administrative user invitation saga transactions must target only the idempotency table."
   }
 
   assert {

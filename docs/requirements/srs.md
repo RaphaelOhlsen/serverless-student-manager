@@ -460,9 +460,30 @@ Required data:
 
 The application shall not receive or store the user's password.
 
+The HTTP body is a strict object containing exactly `fullName`, `email` and
+`role`; extra or duplicate keys, nulls and invalid types are rejected.
+
+For Administrative Users, `fullName` accepts Unicode and is normalized with
+NFKC, trim and internal-whitespace collapse. The normalized display value shall
+contain 2 to 150 characters, shall not be empty and shall not contain control
+characters. Display capitalization is preserved; case folding is used only for
+the normalized search field.
+
+Administrative User email is trimmed, normalized to lowercase, syntactically
+validated by the application's generic email validator and limited to 254
+characters. These are User requirements and do not rely on Student-specific
+rules as their authority.
+
 ### RF-USR-002 — Invite user
 
 The system shall initiate the Cognito invitation or password-definition flow.
+
+Create/Invite returns HTTP 201 with the public `INVITED` User only after the
+identity is reconciled, the domain transaction is confirmed, invitation dispatch
+returns known success and durable completion is recorded. A deterministically
+unapplied dispatch returns HTTP 503 `INVITATION_DELIVERY_FAILED` and may be safely
+resumed with the same idempotency key. An ambiguous dispatch returns HTTP 503
+`INVITATION_DELIVERY_UNCERTAIN`; the same key shall not dispatch again.
 
 ### RF-USR-003 — List users
 
@@ -494,6 +515,19 @@ Only Administrators shall reactivate an inactive user.
 ### RF-USR-008 — Resend invitation
 
 Only Administrators shall resend invitations to users in a compatible state.
+
+The HTTP body is a strict object containing only integer `expectedVersion >= 1`;
+boolean, null, float and string values are invalid. Success returns HTTP 204 and
+does not change status, role, version, authVersion or active-Administrator count.
+A completed replay is resolved before a new target/version read and never sends
+again.
+
+A deterministically unapplied resend returns HTTP 503
+`INVITATION_DELIVERY_FAILED` and may be safely retried with the same key after
+revalidating preconditions. An ambiguous resend returns HTTP 503
+`INVITATION_DELIVERY_UNCERTAIN`; the same key never resends. A later request with
+a new `Idempotency-Key` is a new explicit administrative intent and may resend if
+all current preconditions remain valid.
 
 ### RF-USR-009 — Recover own access
 

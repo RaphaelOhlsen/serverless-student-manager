@@ -40,3 +40,83 @@ class AdminUserNotFoundError(RuntimeError):
 
 class AdminUserDataInvariantError(RuntimeError):
     pass
+
+
+class InvalidAdminUserWriteRequestError(ValueError):
+    pass
+
+
+class IdempotencyKeyReusedError(RuntimeError):
+    pass
+
+
+class OperationInProgressError(RuntimeError):
+    pass
+
+
+class InvitationSagaInvariantError(RuntimeError):
+    pass
+
+
+class InvitationSagaConcurrentTransitionError(RuntimeError):
+    pass
+
+
+class CognitoUserNotFoundError(RuntimeError):
+    pass
+
+
+class CognitoUsernameExistsError(RuntimeError):
+    pass
+
+
+class CognitoAliasExistsError(RuntimeError):
+    pass
+
+
+class CognitoResultAmbiguousError(RuntimeError):
+    pass
+
+
+class CognitoCreateDeterministicError(RuntimeError):
+    pass
+
+
+class CognitoServiceError(RuntimeError):
+    pass
+
+
+class CognitoIdentityInvariantError(RuntimeError):
+    pass
+
+
+class UserEmailAlreadyExistsError(RuntimeError):
+    pass
+
+
+class CognitoInvitationDeliveryError(RuntimeError):
+    pass
+
+
+class InvitationDeliveryFailedError(RuntimeError):
+    pass
+
+
+class InvitationDeliveryUncertainError(RuntimeError):
+    pass
+
+
+class UserCreateReconciliationError(RuntimeError):
+    pass
+
+
+class UserVersionConflictError(RuntimeError):
+    pass
+
+
+class UserStateConflictError(RuntimeError):
+    pass
+
+
+class UserInvitationReconciliationError(RuntimeError):
+    pass
