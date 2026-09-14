@@ -13,6 +13,7 @@ from users_api.errors import (
 )
 from users_api.repositories.dynamodb_values import normalize_dynamodb_value
 from users_api.services.invitation_saga import (
+    CHANGE_USER_ROLE_OPERATION,
     CREATE_USER_OPERATION,
     IDEMPOTENCY_TTL_SECONDS,
     IN_PROGRESS_TTL_SECONDS,
@@ -23,9 +24,11 @@ from users_api.services.invitation_saga import (
     CognitoReconciliationReason,
     CreateSagaState,
     ResendSagaState,
+    RoleChangeState,
     SagaClaim,
     create_request_hash,
     resend_request_hash,
+    role_change_request_hash,
     validate_transition,
 )
 from users_api.validation import validate_idempotency_key
@@ -145,6 +148,52 @@ class InvitationSagaRepository:
             "eventId": event_id,
             "correlationId": correlation_id,
             "expectedVersion": expected_version,
+            "startedAt": timestamp,
+            "updatedAt": timestamp,
+            "expiration": now + IDEMPOTENCY_TTL_SECONDS,
+            "inProgressExpiration": (now + IN_PROGRESS_TTL_SECONDS) * 1000,
+        }
+        return self._create_or_resolve(record)
+
+    def claim_role_change(
+        self,
+        *,
+        environment: str,
+        actor_id: str,
+        idempotency_key: str,
+        user_id: str,
+        role: str,
+        expected_version: int,
+        request_id: str | None,
+    ) -> SagaClaim:
+        validate_idempotency_key(idempotency_key)
+        record_id = self._record_id(
+            environment, actor_id, CHANGE_USER_ROLE_OPERATION, idempotency_key
+        )
+        request_hash = role_change_request_hash(
+            user_id=user_id, role=role, expected_version=expected_version
+        )
+        attempted_context: dict[str, object] = {
+            "id": record_id,
+            "environment": environment,
+            "actorId": actor_id,
+            "operation": CHANGE_USER_ROLE_OPERATION,
+            "idempotencyKey": idempotency_key,
+            "requestHash": request_hash,
+        }
+        existing = self.get(record_id)
+        if existing is not None:
+            return self._resolve_existing(existing, attempted_context)
+        now = self._now_seconds()
+        timestamp = self._timestamp(now)
+        record: dict[str, object] = {
+            **attempted_context,
+            "target": user_id,
+            "state": RoleChangeState.CLAIMED.value,
+            "desiredRole": role,
+            "expectedVersion": expected_version,
+            "eventId": str(self._identifier_factory()),
+            "correlationId": request_id or str(self._identifier_factory()),
             "startedAt": timestamp,
             "updatedAt": timestamp,
             "expiration": now + IDEMPOTENCY_TTL_SECONDS,
@@ -298,6 +347,64 @@ class InvitationSagaRepository:
                         ":updated": started_at,
                     }
                 ),
+            }
+        }
+
+    def build_role_change_completion_transition(
+        self,
+        *,
+        record: dict[str, object],
+        response: dict[str, object],
+    ) -> dict[str, object]:
+        record_id, operation, current_state, request_hash = self._transition_context(record)
+        if operation != CHANGE_USER_ROLE_OPERATION or current_state != RoleChangeState.CLAIMED:
+            raise InvitationSagaInvariantError(
+                "transaction hook is restricted to role change completion"
+            )
+        fields = {
+            "responseUserId": response.get("userId"),
+            "responseRole": response.get("role"),
+            "responseStatus": response.get("status"),
+            "responseVersion": response.get("version"),
+            "responseCreatedAt": response.get("createdAt"),
+            "responseUpdatedAt": response.get("updatedAt"),
+        }
+        started_at = record.get("startedAt")
+        if (
+            not all(
+                isinstance(value, str) and value
+                for name, value in fields.items()
+                if name != "responseVersion"
+            )
+            or type(fields["responseVersion"]) is not int
+            or fields["responseVersion"] < 1
+            or fields["responseUserId"] != record.get("target")
+            or fields["responseRole"] != record.get("desiredRole")
+            or not isinstance(started_at, str)
+            or not started_at
+        ):
+            raise InvitationSagaInvariantError("role change completion response is invalid")
+        names = {"#state": "state"}
+        values: dict[str, object] = {
+            ":claimed": RoleChangeState.CLAIMED.value,
+            ":completed": RoleChangeState.COMPLETED.value,
+            ":request_hash": request_hash,
+            ":status": 200,
+            ":updated": started_at,
+        }
+        assignments = ["#state = :completed", "httpStatus = :status", "updatedAt = :updated"]
+        for index, (name, value) in enumerate(fields.items()):
+            names[f"#field{index}"] = name
+            values[f":value{index}"] = value
+            assignments.append(f"#field{index} = :value{index}")
+        return {
+            "Update": {
+                "TableName": self._table_name,
+                "Key": self._serialize({"id": record_id}),
+                "UpdateExpression": f"SET {', '.join(assignments)}",
+                "ConditionExpression": "#state = :claimed AND requestHash = :request_hash",
+                "ExpressionAttributeNames": names,
+                "ExpressionAttributeValues": self._serialize(values),
             }
         }
 
@@ -559,6 +666,19 @@ class InvitationSagaRepository:
                     raise InvitationSagaInvariantError(
                         "resend invitation claim has invalid expected version"
                     )
+                return
+            if operation == CHANGE_USER_ROLE_OPERATION:
+                RoleChangeState(str(state))
+                expected_version = record.get("expectedVersion")
+                desired_role = record.get("desiredRole")
+                if (
+                    type(expected_version) is not int
+                    or expected_version < 1
+                    or desired_role not in {"ADMIN", "OPERATOR"}
+                ):
+                    raise InvitationSagaInvariantError("role change claim is invalid")
+                if state == RoleChangeState.COMPLETED.value and record.get("httpStatus") != 200:
+                    raise InvitationSagaInvariantError("role change replay status is invalid")
                 return
         except ValueError:
             raise InvitationSagaInvariantError("idempotency claim has unknown state") from None

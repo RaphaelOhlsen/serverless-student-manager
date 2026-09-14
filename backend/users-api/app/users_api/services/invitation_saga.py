@@ -9,6 +9,7 @@ from users_api.validation import normalize_admin_user_email, normalize_admin_use
 
 CREATE_USER_OPERATION: Final = "create-user"
 RESEND_INVITATION_OPERATION: Final = "resend-user-invitation"
+CHANGE_USER_ROLE_OPERATION: Final = "change-user-role"
 IDEMPOTENCY_TTL_SECONDS: Final = 24 * 60 * 60
 IN_PROGRESS_TTL_SECONDS: Final = 60
 INVITATION_DELIVERY_FAILED: Final = "INVITATION_DELIVERY_FAILED"
@@ -34,6 +35,11 @@ class ResendSagaState(StrEnum):
     SENT = "SENT"
     COMPLETED = "COMPLETED"
     RECONCILIATION_REQUIRED = "RECONCILIATION_REQUIRED"
+
+
+class RoleChangeState(StrEnum):
+    CLAIMED = "CLAIMED"
+    COMPLETED = "COMPLETED"
 
 
 class CognitoIdentityEvidence(StrEnum):
@@ -140,6 +146,23 @@ def resend_request_hash(*, user_id: str, expected_version: int) -> str:
         {
             "operation": RESEND_INVITATION_OPERATION,
             "targetUserId": user_id,
+            "expectedVersion": expected_version,
+        }
+    )
+
+
+def role_change_request_hash(*, user_id: str, role: str, expected_version: int) -> str:
+    if (
+        role not in {"ADMIN", "OPERATOR"}
+        or type(expected_version) is not int
+        or expected_version < 1
+    ):
+        raise InvitationSagaInvariantError("invalid change-user-role request hash")
+    return _hash(
+        {
+            "operation": CHANGE_USER_ROLE_OPERATION,
+            "targetUserId": user_id,
+            "role": role,
             "expectedVersion": expected_version,
         }
     )

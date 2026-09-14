@@ -7,6 +7,7 @@ from users_api.validation import (
     normalize_admin_user_full_name,
     parse_create_user_body,
     parse_resend_invitation_body,
+    parse_role_change_body,
     validate_idempotency_key,
 )
 
@@ -102,3 +103,31 @@ def test_idempotency_key_must_be_canonical_uuid() -> None:
     for invalid in (key.upper(), "not-a-uuid", None):
         with pytest.raises(InvalidAdminUserWriteRequestError):
             validate_idempotency_key(invalid)
+
+
+@pytest.mark.parametrize("role", ["ADMIN", "OPERATOR"])
+def test_role_change_accepts_strict_contract(role: str) -> None:
+    parsed = parse_role_change_body(json.dumps({"expectedVersion": 1, "role": role}))
+    assert parsed.expected_version == 1
+    assert parsed.role == role
+
+
+@pytest.mark.parametrize("value", [True, "1", 1.0, None, 0, -1])
+def test_role_change_rejects_invalid_expected_version(value: object) -> None:
+    with pytest.raises(InvalidAdminUserWriteRequestError):
+        parse_role_change_body(json.dumps({"expectedVersion": value, "role": "ADMIN"}))
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "{}",
+        '{"expectedVersion":1,"role":"OWNER"}',
+        '{"expectedVersion":1,"role":null}',
+        '{"expectedVersion":1,"role":"ADMIN","extra":true}',
+        '{"expectedVersion":1,"expectedVersion":2,"role":"ADMIN"}',
+    ],
+)
+def test_role_change_body_is_strict(body: str) -> None:
+    with pytest.raises(InvalidAdminUserWriteRequestError):
+        parse_role_change_body(body)

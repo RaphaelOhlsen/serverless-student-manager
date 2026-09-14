@@ -56,6 +56,13 @@ class UserRepository:
             f"TS#{occurred_at}#EVENT#{event_id}",
         )
 
+    def get_active_admin_count(self) -> int | None:
+        item = self._get_user_item("CONTROL#ACTIVE_ADMIN_COUNT", "CONTROL")
+        if item is None:
+            return None
+        value = item.get("activeAdminCount")
+        return value if type(value) is int else None
+
     def provision_invited_user(
         self,
         *,
@@ -94,6 +101,171 @@ class UserRepository:
                     "attribute_not_exists(PK) AND attribute_not_exists(SK)",
                 ),
                 saga_transition,
+            ],
+            ClientRequestToken=client_request_token,
+        )
+
+    def change_role(
+        self,
+        *,
+        user_id: str,
+        cognito_sub: str,
+        old_role: str,
+        new_role: str,
+        status: str,
+        version: int,
+        auth_version: int,
+        updated_at: str,
+        actor_id: str,
+        audit: dict[str, object],
+        idempotency_transition: dict[str, object],
+        client_request_token: str,
+    ) -> None:
+        names = {"#role": "role", "#status": "status", "#version": "version"}
+        next_version = version + 1
+        next_auth_version = auth_version + 1
+        version_condition = self._version_condition(version)
+        profile_values = self._serialize_values(
+            {
+                ":user_id": user_id,
+                ":sub": cognito_sub,
+                ":old_role": old_role,
+                ":new_role": new_role,
+                ":status": status,
+                ":version": version,
+                ":next_version": next_version,
+                ":auth_version": auth_version,
+                ":next_auth_version": next_auth_version,
+                ":updated_at": updated_at,
+                ":actor_id": actor_id,
+            }
+        )
+        items: list[dict[str, object]] = [
+            {
+                "Update": {
+                    "TableName": self._users_table,
+                    "Key": self._serialize_item({"PK": f"USER#{user_id}", "SK": "PROFILE"}),
+                    "UpdateExpression": (
+                        "SET #role = :new_role, #version = :next_version, "
+                        "authVersion = :next_auth_version, updatedAt = :updated_at, "
+                        "updatedBy = :actor_id"
+                    ),
+                    "ConditionExpression": (
+                        "attribute_exists(PK) AND attribute_exists(SK) "
+                        "AND userId = :user_id AND cognitoSub = :sub "
+                        "AND #role = :old_role AND #status = :status "
+                        "AND authVersion = :auth_version AND " + version_condition
+                    ),
+                    "ExpressionAttributeNames": names,
+                    "ExpressionAttributeValues": profile_values,
+                }
+            },
+            {
+                "Update": {
+                    "TableName": self._users_table,
+                    "Key": self._serialize_item(
+                        {"PK": f"COGNITO#{cognito_sub}", "SK": "AUTHORIZATION"}
+                    ),
+                    "UpdateExpression": ("SET #role = :new_role, authVersion = :next_auth_version"),
+                    "ConditionExpression": (
+                        "attribute_exists(PK) AND attribute_exists(SK) "
+                        "AND userId = :user_id AND #role = :old_role "
+                        "AND #status = :status AND authVersion = :auth_version"
+                    ),
+                    "ExpressionAttributeNames": {"#role": "role", "#status": "status"},
+                    "ExpressionAttributeValues": self._serialize_values(
+                        {
+                            ":user_id": user_id,
+                            ":old_role": old_role,
+                            ":new_role": new_role,
+                            ":status": status,
+                            ":auth_version": auth_version,
+                            ":next_auth_version": next_auth_version,
+                        }
+                    ),
+                }
+            },
+        ]
+        if status == "ACTIVE":
+            delta = 1 if old_role == "OPERATOR" and new_role == "ADMIN" else -1
+            condition = (
+                "attribute_type(activeAdminCount, :number_type) AND activeAdminCount >= :one"
+                if delta == 1
+                else "attribute_type(activeAdminCount, :number_type) AND activeAdminCount > :one"
+            )
+            items.append(
+                {
+                    "Update": {
+                        "TableName": self._users_table,
+                        "Key": self._serialize_item(
+                            {"PK": "CONTROL#ACTIVE_ADMIN_COUNT", "SK": "CONTROL"}
+                        ),
+                        "UpdateExpression": "ADD activeAdminCount :delta",
+                        "ConditionExpression": condition,
+                        "ExpressionAttributeValues": self._serialize_values(
+                            {":delta": delta, ":one": 1, ":number_type": "N"}
+                        ),
+                    }
+                }
+            )
+        items.extend(
+            [
+                self._put(
+                    self._audit_table,
+                    audit,
+                    "attribute_not_exists(PK) AND attribute_not_exists(SK)",
+                ),
+                idempotency_transition,
+            ]
+        )
+        self._client.transact_write_items(
+            TransactItems=items, ClientRequestToken=client_request_token
+        )
+
+    def complete_role_change_noop(
+        self,
+        *,
+        user_id: str,
+        cognito_sub: str,
+        role: str,
+        status: str,
+        version: int,
+        auth_version: int,
+        idempotency_transition: dict[str, object],
+        client_request_token: str,
+    ) -> None:
+        values = self._serialize_values(
+            {
+                ":user_id": user_id,
+                ":sub": cognito_sub,
+                ":role": role,
+                ":status": status,
+                ":version": version,
+                ":auth_version": auth_version,
+            }
+        )
+        self._client.transact_write_items(
+            TransactItems=[
+                {
+                    "ConditionCheck": {
+                        "TableName": self._users_table,
+                        "Key": self._serialize_item({"PK": f"USER#{user_id}", "SK": "PROFILE"}),
+                        "ConditionExpression": (
+                            "attribute_exists(PK) AND attribute_exists(SK) "
+                            "AND userId = :user_id AND cognitoSub = :sub "
+                            "AND #role = :role AND #status = :status "
+                            "AND authVersion = :auth_version AND "
+                            + self._version_condition(version)
+                        ),
+                        "ExpressionAttributeNames": {
+                            "#role": "role",
+                            "#status": "status",
+                            "#version": "version",
+                        },
+                        "ExpressionAttributeValues": values,
+                    }
+                },
+                idempotency_transition,
             ],
             ClientRequestToken=client_request_token,
         )
@@ -306,6 +478,12 @@ class UserRepository:
                 "ConditionExpression": condition,
             }
         }
+
+    @staticmethod
+    def _version_condition(version: int) -> str:
+        if version == 1:
+            return "(attribute_not_exists(#version) OR #version = :version)"
+        return "#version = :version"
 
     def _deserialize_item(self, item: dict[str, Any]) -> dict[str, object]:
         return {
