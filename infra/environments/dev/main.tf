@@ -255,6 +255,22 @@ data "aws_iam_policy_document" "users_api" {
   }
 
   statement {
+    sid    = "ManageAdministrativeUserInvitations"
+    effect = "Allow"
+
+    actions = [
+      "cognito-idp:AdminCreateUser",
+      "cognito-idp:AdminDeleteUser",
+      "cognito-idp:AdminDisableUser",
+      "cognito-idp:AdminGetUser",
+    ]
+
+    resources = [
+      module.identity.user_pool_arn,
+    ]
+  }
+
+  statement {
     sid    = "ReadAndTransactActivationState"
     effect = "Allow"
 
@@ -274,6 +290,25 @@ data "aws_iam_policy_document" "users_api" {
 
     actions = [
       "dynamodb:UpdateItem",
+    ]
+
+    resources = [
+      module.user_store.table_arn,
+    ]
+
+    condition {
+      test     = "StringEquals"
+      variable = "dynamodb:EnclosingOperation"
+      values   = ["TransactWriteItems"]
+    }
+  }
+
+  statement {
+    sid    = "PutUserProvisioningInTransaction"
+    effect = "Allow"
+
+    actions = [
+      "dynamodb:PutItem",
     ]
 
     resources = [
@@ -320,6 +355,19 @@ data "aws_iam_policy_document" "users_api" {
   }
 
   statement {
+    sid    = "ReadUserInvitationAuditReconciliation"
+    effect = "Allow"
+
+    actions = [
+      "dynamodb:GetItem",
+    ]
+
+    resources = [
+      module.audit_store.table_arn,
+    ]
+  }
+
+  statement {
     sid    = "ManageActivationIdempotency"
     effect = "Allow"
 
@@ -327,6 +375,19 @@ data "aws_iam_policy_document" "users_api" {
       "dynamodb:GetItem",
       "dynamodb:PutItem",
       "dynamodb:UpdateItem",
+    ]
+
+    resources = [
+      module.idempotency_store.table_arn,
+    ]
+  }
+
+  statement {
+    sid    = "TransactUserInvitationSagaState"
+    effect = "Allow"
+
+    actions = [
+      "dynamodb:TransactWriteItems",
     ]
 
     resources = [
@@ -473,6 +534,18 @@ module "http_api" {
 
     get_user = {
       route_key          = "GET /users/{userId}"
+      integration_key    = "users"
+      authorization_type = "JWT"
+    }
+
+    create_user = {
+      route_key          = "POST /users"
+      integration_key    = "users"
+      authorization_type = "JWT"
+    }
+
+    resend_user_invitation = {
+      route_key          = "POST /users/{userId}/invitation/resend"
       integration_key    = "users"
       authorization_type = "JWT"
     }
