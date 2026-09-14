@@ -109,6 +109,11 @@ variables {
       integration_key    = "users"
       authorization_type = "JWT"
     }
+    change_user_role = {
+      route_key          = "POST /users/{userId}/role-change"
+      integration_key    = "users"
+      authorization_type = "JWT"
+    }
   }
 
   cors_allow_origins = [
@@ -624,26 +629,26 @@ run "wires_computed_references" {
 
   assert {
     condition = alltrue([
-      for route_name in ["create_user", "resend_user_invitation"] :
+      for route_name in ["create_user", "resend_user_invitation", "change_user_role"] :
       aws_apigatewayv2_route.this[route_name].authorization_type == "JWT" &&
       aws_apigatewayv2_route.this[route_name].authorizer_id == aws_apigatewayv2_authorizer.jwt.id &&
       aws_apigatewayv2_route.this[route_name].target == "integrations/${aws_apigatewayv2_integration.lambda["users"].id}"
     ])
-    error_message = "Administrative user invitation routes must use JWT and the users integration."
+    error_message = "Administrative user write routes must use JWT and the users integration."
   }
 
   assert {
     condition = (
       aws_apigatewayv2_route.this["create_user"].route_key == "POST /users" &&
-      aws_apigatewayv2_route.this["resend_user_invitation"].route_key == "POST /users/{userId}/invitation/resend"
+      aws_apigatewayv2_route.this["resend_user_invitation"].route_key == "POST /users/{userId}/invitation/resend" &&
+      aws_apigatewayv2_route.this["change_user_role"].route_key == "POST /users/{userId}/role-change"
     )
-    error_message = "Administrative user invitation route keys are incorrect."
+    error_message = "Administrative user write route keys are incorrect."
   }
 
   assert {
     condition = alltrue([
       for route in values(aws_apigatewayv2_route.this) : !contains([
-        "POST /users/{userId}/role-change",
         "POST /users/{userId}/deactivation",
         "POST /users/{userId}/reactivation",
       ], route.route_key)

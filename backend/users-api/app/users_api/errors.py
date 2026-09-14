@@ -120,3 +120,11 @@ class UserStateConflictError(RuntimeError):
 
 class UserInvitationReconciliationError(RuntimeError):
     pass
+
+
+class LastActiveAdminConflictError(RuntimeError):
+    pass
+
+
+class UserRoleChangeReconciliationError(RuntimeError):
+    pass

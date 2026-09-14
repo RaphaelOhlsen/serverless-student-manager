@@ -31,6 +31,15 @@ class ResendInvitationInput:
         return {"expectedVersion": self.expected_version}
 
 
+@dataclass(frozen=True)
+class RoleChangeInput:
+    expected_version: int
+    role: str
+
+    def canonical_payload(self) -> dict[str, int | str]:
+        return {"expectedVersion": self.expected_version, "role": self.role}
+
+
 def parse_create_user_body(body: str) -> CreateUserInput:
     value = _parse_strict_object(body)
     if set(value) != {"fullName", "email", "role"}:
@@ -60,6 +69,18 @@ def parse_resend_invitation_body(body: str) -> ResendInvitationInput:
     ):
         raise InvalidAdminUserWriteRequestError
     return ResendInvitationInput(expected_version=value["expectedVersion"])
+
+
+def parse_role_change_body(body: str) -> RoleChangeInput:
+    value = _parse_strict_object(body)
+    if (
+        set(value) != {"expectedVersion", "role"}
+        or type(value["expectedVersion"]) is not int
+        or value["expectedVersion"] < 1
+        or value["role"] not in {"ADMIN", "OPERATOR"}
+    ):
+        raise InvalidAdminUserWriteRequestError
+    return RoleChangeInput(expected_version=value["expectedVersion"], role=value["role"])
 
 
 def validate_idempotency_key(value: object) -> str:

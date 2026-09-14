@@ -14,6 +14,7 @@ from users_api.errors import (
 )
 from users_api.repositories.invitation_saga_repository import InvitationSagaRepository
 from users_api.services.invitation_saga import (
+    CHANGE_USER_ROLE_OPERATION,
     CREATE_TRANSITIONS,
     IDEMPOTENCY_TTL_SECONDS,
     IN_PROGRESS_TTL_SECONDS,
@@ -25,9 +26,11 @@ from users_api.services.invitation_saga import (
     CognitoReconciliationReason,
     CreateSagaState,
     ResendSagaState,
+    RoleChangeState,
     create_request_hash,
     replay_from_record,
     resend_request_hash,
+    role_change_request_hash,
     validate_transition,
 )
 
@@ -579,3 +582,112 @@ def test_delivery_failure_state_and_code_must_match() -> None:
             retryable_state=CreateSagaState.INVITATION_RETRYABLE.value,
             error_code=INVITATION_DELIVERY_UNCERTAIN,
         )
+
+
+def test_role_change_claim_namespace_hash_ttl_stable_ids_and_privacy() -> None:
+    table = FakeTable()
+    repo = repository(table)
+    claim = repo.claim_role_change(
+        environment="dev",
+        actor_id="actor-1",
+        idempotency_key=KEY,
+        user_id="user-1",
+        role="ADMIN",
+        expected_version=1,
+        request_id=None,
+    )
+    record = claim.record
+    assert record["operation"] == CHANGE_USER_ROLE_OPERATION
+    assert record["state"] == RoleChangeState.CLAIMED.value
+    assert record["eventId"] == str(IDS[0])
+    assert record["correlationId"] == str(IDS[1])
+    assert record["expiration"] == NOW + IDEMPOTENCY_TTL_SECONDS
+    assert record["requestHash"] == role_change_request_hash(
+        user_id="user-1", role="ADMIN", expected_version=1
+    )
+    assert "email" not in repr(record).lower()
+    assert "fullName" not in repr(record)
+
+    table.items[str(record["id"])]["inProgressExpiration"] = NOW * 1000
+    replay = repo.claim_role_change(
+        environment="dev",
+        actor_id="actor-1",
+        idempotency_key=KEY,
+        user_id="user-1",
+        role="ADMIN",
+        expected_version=1,
+        request_id="different",
+    )
+    assert replay.record["eventId"] == record["eventId"]
+    assert replay.record["correlationId"] == record["correlationId"]
+
+
+def test_role_change_claim_mismatch_and_active_execution() -> None:
+    table = FakeTable()
+    repo = repository(table)
+    repo.claim_role_change(
+        environment="dev",
+        actor_id="actor-1",
+        idempotency_key=KEY,
+        user_id="user-1",
+        role="ADMIN",
+        expected_version=1,
+        request_id=None,
+    )
+    with pytest.raises(OperationInProgressError):
+        repo.claim_role_change(
+            environment="dev",
+            actor_id="actor-1",
+            idempotency_key=KEY,
+            user_id="user-1",
+            role="ADMIN",
+            expected_version=1,
+            request_id=None,
+        )
+    with pytest.raises(IdempotencyKeyReusedError):
+        repo.claim_role_change(
+            environment="dev",
+            actor_id="actor-1",
+            idempotency_key=KEY,
+            user_id="user-1",
+            role="OPERATOR",
+            expected_version=1,
+            request_id=None,
+        )
+
+
+def test_role_change_completion_hook_is_atomic_ready_and_contains_no_pii() -> None:
+    table = FakeTable()
+    repo = repository(table)
+    record = repo.claim_role_change(
+        environment="dev",
+        actor_id="actor-1",
+        idempotency_key=KEY,
+        user_id="user-1",
+        role="ADMIN",
+        expected_version=1,
+        request_id="request-1",
+    ).record
+    response: dict[str, object] = {
+        "userId": "user-1",
+        "fullName": "Synthetic User",
+        "email": "synthetic@example.test",
+        "role": "ADMIN",
+        "status": "INVITED",
+        "version": 2,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "updatedAt": "2027-01-15T08:00:00.000Z",
+    }
+    transition = repo.build_role_change_completion_transition(record=record, response=response)
+    rendered = repr(transition)
+    assert "Synthetic User" not in rendered
+    assert "synthetic@example.test" not in rendered
+    update = transition["Update"]
+    assert isinstance(update, dict)
+    decoded = {
+        key: TypeDeserializer().deserialize(value)
+        for key, value in update["ExpressionAttributeValues"].items()
+    }
+    assert decoded[":completed"] == "COMPLETED"
+    assert decoded[":status"] == 200
+    assert decoded[":value3"] == 2

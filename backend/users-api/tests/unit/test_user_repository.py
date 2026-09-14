@@ -335,3 +335,141 @@ def test_transaction_error_logging_is_structured_and_sanitized(
     assert "admin@example.test" not in rendered
     assert "token-secret" not in rendered
     assert "22222222-2222-4222-8222-222222222222" not in rendered
+
+
+def role_change(
+    repository: UserRepository,
+    client: FakeClient,
+    *,
+    old_role: str,
+    new_role: str,
+    status: str,
+    version: int = 1,
+) -> list[dict[str, object]]:
+    repository.change_role(
+        user_id="user-1",
+        cognito_sub="sub-1",
+        old_role=old_role,
+        new_role=new_role,
+        status=status,
+        version=version,
+        auth_version=3,
+        updated_at="2026-09-14T14:00:00.000Z",
+        actor_id="actor-1",
+        audit={"PK": "RESOURCE#USER#user-1", "SK": "TS#time#EVENT#event-1"},
+        idempotency_transition={"Update": {"TableName": "idempotency"}},
+        client_request_token="55555555-5555-4555-8555-555555555555",
+    )
+    assert client.transaction is not None
+    items = client.transaction["TransactItems"]
+    assert isinstance(items, list)
+    return items
+
+
+@pytest.mark.parametrize("status", ["INVITED", "INACTIVE"])
+def test_role_change_transaction_without_counter_has_four_items(status: str) -> None:
+    client = FakeClient()
+    items = role_change(
+        UserRepository(client, "users", "audit"),
+        client,
+        old_role="OPERATOR",
+        new_role="ADMIN",
+        status=status,
+    )
+    assert len(items) == 4
+    assert [next(iter(item)) for item in items] == ["Update", "Update", "Put", "Update"]
+    assert "CONTROL#ACTIVE_ADMIN_COUNT" not in repr(items)
+
+    profile = items[0]["Update"]
+    auth = items[1]["Update"]
+    assert isinstance(profile, dict) and isinstance(auth, dict)
+    assert "authVersion = :next_auth_version" in profile["UpdateExpression"]
+    assert "#version = :next_version" in profile["UpdateExpression"]
+    assert "#role = :new_role" in auth["UpdateExpression"]
+    assert "#status = :status" in profile["ConditionExpression"]
+    assert "authVersion = :auth_version" in auth["ConditionExpression"]
+
+
+@pytest.mark.parametrize(
+    ("old_role", "new_role", "delta", "condition"),
+    [
+        ("OPERATOR", "ADMIN", 1, "activeAdminCount >= :one"),
+        ("ADMIN", "OPERATOR", -1, "activeAdminCount > :one"),
+    ],
+)
+def test_active_role_change_updates_counter_atomically(
+    old_role: str, new_role: str, delta: int, condition: str
+) -> None:
+    client = FakeClient()
+    items = role_change(
+        UserRepository(client, "users", "audit"),
+        client,
+        old_role=old_role,
+        new_role=new_role,
+        status="ACTIVE",
+    )
+    assert len(items) == 5
+    counter = items[2]["Update"]
+    assert isinstance(counter, dict)
+    assert counter["UpdateExpression"] == "ADD activeAdminCount :delta"
+    assert condition in counter["ConditionExpression"]
+    assert TypeDeserializer().deserialize(counter["ExpressionAttributeValues"][":delta"]) == delta
+    audit = items[3]["Put"]
+    assert isinstance(audit, dict) and audit["TableName"] == "audit"
+    assert items[4] == {"Update": {"TableName": "idempotency"}}
+
+
+def test_role_change_supports_legacy_version_one_but_not_other_stale_versions() -> None:
+    client = FakeClient()
+    first = role_change(
+        UserRepository(client, "users", "audit"),
+        client,
+        old_role="OPERATOR",
+        new_role="ADMIN",
+        status="INVITED",
+        version=1,
+    )
+    first_profile = first[0]["Update"]
+    assert isinstance(first_profile, dict)
+    assert (
+        "attribute_not_exists(#version) OR #version = :version"
+        in first_profile["ConditionExpression"]
+    )
+
+    second = role_change(
+        UserRepository(client, "users", "audit"),
+        client,
+        old_role="ADMIN",
+        new_role="OPERATOR",
+        status="INACTIVE",
+        version=2,
+    )
+    second_profile = second[0]["Update"]
+    assert isinstance(second_profile, dict)
+    condition = second_profile["ConditionExpression"]
+    assert "attribute_not_exists(#version)" not in condition
+    assert condition.endswith("#version = :version")
+
+
+def test_role_change_noop_is_condition_check_plus_completion_only() -> None:
+    client = FakeClient()
+    transition: dict[str, object] = {"Update": {"TableName": "idempotency"}}
+    UserRepository(client, "users", "audit").complete_role_change_noop(
+        user_id="user-1",
+        cognito_sub="sub-1",
+        role="ADMIN",
+        status="ACTIVE",
+        version=1,
+        auth_version=4,
+        idempotency_transition=transition,
+        client_request_token="55555555-5555-4555-8555-555555555555",
+    )
+    assert client.transaction is not None
+    items = client.transaction["TransactItems"]
+    assert isinstance(items, list) and len(items) == 2
+    assert "ConditionCheck" in items[0]
+    assert items[1] == transition
+    rendered = repr(items)
+    assert "USER_ROLE_CHANGED" not in rendered
+    assert "CONTROL#ACTIVE_ADMIN_COUNT" not in rendered
+    assert "UpdateExpression" not in repr(items[0])
