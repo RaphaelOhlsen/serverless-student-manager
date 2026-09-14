@@ -914,8 +914,8 @@ run "plans_users_api_access" {
   command = plan
 
   assert {
-    condition     = length(data.aws_iam_policy_document.users_api.statement) == 11
-    error_message = "The users-api policy must contain exactly eleven semantic statements."
+    condition     = length(data.aws_iam_policy_document.users_api.statement) == 12
+    error_message = "The users-api policy must contain exactly twelve semantic statements."
   }
 
   assert {
@@ -1051,6 +1051,39 @@ run "plans_users_api_access" {
         if statement.sid == "UpdateActivationStateInTransaction"
     ])).values) == toset(["TransactWriteItems"])
     error_message = "UpdateItem on users must require EnclosingOperation TransactWriteItems."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.users_api.statement : statement.actions
+      if statement.sid == "CheckUserRoleNoopInTransaction"
+    ])) == toset(["dynamodb:ConditionCheckItem"])
+    error_message = "Role-change no-op must contain only ConditionCheckItem."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.users_api.statement : statement.resources
+      if statement.sid == "CheckUserRoleNoopInTransaction"
+    ])) == toset([module.user_store.table_arn])
+    error_message = "Role-change no-op ConditionCheckItem must target only users."
+  }
+
+  assert {
+    condition = length(one([
+      for statement in data.aws_iam_policy_document.users_api.statement : statement.condition
+      if statement.sid == "CheckUserRoleNoopInTransaction"
+      ])) == 1 && one(one([
+      for statement in data.aws_iam_policy_document.users_api.statement : statement.condition
+      if statement.sid == "CheckUserRoleNoopInTransaction"
+      ])).test == "StringEquals" && one(one([
+      for statement in data.aws_iam_policy_document.users_api.statement : statement.condition
+      if statement.sid == "CheckUserRoleNoopInTransaction"
+      ])).variable == "dynamodb:EnclosingOperation" && toset(one(one([
+        for statement in data.aws_iam_policy_document.users_api.statement : statement.condition
+        if statement.sid == "CheckUserRoleNoopInTransaction"
+    ])).values) == toset(["TransactWriteItems"])
+    error_message = "ConditionCheckItem must require EnclosingOperation TransactWriteItems."
   }
 
   assert {

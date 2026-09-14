@@ -304,6 +304,25 @@ data "aws_iam_policy_document" "users_api" {
   }
 
   statement {
+    sid    = "CheckUserRoleNoopInTransaction"
+    effect = "Allow"
+
+    actions = [
+      "dynamodb:ConditionCheckItem",
+    ]
+
+    resources = [
+      module.user_store.table_arn,
+    ]
+
+    condition {
+      test     = "StringEquals"
+      variable = "dynamodb:EnclosingOperation"
+      values   = ["TransactWriteItems"]
+    }
+  }
+
+  statement {
     sid    = "PutUserProvisioningInTransaction"
     effect = "Allow"
 
@@ -546,6 +565,12 @@ module "http_api" {
 
     resend_user_invitation = {
       route_key          = "POST /users/{userId}/invitation/resend"
+      integration_key    = "users"
+      authorization_type = "JWT"
+    }
+
+    change_user_role = {
+      route_key          = "POST /users/{userId}/role-change"
       integration_key    = "users"
       authorization_type = "JWT"
     }
