@@ -7,7 +7,11 @@ from aws_lambda_powertools.event_handler import (
     content_types,
 )
 
-from users_api.dependencies import get_admin_user_service, get_create_user_service
+from users_api.dependencies import (
+    get_admin_user_service,
+    get_create_user_service,
+    get_resend_invitation_service,
+)
 from users_api.errors import (
     AdminUserForbiddenError,
     AdminUserNotFoundError,
@@ -20,6 +24,9 @@ from users_api.errors import (
     OperationInProgressError,
     UserCreateReconciliationError,
     UserEmailAlreadyExistsError,
+    UserInvitationReconciliationError,
+    UserStateConflictError,
+    UserVersionConflictError,
 )
 
 
@@ -59,10 +66,23 @@ class CreateUserServiceProtocol(Protocol):
     ) -> dict[str, object]: ...
 
 
+class ResendInvitationServiceProtocol(Protocol):
+    def resend_invitation(
+        self,
+        *,
+        cognito_sub: str,
+        user_id: str,
+        idempotency_key: object,
+        request_id: str | None,
+        body: str,
+    ) -> None: ...
+
+
 def register_admin_user_routes(
     app: APIGatewayHttpResolver,
     service: AdminUserServiceProtocol | None = None,
     create_service: CreateUserServiceProtocol | None = None,
+    resend_service: ResendInvitationServiceProtocol | None = None,
 ) -> None:
     @app.post("/users")
     def create_user() -> Response[dict[str, object]] | Response[dict[str, str]]:
@@ -108,6 +128,55 @@ def register_admin_user_routes(
                 "Invitation delivery result is uncertain",
             )
         except UserCreateReconciliationError:
+            return _error_response(500, "INTERNAL_ERROR", "Unexpected internal error")
+        except Exception:
+            return _error_response(500, "INTERNAL_ERROR", "Unexpected internal error")
+
+    @app.post("/users/<user_id>/invitation/resend")
+    def resend_invitation(user_id: str) -> Response[None] | Response[dict[str, str]]:
+        try:
+            event = app.current_event.raw_event
+            cognito_sub, key, request_id, body = _parse_create_request(event)
+            active_service = (
+                resend_service if resend_service is not None else get_resend_invitation_service()
+            )
+            active_service.resend_invitation(
+                cognito_sub=cognito_sub,
+                user_id=user_id,
+                idempotency_key=key,
+                request_id=request_id,
+                body=body,
+            )
+            return Response(status_code=204, content_type=None, body=None)
+        except InvalidAdminUserWriteRequestError:
+            return _error_response(400, "INVALID_REQUEST", "Invalid invitation resend request")
+        except AdminUserUnauthorizedError:
+            return _error_response(401, "UNAUTHORIZED", "Unauthorized")
+        except AdminUserForbiddenError:
+            return _error_response(403, "FORBIDDEN", "Forbidden")
+        except AdminUserNotFoundError:
+            return _error_response(404, "USER_NOT_FOUND", "User not found")
+        except UserVersionConflictError:
+            return _error_response(409, "USER_VERSION_CONFLICT", "User version conflict")
+        except UserStateConflictError:
+            return _error_response(409, "USER_STATE_CONFLICT", "User state conflict")
+        except IdempotencyKeyReusedError:
+            return _error_response(409, "IDEMPOTENCY_KEY_REUSED", "Idempotency key reused")
+        except OperationInProgressError:
+            return _error_response(409, "OPERATION_IN_PROGRESS", "Operation in progress")
+        except InvitationDeliveryFailedError:
+            return _error_response(
+                503,
+                "INVITATION_DELIVERY_FAILED",
+                "Invitation delivery failed",
+            )
+        except InvitationDeliveryUncertainError:
+            return _error_response(
+                503,
+                "INVITATION_DELIVERY_UNCERTAIN",
+                "Invitation delivery result is uncertain",
+            )
+        except UserInvitationReconciliationError:
             return _error_response(500, "INTERNAL_ERROR", "Unexpected internal error")
         except Exception:
             return _error_response(500, "INTERNAL_ERROR", "Unexpected internal error")

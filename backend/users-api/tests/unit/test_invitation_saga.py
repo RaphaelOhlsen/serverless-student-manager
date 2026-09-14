@@ -536,6 +536,37 @@ def test_resend_deterministic_failure_can_retry_dispatch() -> None:
     assert table.items[str(record["id"])]["state"] == ResendSagaState.DISPATCHING.value
 
 
+def test_resend_completion_hook_is_stable_and_atomic_ready() -> None:
+    table = FakeTable()
+    repo = repository(table)
+    record = repo.claim_resend(
+        environment="dev",
+        actor_id="actor-1",
+        idempotency_key=KEY,
+        user_id="user-1",
+        expected_version=1,
+        request_id="request-1",
+    ).record
+    record["state"] = ResendSagaState.SENT.value
+    table.items[str(record["id"])]["state"] = record["state"]
+
+    first = repo.build_resend_completion_transition(record=record)
+    second = repo.build_resend_completion_transition(record=record)
+
+    assert first == second
+    update = first["Update"]
+    assert isinstance(update, dict)
+    assert "#state = :sent" in str(update["ConditionExpression"])
+    values = update["ExpressionAttributeValues"]
+    assert isinstance(values, dict)
+    decoded = {key: TypeDeserializer().deserialize(value) for key, value in values.items()}
+    assert decoded[":completed"] == "COMPLETED"
+    assert decoded[":status"] == 204
+
+    with pytest.raises(InvitationSagaInvariantError, match="restricted"):
+        repo.build_resend_completion_transition(record={**record, "state": "DISPATCHING"})
+
+
 def test_delivery_failure_state_and_code_must_match() -> None:
     table = FakeTable()
     repo = repository(table)

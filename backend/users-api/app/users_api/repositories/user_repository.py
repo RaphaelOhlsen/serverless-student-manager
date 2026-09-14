@@ -79,6 +79,25 @@ class UserRepository:
             ClientRequestToken=client_request_token,
         )
 
+    def complete_invitation_resend(
+        self,
+        *,
+        audit: dict[str, object],
+        saga_transition: dict[str, object],
+        client_request_token: str,
+    ) -> None:
+        self._client.transact_write_items(
+            TransactItems=[
+                self._put(
+                    self._audit_table,
+                    audit,
+                    "attribute_not_exists(PK) AND attribute_not_exists(SK)",
+                ),
+                saga_transition,
+            ],
+            ClientRequestToken=client_request_token,
+        )
+
     def list_profiles(
         self,
         *,

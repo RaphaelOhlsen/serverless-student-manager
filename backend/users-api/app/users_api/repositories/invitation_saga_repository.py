@@ -267,6 +267,40 @@ class InvitationSagaRepository:
             }
         }
 
+    def build_resend_completion_transition(
+        self,
+        *,
+        record: dict[str, object],
+    ) -> dict[str, object]:
+        record_id, operation, current_state, request_hash = self._transition_context(record)
+        if operation != RESEND_INVITATION_OPERATION or current_state != ResendSagaState.SENT.value:
+            raise InvitationSagaInvariantError(
+                "transaction hook is restricted to resend completion"
+            )
+        started_at = record.get("startedAt")
+        if not isinstance(started_at, str) or not started_at:
+            raise InvitationSagaInvariantError("resend completion requires stable startedAt")
+        return {
+            "Update": {
+                "TableName": self._table_name,
+                "Key": self._serialize({"id": record_id}),
+                "UpdateExpression": (
+                    "SET #state = :completed, httpStatus = :status, updatedAt = :updated"
+                ),
+                "ConditionExpression": "#state = :sent AND requestHash = :request_hash",
+                "ExpressionAttributeNames": {"#state": "state"},
+                "ExpressionAttributeValues": self._serialize(
+                    {
+                        ":sent": ResendSagaState.SENT.value,
+                        ":completed": ResendSagaState.COMPLETED.value,
+                        ":status": 204,
+                        ":request_hash": request_hash,
+                        ":updated": started_at,
+                    }
+                ),
+            }
+        }
+
     def begin_cognito_compensation(
         self,
         *,

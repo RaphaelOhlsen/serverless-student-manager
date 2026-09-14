@@ -108,3 +108,15 @@ class InvitationDeliveryUncertainError(RuntimeError):
 
 class UserCreateReconciliationError(RuntimeError):
     pass
+
+
+class UserVersionConflictError(RuntimeError):
+    pass
+
+
+class UserStateConflictError(RuntimeError):
+    pass
+
+
+class UserInvitationReconciliationError(RuntimeError):
+    pass
