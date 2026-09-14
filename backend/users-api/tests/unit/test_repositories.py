@@ -21,6 +21,14 @@ class FakeCognitoClient:
         self.calls.append(("factors", kwargs))
         return {"ConfiguredUserAuthFactors": ["SOFTWARE_TOKEN"]}
 
+    def admin_delete_user(self, **kwargs: object) -> dict[str, Any]:
+        self.calls.append(("delete", kwargs))
+        return {}
+
+    def admin_disable_user(self, **kwargs: object) -> dict[str, Any]:
+        self.calls.append(("disable", kwargs))
+        return {}
+
 
 class FakeTable:
     def __init__(self) -> None:

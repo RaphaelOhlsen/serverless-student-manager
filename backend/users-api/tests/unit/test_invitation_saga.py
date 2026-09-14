@@ -294,13 +294,69 @@ def test_ddb_committed_transition_can_join_domain_transaction() -> None:
     values = update["ExpressionAttributeValues"]
     assert isinstance(values, dict)
     assert deserializer.deserialize(values[":next"]) == "DDB_COMMITTED"
-    assert deserializer.deserialize(values[":lease"]) == (NOW + IN_PROGRESS_TTL_SECONDS) * 1000
+    assert deserializer.deserialize(values[":updated"]) == record["startedAt"]
+    assert ":lease" not in values
 
     with pytest.raises(InvitationSagaInvariantError, match="restricted"):
         repo.build_transaction_transition(
             record=record,
             next_state=CreateSagaState.RECONCILIATION_REQUIRED.value,
         )
+
+
+def test_ddb_transaction_hook_is_stable_when_wall_clock_changes() -> None:
+    table = FakeTable()
+    current_time = [NOW]
+    repo = repository(table, clock=lambda: current_time[0])
+    record = claim_create(repo).record
+    record.update(
+        state=CreateSagaState.COGNITO_CREATED.value,
+        cognitoSub="55555555-5555-4555-8555-555555555555",
+        cognitoEvidence=CognitoIdentityEvidence.CREATE_SUCCESS.value,
+    )
+    first = repo.build_transaction_transition(
+        record=record, next_state=CreateSagaState.DDB_COMMITTED.value
+    )
+    current_time[0] += 300
+    second = repo.build_transaction_transition(
+        record=record, next_state=CreateSagaState.DDB_COMMITTED.value
+    )
+    assert first == second
+
+
+def test_compensated_business_failure_is_durable_and_replayable() -> None:
+    table = FakeTable()
+    repo = repository(table)
+    record = claim_create(repo).record
+    cognito_sub = "55555555-5555-4555-8555-555555555555"
+    repo.store_cognito_created(
+        record=record,
+        cognito_sub=cognito_sub,
+        evidence=CognitoIdentityEvidence.CREATE_SUCCESS,
+    )
+    record.update(
+        state=CreateSagaState.COGNITO_CREATED.value,
+        cognitoSub=cognito_sub,
+        cognitoEvidence=CognitoIdentityEvidence.CREATE_SUCCESS.value,
+    )
+    repo.begin_cognito_compensation(
+        record=record,
+        http_status=409,
+        error_code="EMAIL_ALREADY_EXISTS",
+    )
+    record.update(
+        state=CreateSagaState.COMPENSATING.value,
+        terminalHttpStatus=409,
+        terminalErrorCode="EMAIL_ALREADY_EXISTS",
+    )
+    repo.complete_compensation(record=record)
+
+    completed = repo.get(str(record["id"]))
+    assert completed is not None
+    replay = replay_from_record(completed)
+    assert replay.http_status == 409
+    assert replay.error_code == "EMAIL_ALREADY_EXISTS"
+    assert replay.response_user_id is None
 
 
 def test_existing_create_claim_rejects_corrupted_stable_identity() -> None:

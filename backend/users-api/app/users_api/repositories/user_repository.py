@@ -43,6 +43,42 @@ class UserRepository:
     def get_email_reservation(self, normalized_email: str) -> dict[str, object] | None:
         return self._get_user_item(f"UNIQUE#EMAIL#{normalized_email}", "UNIQUE")
 
+    def get_audit_event(
+        self,
+        *,
+        user_id: str,
+        occurred_at: str,
+        event_id: str,
+    ) -> dict[str, object] | None:
+        return self._get_item(
+            self._audit_table,
+            f"RESOURCE#USER#{user_id}",
+            f"TS#{occurred_at}#EVENT#{event_id}",
+        )
+
+    def provision_invited_user(
+        self,
+        *,
+        profile: dict[str, object],
+        unique_email: dict[str, object],
+        authorization: dict[str, object],
+        audit: dict[str, object],
+        saga_transition: dict[str, object],
+        client_request_token: str,
+    ) -> None:
+        condition = "attribute_not_exists(PK) AND attribute_not_exists(SK)"
+        items = [
+            self._put(self._users_table, profile, condition),
+            self._put(self._users_table, unique_email, condition),
+            self._put(self._users_table, authorization, condition),
+            self._put(self._audit_table, audit, condition),
+            saga_transition,
+        ]
+        self._client.transact_write_items(
+            TransactItems=items,
+            ClientRequestToken=client_request_token,
+        )
+
     def list_profiles(
         self,
         *,
@@ -220,8 +256,16 @@ class UserRepository:
             raise
 
     def _get_user_item(self, partition_key: str, sort_key: str) -> dict[str, object] | None:
+        return self._get_item(self._users_table, partition_key, sort_key)
+
+    def _get_item(
+        self,
+        table_name: str,
+        partition_key: str,
+        sort_key: str,
+    ) -> dict[str, object] | None:
         response = self._client.get_item(
-            TableName=self._users_table,
+            TableName=table_name,
             Key=self._serialize_item({"PK": partition_key, "SK": sort_key}),
             ConsistentRead=True,
         )
@@ -229,6 +273,20 @@ class UserRepository:
         if not isinstance(item, dict):
             return None
         return self._deserialize_item(item)
+
+    def _put(
+        self,
+        table_name: str,
+        item: dict[str, object],
+        condition: str,
+    ) -> dict[str, object]:
+        return {
+            "Put": {
+                "TableName": table_name,
+                "Item": self._serialize_item(item),
+                "ConditionExpression": condition,
+            }
+        }
 
     def _deserialize_item(self, item: dict[str, Any]) -> dict[str, object]:
         return {

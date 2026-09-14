@@ -240,26 +240,67 @@ class InvitationSagaRepository:
                 "transaction hook is restricted to create DDB_COMMITTED"
             )
         validate_transition(operation=operation, current_state=current_state, next_state=next_state)
-        now = self._now_seconds()
+        started_at = record.get("startedAt")
+        if not isinstance(started_at, str) or not started_at:
+            raise InvitationSagaInvariantError("transaction hook requires stable startedAt")
         values: dict[str, object] = {
             ":current": current_state,
             ":next": next_state,
             ":request_hash": request_hash,
-            ":updated": self._timestamp(now),
-            ":lease": (now + IN_PROGRESS_TTL_SECONDS) * 1000,
+            ":updated": started_at,
         }
         return {
             "Update": {
                 "TableName": self._table_name,
                 "Key": self._serialize({"id": record_id}),
-                "UpdateExpression": (
-                    "SET #state = :next, updatedAt = :updated, inProgressExpiration = :lease"
-                ),
+                "UpdateExpression": "SET #state = :next, updatedAt = :updated",
                 "ConditionExpression": "#state = :current AND requestHash = :request_hash",
                 "ExpressionAttributeNames": {"#state": "state"},
                 "ExpressionAttributeValues": self._serialize(values),
             }
         }
+
+    def begin_cognito_compensation(
+        self,
+        *,
+        record: dict[str, object],
+        http_status: int,
+        error_code: str,
+    ) -> None:
+        if http_status not in {409, 500} or not error_code:
+            raise InvitationSagaInvariantError("invalid compensation terminal result")
+        self._state_update(
+            record=record,
+            next_state=CreateSagaState.COMPENSATING.value,
+            assignments={"terminalHttpStatus": http_status, "terminalErrorCode": error_code},
+        )
+
+    def complete_compensation(self, *, record: dict[str, object]) -> None:
+        status = record.get("terminalHttpStatus")
+        error_code = record.get("terminalErrorCode")
+        if type(status) is not int or status not in {409, 500}:
+            raise InvitationSagaInvariantError("compensation is missing terminal HTTP status")
+        if not isinstance(error_code, str) or not error_code:
+            raise InvitationSagaInvariantError("compensation is missing terminal error code")
+        self._state_update(
+            record=record,
+            next_state=CreateSagaState.COMPLETED.value,
+            assignments={"httpStatus": status, "errorCode": error_code},
+        )
+
+    def store_provisioning_reconciliation_required(
+        self,
+        *,
+        record: dict[str, object],
+        reason: str,
+    ) -> None:
+        if not reason:
+            raise InvitationSagaInvariantError("provisioning reconciliation reason is required")
+        self._state_update(
+            record=record,
+            next_state=CreateSagaState.RECONCILIATION_REQUIRED.value,
+            assignments={"errorCode": reason},
+        )
 
     def store_completed(
         self,
@@ -452,6 +493,7 @@ class InvitationSagaRepository:
                     )
                 if create_state in {
                     CreateSagaState.COGNITO_CREATED,
+                    CreateSagaState.COMPENSATING,
                     CreateSagaState.DDB_COMMITTED,
                     CreateSagaState.INVITATION_DISPATCHING,
                     CreateSagaState.INVITATION_RETRYABLE,

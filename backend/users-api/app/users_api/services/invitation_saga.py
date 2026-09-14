@@ -18,6 +18,7 @@ INVITATION_DELIVERY_UNCERTAIN: Final = "INVITATION_DELIVERY_UNCERTAIN"
 class CreateSagaState(StrEnum):
     CLAIMED = "CLAIMED"
     COGNITO_CREATED = "COGNITO_CREATED"
+    COMPENSATING = "COMPENSATING"
     DDB_COMMITTED = "DDB_COMMITTED"
     INVITATION_DISPATCHING = "INVITATION_DISPATCHING"
     INVITATION_RETRYABLE = "INVITATION_RETRYABLE"
@@ -54,7 +55,12 @@ CREATE_TRANSITIONS: Final = {
         CreateSagaState.RECONCILIATION_REQUIRED,
     },
     CreateSagaState.COGNITO_CREATED: {
+        CreateSagaState.COMPENSATING,
         CreateSagaState.DDB_COMMITTED,
+        CreateSagaState.RECONCILIATION_REQUIRED,
+    },
+    CreateSagaState.COMPENSATING: {
+        CreateSagaState.COMPLETED,
         CreateSagaState.RECONCILIATION_REQUIRED,
     },
     CreateSagaState.DDB_COMMITTED: {
@@ -111,6 +117,7 @@ class SagaClaim:
 class StoredReplay:
     http_status: int
     response_user_id: str | None
+    error_code: str | None = None
 
 
 def create_request_hash(*, full_name: str, email: str, role: str) -> str:
@@ -165,14 +172,23 @@ def replay_from_record(record: dict[str, object]) -> StoredReplay:
     if record.get("state") != "COMPLETED":
         raise InvitationSagaInvariantError("invitation saga is not completed")
     status = record.get("httpStatus")
-    if type(status) is not int or status not in {201, 204}:
+    if type(status) is not int or status not in {201, 204, 409, 500}:
         raise InvitationSagaInvariantError("completed invitation saga has invalid HTTP status")
     response_user_id = record.get("responseUserId")
     if status == 201 and (not isinstance(response_user_id, str) or not response_user_id):
         raise InvitationSagaInvariantError("create replay is missing response user ID")
-    if status == 204 and response_user_id is not None:
-        raise InvitationSagaInvariantError("resend replay must not contain a response user ID")
-    return StoredReplay(status, response_user_id if isinstance(response_user_id, str) else None)
+    if status in {204, 409, 500} and response_user_id is not None:
+        raise InvitationSagaInvariantError("replay must not contain a response user ID")
+    error_code = record.get("errorCode")
+    if status in {409, 500} and (not isinstance(error_code, str) or not error_code):
+        raise InvitationSagaInvariantError("failed create replay is missing error code")
+    if status in {201, 204} and error_code is not None:
+        raise InvitationSagaInvariantError("successful replay must not contain an error code")
+    return StoredReplay(
+        status,
+        response_user_id if isinstance(response_user_id, str) else None,
+        error_code if isinstance(error_code, str) else None,
+    )
 
 
 def _hash(value: object) -> str:

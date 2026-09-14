@@ -42,6 +42,10 @@ class CognitoClient(Protocol):
 
     def admin_get_user_auth_factors(self, **kwargs: object) -> dict[str, Any]: ...
 
+    def admin_delete_user(self, **kwargs: object) -> dict[str, Any]: ...
+
+    def admin_disable_user(self, **kwargs: object) -> dict[str, Any]: ...
+
 
 @dataclass(frozen=True)
 class ReconciledCognitoIdentity:
@@ -96,6 +100,27 @@ class CognitoRepository:
             UserPoolId=self._user_pool_id,
             Username=user_id,
         )
+
+    def admin_delete_user(self, *, user_id: str) -> None:
+        self._compensation_call("delete", user_id=user_id)
+
+    def admin_disable_user(self, *, user_id: str) -> None:
+        self._compensation_call("disable", user_id=user_id)
+
+    def _compensation_call(self, operation: str, *, user_id: str) -> None:
+        try:
+            if operation == "delete":
+                self._client.admin_delete_user(
+                    UserPoolId=self._user_pool_id,
+                    Username=user_id,
+                )
+            else:
+                self._client.admin_disable_user(
+                    UserPoolId=self._user_pool_id,
+                    Username=user_id,
+                )
+        except Exception as error:
+            self._raise_read_error(error)
 
     @staticmethod
     def _parse_identity(

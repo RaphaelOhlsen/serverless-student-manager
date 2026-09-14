@@ -88,3 +88,7 @@ class CognitoServiceError(RuntimeError):
 
 class CognitoIdentityInvariantError(RuntimeError):
     pass
+
+
+class UserEmailAlreadyExistsError(RuntimeError):
+    pass

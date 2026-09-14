@@ -47,9 +47,13 @@ class FakeCognitoClient:
     def __init__(self) -> None:
         self.create_error: Exception | None = None
         self.get_error: Exception | None = None
+        self.delete_error: Exception | None = None
+        self.disable_error: Exception | None = None
         self.user = compatible_response()
         self.create_calls: list[dict[str, object]] = []
         self.get_calls: list[dict[str, object]] = []
+        self.delete_calls: list[dict[str, object]] = []
+        self.disable_calls: list[dict[str, object]] = []
 
     def admin_create_user(self, **kwargs: object) -> dict[str, Any]:
         self.create_calls.append(kwargs)
@@ -65,6 +69,18 @@ class FakeCognitoClient:
 
     def admin_get_user_auth_factors(self, **kwargs: object) -> dict[str, Any]:
         raise AssertionError(f"unexpected auth factors call: {kwargs}")
+
+    def admin_delete_user(self, **kwargs: object) -> dict[str, Any]:
+        self.delete_calls.append(kwargs)
+        if self.delete_error is not None:
+            raise self.delete_error
+        return {}
+
+    def admin_disable_user(self, **kwargs: object) -> dict[str, Any]:
+        self.disable_calls.append(kwargs)
+        if self.disable_error is not None:
+            raise self.disable_error
+        return {}
 
 
 def repository(client: FakeCognitoClient) -> CognitoRepository:
@@ -235,3 +251,55 @@ def test_admin_get_user_classifies_read_errors(
     client.get_error = error
     with pytest.raises(error_type):
         repository(client).admin_get_user(user_id=USER_ID, expected_email=EMAIL)
+
+
+def test_compensation_calls_use_only_stable_username() -> None:
+    client = FakeCognitoClient()
+    repo = repository(client)
+
+    repo.admin_delete_user(user_id=USER_ID)
+    repo.admin_disable_user(user_id=USER_ID)
+
+    expected = [{"UserPoolId": "pool-1", "Username": USER_ID}]
+    assert client.delete_calls == expected
+    assert client.disable_calls == expected
+
+
+@pytest.mark.parametrize(
+    ("operation", "error", "error_type"),
+    [
+        (
+            "delete",
+            client_error("UserNotFoundException", "AdminDeleteUser"),
+            CognitoUserNotFoundError,
+        ),
+        (
+            "delete",
+            EndpointConnectionError(endpoint_url="https://cognito.invalid"),
+            CognitoResultAmbiguousError,
+        ),
+        (
+            "disable",
+            client_error("AccessDeniedException", "AdminDisableUser"),
+            CognitoServiceError,
+        ),
+    ],
+)
+def test_compensation_calls_classify_sanitized_errors(
+    operation: str,
+    error: Exception,
+    error_type: type[Exception],
+) -> None:
+    client = FakeCognitoClient()
+    if operation == "delete":
+        client.delete_error = error
+    else:
+        client.disable_error = error
+
+    with pytest.raises(error_type) as captured:
+        if operation == "delete":
+            repository(client).admin_delete_user(user_id=USER_ID)
+        else:
+            repository(client).admin_disable_user(user_id=USER_ID)
+
+    assert "sensitive provider detail" not in str(captured.value)
