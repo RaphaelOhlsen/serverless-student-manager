@@ -98,6 +98,10 @@ class FakeTable:
             if alias.startswith("#field"):
                 index = alias.removeprefix("#field")
                 item[str(name)] = values[f":value{index}"]
+        expression = kwargs.get("UpdateExpression")
+        if isinstance(expression, str) and " REMOVE " in expression:
+            for name in expression.split(" REMOVE ", 1)[1].split(","):
+                item.pop(name.strip(), None)
         return {}
 
 
@@ -411,6 +415,36 @@ def test_create_retryable_and_uncertain_states_are_distinct() -> None:
         error_code=INVITATION_DELIVERY_UNCERTAIN,
     )
     assert other_table.items[str(other["id"])]["state"] == "RECONCILIATION_REQUIRED"
+
+
+def test_create_delivery_retry_clears_failure_before_successful_replay() -> None:
+    table = FakeTable()
+    repo = repository(table)
+    record = claim_create(repo).record
+    cognito_sub = "55555555-5555-4555-8555-555555555555"
+    record.update(
+        state=CreateSagaState.INVITATION_DISPATCHING.value,
+        cognitoSub=cognito_sub,
+        cognitoEvidence=CognitoIdentityEvidence.CREATE_SUCCESS.value,
+    )
+    table.items[str(record["id"])].update(record)
+    repo.store_delivery_failure(
+        record=record,
+        retryable_state=CreateSagaState.INVITATION_RETRYABLE.value,
+        error_code=INVITATION_DELIVERY_FAILED,
+    )
+    record["state"] = CreateSagaState.INVITATION_RETRYABLE.value
+    repo.transition(record=record, next_state=CreateSagaState.INVITATION_DISPATCHING.value)
+    stored = table.items[str(record["id"])]
+    assert "errorCode" not in stored
+    assert "httpStatus" not in stored
+
+    record["state"] = CreateSagaState.INVITATION_DISPATCHING.value
+    repo.transition(record=record, next_state=CreateSagaState.INVITATION_SENT.value)
+    record["state"] = CreateSagaState.INVITATION_SENT.value
+    repo.store_completed(record=record, http_status=201, response_user_id=str(record["userId"]))
+    replay = replay_from_record(table.items[str(record["id"])])
+    assert replay.http_status == 201
 
 
 def test_resend_namespace_replay_mismatch_and_completed_204() -> None:

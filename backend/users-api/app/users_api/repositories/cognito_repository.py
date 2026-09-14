@@ -14,6 +14,7 @@ from users_api.errors import (
     CognitoAliasExistsError,
     CognitoCreateDeterministicError,
     CognitoIdentityInvariantError,
+    CognitoInvitationDeliveryError,
     CognitoResultAmbiguousError,
     CognitoServiceError,
     CognitoUsernameExistsError,
@@ -106,6 +107,21 @@ class CognitoRepository:
 
     def admin_disable_user(self, *, user_id: str) -> None:
         self._compensation_call("disable", user_id=user_id)
+
+    def admin_resend_invitation(self, *, user_id: str) -> None:
+        try:
+            self._client.admin_create_user(
+                UserPoolId=self._user_pool_id,
+                Username=user_id,
+                MessageAction="RESEND",
+            )
+        except Exception as error:
+            code, http_status = self._error_details(error)
+            if self._is_ambiguous(error, code, http_status):
+                raise CognitoResultAmbiguousError from None
+            if isinstance(error, ClientError):
+                raise CognitoInvitationDeliveryError from None
+            raise
 
     def _compensation_call(self, operation: str, *, user_id: str) -> None:
         try:

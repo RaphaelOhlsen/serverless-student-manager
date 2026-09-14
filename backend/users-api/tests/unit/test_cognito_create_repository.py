@@ -9,6 +9,7 @@ from users_api.errors import (
     CognitoAliasExistsError,
     CognitoCreateDeterministicError,
     CognitoIdentityInvariantError,
+    CognitoInvitationDeliveryError,
     CognitoResultAmbiguousError,
     CognitoServiceError,
     CognitoUsernameExistsError,
@@ -263,6 +264,52 @@ def test_compensation_calls_use_only_stable_username() -> None:
     expected = [{"UserPoolId": "pool-1", "Username": USER_ID}]
     assert client.delete_calls == expected
     assert client.disable_calls == expected
+
+
+def test_initial_invitation_resend_uses_only_proven_call_shape() -> None:
+    client = FakeCognitoClient()
+
+    repository(client).admin_resend_invitation(user_id=USER_ID)
+
+    assert client.create_calls == [
+        {
+            "UserPoolId": "pool-1",
+            "Username": USER_ID,
+            "MessageAction": "RESEND",
+        }
+    ]
+    assert "ForceAliasCreation" not in client.create_calls[0]
+    assert "TemporaryPassword" not in client.create_calls[0]
+
+
+@pytest.mark.parametrize(
+    ("error", "error_type"),
+    [
+        (
+            client_error("AccessDeniedException", "AdminCreateUser"),
+            CognitoInvitationDeliveryError,
+        ),
+        (
+            client_error("InternalErrorException", "AdminCreateUser", status=500),
+            CognitoResultAmbiguousError,
+        ),
+        (
+            EndpointConnectionError(endpoint_url="https://cognito.invalid"),
+            CognitoResultAmbiguousError,
+        ),
+    ],
+)
+def test_initial_invitation_classifies_deterministic_and_ambiguous_results(
+    error: Exception,
+    error_type: type[Exception],
+) -> None:
+    client = FakeCognitoClient()
+    client.create_error = error
+
+    with pytest.raises(error_type) as captured:
+        repository(client).admin_resend_invitation(user_id=USER_ID)
+
+    assert "sensitive provider detail" not in str(captured.value)
 
 
 @pytest.mark.parametrize(

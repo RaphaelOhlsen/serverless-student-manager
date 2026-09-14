@@ -92,3 +92,19 @@ class CognitoIdentityInvariantError(RuntimeError):
 
 class UserEmailAlreadyExistsError(RuntimeError):
     pass
+
+
+class CognitoInvitationDeliveryError(RuntimeError):
+    pass
+
+
+class InvitationDeliveryFailedError(RuntimeError):
+    pass
+
+
+class InvitationDeliveryUncertainError(RuntimeError):
+    pass
+
+
+class UserCreateReconciliationError(RuntimeError):
+    pass

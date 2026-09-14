@@ -7,12 +7,19 @@ from aws_lambda_powertools.event_handler import (
     content_types,
 )
 
-from users_api.dependencies import get_admin_user_service
+from users_api.dependencies import get_admin_user_service, get_create_user_service
 from users_api.errors import (
     AdminUserForbiddenError,
     AdminUserNotFoundError,
     AdminUserUnauthorizedError,
+    IdempotencyKeyReusedError,
     InvalidAdminUserListRequestError,
+    InvalidAdminUserWriteRequestError,
+    InvitationDeliveryFailedError,
+    InvitationDeliveryUncertainError,
+    OperationInProgressError,
+    UserCreateReconciliationError,
+    UserEmailAlreadyExistsError,
 )
 
 
@@ -41,10 +48,70 @@ class AdminUserServiceProtocol(Protocol):
     ) -> dict[str, object]: ...
 
 
+class CreateUserServiceProtocol(Protocol):
+    def create_user(
+        self,
+        *,
+        cognito_sub: str,
+        idempotency_key: object,
+        request_id: str | None,
+        body: str,
+    ) -> dict[str, object]: ...
+
+
 def register_admin_user_routes(
     app: APIGatewayHttpResolver,
     service: AdminUserServiceProtocol | None = None,
+    create_service: CreateUserServiceProtocol | None = None,
 ) -> None:
+    @app.post("/users")
+    def create_user() -> Response[dict[str, object]] | Response[dict[str, str]]:
+        try:
+            event = app.current_event.raw_event
+            cognito_sub, key, request_id, body = _parse_create_request(event)
+            active_service = (
+                create_service if create_service is not None else get_create_user_service()
+            )
+            result = active_service.create_user(
+                cognito_sub=cognito_sub,
+                idempotency_key=key,
+                request_id=request_id,
+                body=body,
+            )
+            return Response(
+                status_code=201,
+                content_type=content_types.APPLICATION_JSON,
+                body=result,
+            )
+        except InvalidAdminUserWriteRequestError:
+            return _error_response(400, "INVALID_REQUEST", "Invalid user creation request")
+        except AdminUserUnauthorizedError:
+            return _error_response(401, "UNAUTHORIZED", "Unauthorized")
+        except AdminUserForbiddenError:
+            return _error_response(403, "FORBIDDEN", "Forbidden")
+        except UserEmailAlreadyExistsError:
+            return _error_response(409, "EMAIL_ALREADY_EXISTS", "Email is already in use")
+        except IdempotencyKeyReusedError:
+            return _error_response(409, "IDEMPOTENCY_KEY_REUSED", "Idempotency key reused")
+        except OperationInProgressError:
+            return _error_response(409, "OPERATION_IN_PROGRESS", "Operation in progress")
+        except InvitationDeliveryFailedError:
+            return _error_response(
+                503,
+                "INVITATION_DELIVERY_FAILED",
+                "Invitation delivery failed",
+            )
+        except InvitationDeliveryUncertainError:
+            return _error_response(
+                503,
+                "INVITATION_DELIVERY_UNCERTAIN",
+                "Invitation delivery result is uncertain",
+            )
+        except UserCreateReconciliationError:
+            return _error_response(500, "INTERNAL_ERROR", "Unexpected internal error")
+        except Exception:
+            return _error_response(500, "INTERNAL_ERROR", "Unexpected internal error")
+
     @app.get("/users")
     def list_users() -> dict[str, object] | Response[dict[str, str]]:
         try:
@@ -127,6 +194,28 @@ def _validate_detail_request(event: dict[str, Any]) -> None:
         or event.get("isBase64Encoded") is True
     ):
         raise InvalidAdminUserListRequestError
+
+
+def _parse_create_request(event: dict[str, Any]) -> tuple[str, object, str | None, str]:
+    if event.get("rawQueryString") not in {None, ""} or event.get("isBase64Encoded") is True:
+        raise InvalidAdminUserWriteRequestError
+    body = event.get("body")
+    if not isinstance(body, str) or not body:
+        raise InvalidAdminUserWriteRequestError
+    headers = event.get("headers")
+    if not isinstance(headers, dict):
+        raise InvalidAdminUserWriteRequestError
+    normalized_headers = {str(name).lower(): value for name, value in headers.items()}
+    if "idempotency-key" not in normalized_headers:
+        raise InvalidAdminUserWriteRequestError
+    request_context = event.get("requestContext")
+    request_id = request_context.get("requestId") if isinstance(request_context, dict) else None
+    return (
+        _authenticated_sub(event),
+        normalized_headers["idempotency-key"],
+        request_id if isinstance(request_id, str) else None,
+        body,
+    )
 
 
 def _authenticated_sub(event: dict[str, Any]) -> str:

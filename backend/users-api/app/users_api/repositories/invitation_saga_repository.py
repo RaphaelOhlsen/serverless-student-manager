@@ -164,12 +164,19 @@ class InvitationSagaRepository:
             )
         validate_transition(operation=operation, current_state=current_state, next_state=next_state)
         now = self._now_seconds()
+        retrying_delivery = current_state in {
+            CreateSagaState.INVITATION_RETRYABLE.value,
+            ResendSagaState.RETRYABLE.value,
+        }
+        update_expression = (
+            "SET #state = :next, updatedAt = :updated, inProgressExpiration = :lease"
+        )
+        if retrying_delivery:
+            update_expression += " REMOVE errorCode, httpStatus"
         try:
             self._table.update_item(
                 Key={"id": record_id},
-                UpdateExpression=(
-                    "SET #state = :next, updatedAt = :updated, inProgressExpiration = :lease"
-                ),
+                UpdateExpression=update_expression,
                 ConditionExpression="#state = :current AND requestHash = :request_hash",
                 ExpressionAttributeNames={"#state": "state"},
                 ExpressionAttributeValues={
