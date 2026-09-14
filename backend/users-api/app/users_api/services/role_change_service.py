@@ -29,13 +29,49 @@ class UserRepositoryProtocol(Protocol):
 
     def get_active_admin_count(self) -> int | None: ...
 
-    def change_role(self, **kwargs: object) -> None: ...
+    def change_role(
+        self,
+        *,
+        user_id: str,
+        cognito_sub: str,
+        old_role: str,
+        new_role: str,
+        status: str,
+        version: int,
+        auth_version: int,
+        updated_at: str,
+        actor_id: str,
+        audit: dict[str, object],
+        idempotency_transition: dict[str, object],
+        client_request_token: str,
+    ) -> None: ...
 
-    def complete_role_change_noop(self, **kwargs: object) -> None: ...
+    def complete_role_change_noop(
+        self,
+        *,
+        user_id: str,
+        cognito_sub: str,
+        role: str,
+        status: str,
+        version: int,
+        auth_version: int,
+        idempotency_transition: dict[str, object],
+        client_request_token: str,
+    ) -> None: ...
 
 
 class SagaRepositoryProtocol(Protocol):
-    def claim_role_change(self, **kwargs: object) -> SagaClaim: ...
+    def claim_role_change(
+        self,
+        *,
+        environment: str,
+        actor_id: str,
+        idempotency_key: str,
+        user_id: str,
+        role: str,
+        expected_version: int,
+        request_id: str | None,
+    ) -> SagaClaim: ...
 
     def get(self, record_id: str) -> dict[str, object] | None: ...
 
