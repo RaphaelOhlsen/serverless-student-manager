@@ -90,9 +90,11 @@ Toda mutação funcional do PROFILE incrementa `version` exatamente uma vez.
 Mudanças que afetam acesso — `INVITED -> ACTIVE`, troca de role, desativação e
 reativação — também incrementam `authVersion`. Recovery incrementa somente nos
 casos definidos por sua ADR. List, Get, resend e no-op não incrementam nenhum dos
-dois valores. Este contrato refina a regra da ADR-027 que preservava
-`authVersion` na ativação: a implementação futura da ativação deve incrementá-lo
-na transição efetiva, junto das duas projeções.
+dois valores. O SRS já exige ambos os incrementos na ativação efetiva, mas a
+ADR-027 Approved e a capability live preservam `authVersion` e não materializam
+`version` nessa transição. `ACTIVATION_CONTRACT_DRIFT=OPEN`: esta proposta não
+altera a implementação de `/users/me/activation` nem considera o comportamento
+live conforme ao SRS; a correção/reconciliação exige milestone separado.
 
 Role, status e `authVersion` no PROFILE e em
 `COGNITO#<sub> / AUTHORIZATION` devem permanecer iguais. A autorização funcional
@@ -129,8 +131,9 @@ inválidos. Versão obsoleta retorna HTTP 409 `USER_VERSION_CONFLICT`. Restriç�
 de último Admin permanecem condições transacionais, nunca read-then-write.
 
 Uma nova request que já encontra o valor desejado e versão atual pode concluir
-como no-op 200, sem mudar versão, authVersion, timestamps ou auditoria de domínio.
-Lifecycle no-op ainda reconcilia o estado Cognito quando necessário. Divergência
+como no-op 200, sem mudar versão, authVersion, timestamps ou auditoria de domínio,
+somente quando o contrato da operação o permite. Deactivation não admite no-op
+para nova chave contra `INACTIVE`: retorna `409 USER_STATE_CONFLICT`. Divergência
 entre DynamoDB e Cognito segue caminho de reconciliação, não uma falsa mutação.
 
 ## Proteção do último Administrador
@@ -283,19 +286,59 @@ Idempotency-Key: <UUID>
 {"expectedVersion": 1}
 ```
 
-Self-deactivation é proibida. A saga é fail-closed:
+O body é um objeto estrito contendo somente `expectedVersion`, JSON integer >= 1.
+Para uma nova intenção, somente target `ACTIVE` é elegível: `INVITED` ou
+`INACTIVE` retorna `409 USER_STATE_CONFLICT`, e target inexistente retorna 404.
+Não existe lifecycle no-op de Deactivation para uma nova chave. A recuperação de
+uma operação parcial pertence somente à sua `Idempotency-Key` original.
 
-1. claim idempotente;
-2. uma transação DynamoDB muda PROFILE e AUTHORIZATION para `INACTIVE`, incrementa
-   version/authVersion, decrementa opcionalmente o contador sob condição, insere
-   `USER_DEACTIVATED / SUCCESS` exatamente uma vez e persiste a fase durável;
-3. `AdminUserGlobalSignOut`;
-4. `AdminDisableUser`;
-5. idempotência `COMPLETED` com HTTP 200 e User público.
+Antes de claim/replay, o backend autentica o ator, reconcilia sua autorização
+funcional, exige `ACTIVE ADMIN`, valida a request e proíbe self-deactivation.
+Uma self-deactivation não cria operação válida `COMPLETED`. Depois do claim,
+replay exato `COMPLETED` retorna o resultado terminal antes de nova leitura do
+target ou validação da versão. Nova operação lê consistentemente o target e
+valida versão, estado e projeções antes de qualquer mutação.
 
-Depois da etapa 2 a autorização funcional já está bloqueada. O HTTP não conclui
-antes de sign-out e disable conhecidos como concluídos. Timeout não é inferido
-pelo PROFILE; o retry retoma a fase durável e reconcilia Cognito.
+A saga fail-closed possui as fases duráveis mínimas:
+
+```text
+CLAIMED -> DOMAIN_COMMITTED -> SIGNOUT_COMPLETED -> DISABLE_COMPLETED -> COMPLETED
+```
+
+1. A mesma `TransactWriteItems` que muda PROFILE e AUTHORIZATION de `ACTIVE`
+   para `INACTIVE`, incrementa `version`/`authVersion`, decrementa opcionalmente
+   `ACTIVE_ADMIN_COUNT` sob condição e insere `USER_DEACTIVATED / SUCCESS`
+   exatamente uma vez também avança a operação para `DOMAIN_COMMITTED` por CAS.
+2. Após `DOMAIN_COMMITTED`, chama `AdminUserGlobalSignOut` com `Username=userId`;
+   sucesso conhecido é persistido como `SIGNOUT_COMPLETED`.
+3. Após `SIGNOUT_COMPLETED`, chama `AdminDisableUser` com `Username=userId`;
+   sucesso conhecido é persistido como `DISABLE_COMPLETED`.
+4. Após `DISABLE_COMPLETED`, persiste `COMPLETED` e a resposta terminal necessária
+   ao replay; somente então retorna HTTP 200 com o User público `INACTIVE` e a
+   nova `version`, sem expor `authVersion`.
+
+Depois de `DOMAIN_COMMITTED`, a autorização funcional já está bloqueada pelas
+projeções DynamoDB. Retry da mesma chave nunca repete PROFILE, AUTHORIZATION,
+contador ou auditoria de domínio, nem faz rollback ou reativação automática.
+Timeout não é inferido pelo PROFILE: a fase durável governa a retomada.
+
+Resultado ambíguo de transporte/timeout em `AdminUserGlobalSignOut` não prova
+sucesso. A mesma chave pode chamar sign-out novamente com semântica at-least-once;
+somente resposta bem-sucedida avança para `SIGNOUT_COMPLETED`. Resultado ambíguo
+de `AdminDisableUser` exige `AdminGetUser` read-only para reconciliar a mesma
+identidade (`Username=userId` e `sub` coerente com o domínio). `Enabled=false`
+confirma disable e permite `DISABLE_COMPLETED`; `Enabled=true` permite repetir
+disable pela mesma operação. User ausente, identidade incompatível ou leitura
+inconclusiva não são sucesso e exigem reconciliação operacional. Não se recria
+identidade nem se procura por e-mail.
+
+Se Cognito não puder ser concluído/reconciliado na execução após
+`DOMAIN_COMMITTED`, o User permanece funcionalmente `INACTIVE`, sem HTTP 200.
+Retorna HTTP 503 `USER_DEACTIVATION_RECONCILIATION_REQUIRED`, sanitizado, e a
+retomada usa a mesma chave. Uma nova chave que encontra target `INACTIVE`
+retorna `409 USER_STATE_CONFLICT`; não adota, reclassifica nem completa uma saga
+parcial anterior. O `COMPLETED` exato reproduz o resultado original sem novo
+sign-out, disable, audit ou decremento de contador.
 
 O PROFILE registra `deactivatedAt` e `deactivatedBy` conforme o SRS. A request não
 possui motivo, portanto não cria `deactivationReason`. A reativação remove esses
@@ -467,6 +510,7 @@ nomes específicos somente onde a distinção é funcional:
 | Self-deactivation | 403 | `FORBIDDEN` |
 | Remoção do último Admin ativo | 409 | `LAST_ACTIVE_ADMIN_CONFLICT` |
 | Estado alvo incompatível | 409 | `USER_STATE_CONFLICT` |
+| Deactivation após commit de domínio com Cognito ainda não reconciliado | 503 | `USER_DEACTIVATION_RECONCILIATION_REQUIRED` |
 | Entrega conclusivamente não realizada | 503 | `INVITATION_DELIVERY_FAILED` |
 | Resultado de entrega potencialmente aplicado | 503 | `INVITATION_DELIVERY_UNCERTAIN` |
 | Reconciliação necessária/falha técnica | 500 | `INTERNAL_ERROR` |

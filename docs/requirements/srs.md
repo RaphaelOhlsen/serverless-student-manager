@@ -508,6 +508,30 @@ The system shall prevent:
 - Self-deactivation through the application.
 - Deactivation of the last active Administrator.
 
+The contract is `POST /users/{userId}/deactivation` with a mandatory UUID
+`Idempotency-Key` and a strict body containing only JSON integer
+`expectedVersion >= 1`. A new operation is valid only for an `ACTIVE` target;
+`INVITED` or `INACTIVE` returns `409 USER_STATE_CONFLICT`, and a missing target
+returns 404. A new key against `INACTIVE` is not a no-op and cannot adopt a
+partial operation. Only the original key may resume that operation or replay its
+completed result.
+
+Before claiming idempotency, the backend authenticates and functionally
+authorizes an `ACTIVE ADMIN`, validates the request and forbids self-deactivation.
+An exact completed replay then precedes a new target/version read. The domain
+transaction atomically changes PROFILE and AUTHORIZATION to `INACTIVE`, advances
+`version` and `authVersion`, conditionally protects the last active Administrator,
+records one `USER_DEACTIVATED` event and persists `DOMAIN_COMMITTED`. The target
+is functionally blocked immediately after that commit. The same key resumes
+`AdminUserGlobalSignOut` and `AdminDisableUser` without repeating the domain
+transaction, audit or counter update. Ambiguous sign-out may be repeated by the
+same key; ambiguous disable is reconciled with `AdminGetUser` before repetition.
+Success returns `200` with the approved public User only after durable
+`COMPLETED`. If Cognito cannot be reconciled after domain commit, the target
+remains `INACTIVE` and the sanitized response is `503
+USER_DEACTIVATION_RECONCILIATION_REQUIRED`; there is no rollback or automatic
+reactivation.
+
 ### RF-USR-007 — Reactivate user
 
 Only Administrators shall reactivate an inactive user.
@@ -861,6 +885,12 @@ Effective activation, role change, deactivation and reactivation increment both
 the resource `version` and `authVersion`. Read operations, invitation resend and
 no-op do not increment either value. `DISABLED` is a Cognito technical state and
 is not a domain status.
+
+The approved SRS requirement for activation predates ADR-035. ADR-027 and the
+current live `/users/me/activation` capability preserve `authVersion` and do not
+materialize `version` on effective activation. This contract drift remains open
+for a separate reconciliation milestone; it does not weaken the SRS requirement
+or authorize an application change as part of User Deactivation.
 
 #### RN-USR-004 — Passwords
 
