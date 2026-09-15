@@ -128,3 +128,7 @@ class LastActiveAdminConflictError(RuntimeError):
 
 class UserRoleChangeReconciliationError(RuntimeError):
     pass
+
+
+class UserDeactivationReconciliationError(RuntimeError):
+    pass

@@ -16,6 +16,8 @@ from users_api.repositories.invitation_saga_repository import InvitationSagaRepo
 from users_api.services.invitation_saga import (
     CHANGE_USER_ROLE_OPERATION,
     CREATE_TRANSITIONS,
+    DEACTIVATE_USER_OPERATION,
+    DEACTIVATION_TRANSITIONS,
     IDEMPOTENCY_TTL_SECONDS,
     IN_PROGRESS_TTL_SECONDS,
     INVITATION_DELIVERY_FAILED,
@@ -25,9 +27,11 @@ from users_api.services.invitation_saga import (
     CognitoIdentityEvidence,
     CognitoReconciliationReason,
     CreateSagaState,
+    DeactivationState,
     ResendSagaState,
     RoleChangeState,
     create_request_hash,
+    deactivation_request_hash,
     replay_from_record,
     resend_request_hash,
     role_change_request_hash,
@@ -124,6 +128,80 @@ def repository(
         clock=clock,
         identifier_factory=identifier_factory or ids(),
     )
+
+
+def test_deactivation_claim_hash_ttl_replay_and_privacy() -> None:
+    table = FakeTable()
+    repo = repository(table)
+    kwargs = dict(
+        environment="dev",
+        actor_id="actor-1",
+        idempotency_key=KEY,
+        user_id="target-1",
+        expected_version=1,
+        request_id=None,
+    )
+    claim = repo.claim_deactivation(**kwargs)
+    record = claim.record
+    assert claim.created and record["operation"] == DEACTIVATE_USER_OPERATION
+    assert record["state"] == DeactivationState.CLAIMED.value
+    assert record["requestHash"] == deactivation_request_hash(
+        user_id="target-1", expected_version=1
+    )
+    assert record["expiration"] == NOW + IDEMPOTENCY_TTL_SECONDS
+    assert record["eventId"] == str(IDS[0]) and record["correlationId"] == str(IDS[1])
+    assert "email" not in repr(record).lower() and "fullName" not in repr(record)
+    with pytest.raises(OperationInProgressError):
+        repo.claim_deactivation(**kwargs)
+    with pytest.raises(IdempotencyKeyReusedError):
+        repo.claim_deactivation(**{**kwargs, "expected_version": 2})
+
+
+def test_deactivation_transition_cas_and_resume_after_domain_commit() -> None:
+    table = FakeTable()
+    repo = repository(table)
+    kwargs = dict(
+        environment="dev",
+        actor_id="actor-1",
+        idempotency_key=KEY,
+        user_id="target-1",
+        expected_version=1,
+        request_id=None,
+    )
+    claim = repo.claim_deactivation(**kwargs)
+    transition = repo.build_deactivation_domain_transition(
+        record=claim.record,
+        cognito_sub=str(IDS[2]),
+        role="OPERATOR",
+        resulting_version=2,
+    )["Update"]
+    assert transition["TableName"] == "idempotency"
+    assert transition["ConditionExpression"] == "#state = :current AND requestHash = :request_hash"
+    values = {
+        key: TypeDeserializer().deserialize(value)
+        for key, value in transition["ExpressionAttributeValues"].items()
+    }
+    assert values[":current"] == DeactivationState.CLAIMED.value
+    assert values[":next"] == DeactivationState.DOMAIN_COMMITTED.value
+    assert values[":version"] == 2
+    assert DEACTIVATION_TRANSITIONS[DeactivationState.CLAIMED] == {
+        DeactivationState.DOMAIN_COMMITTED
+    }
+    assert DEACTIVATION_TRANSITIONS[DeactivationState.COMPLETED] == set()
+    stored = table.items[str(claim.record["id"])]
+    stored.update(
+        state=DeactivationState.DOMAIN_COMMITTED.value,
+        cognitoSub=str(IDS[2]),
+        domainRole="OPERATOR",
+        resultingVersion=2,
+        inProgressExpiration=NOW * 1000,
+    )
+    resumed = repo.claim_deactivation(**kwargs)
+    assert (
+        resumed.created is False
+        and resumed.record["state"] == DeactivationState.DOMAIN_COMMITTED.value
+    )
+    assert resumed.record["eventId"] == claim.record["eventId"]
 
 
 def claim_create(repo: InvitationSagaRepository, *, email: str = "admin@example.test") -> Any:

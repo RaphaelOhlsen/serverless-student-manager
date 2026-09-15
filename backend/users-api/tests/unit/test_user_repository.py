@@ -40,6 +40,71 @@ def serialized(item: dict[str, object]) -> dict[str, object]:
     return {key: serializer.serialize(value) for key, value in item.items()}
 
 
+@pytest.mark.parametrize(("role", "expected_items"), [("OPERATOR", 4), ("ADMIN", 5)])
+def test_deactivation_transaction_shape_and_conditions(role: str, expected_items: int) -> None:
+    client = FakeClient()
+    repository = UserRepository(client, "users", "audit")
+    audit = {"PK": "RESOURCE#USER#user-1", "SK": "TS#now#EVENT#event-1"}
+    saga = {"Update": {"TableName": "idempotency"}}
+    repository.deactivate_user(
+        user_id="user-1",
+        cognito_sub="sub-1",
+        role=role,
+        version=1,
+        auth_version=1,
+        occurred_at="2026-09-14T14:00:00.000Z",
+        actor_id="actor-1",
+        audit=audit,
+        idempotency_transition=saga,
+        client_request_token="11111111-1111-4111-8111-111111111111",
+    )
+    assert client.transaction is not None
+    items = client.transaction["TransactItems"]
+    assert isinstance(items, list) and len(items) == expected_items
+    profile = items[0]["Update"]
+    authorization = items[1]["Update"]
+    assert profile["TableName"] == authorization["TableName"] == "users"
+    assert "#status = :inactive" in profile["UpdateExpression"]
+    assert "#version = :next_version" in profile["UpdateExpression"]
+    assert "deactivatedAt = :occurred_at" in profile["UpdateExpression"]
+    for expression in (profile["ConditionExpression"], authorization["ConditionExpression"]):
+        assert "userId = :user_id" in expression
+        assert "#role = :role" in expression
+        assert "#status = :active" in expression
+        assert "authVersion = :auth_version" in expression
+    assert "cognitoSub = :sub" in profile["ConditionExpression"]
+    assert "attribute_not_exists(#version)" in profile["ConditionExpression"]
+    if role == "ADMIN":
+        counter = items[2]["Update"]
+        assert counter["UpdateExpression"] == "ADD activeAdminCount :decrement"
+        assert "activeAdminCount > :one" in counter["ConditionExpression"]
+    assert items[-2]["Put"]["TableName"] == "audit"
+    assert items[-1] == saga
+
+
+def test_deactivation_version_condition_guards_legacy_and_versioned_profiles() -> None:
+    client = FakeClient()
+    repository = UserRepository(client, "users", "audit")
+    repository.deactivate_user(
+        user_id="user-1",
+        cognito_sub="sub-1",
+        role="OPERATOR",
+        version=2,
+        auth_version=1,
+        occurred_at="2026-09-14T14:00:00.000Z",
+        actor_id="actor-1",
+        audit={"PK": "a", "SK": "b"},
+        idempotency_transition={"Update": {}},
+        client_request_token="11111111-1111-4111-8111-111111111111",
+    )
+    assert client.transaction is not None
+    items = client.transaction["TransactItems"]
+    assert isinstance(items, list)
+    condition = items[0]["Update"]["ConditionExpression"]
+    assert "attribute_not_exists(#version)" not in condition
+    assert "#version = :version" in condition
+
+
 def activate(repository: UserRepository, client: FakeClient, role: str) -> dict[str, object]:
     repository.activate(
         user_id="user-1",
