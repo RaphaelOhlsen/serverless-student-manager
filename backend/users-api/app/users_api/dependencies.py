@@ -19,6 +19,7 @@ from users_api.services.activation_service import ActivationService
 from users_api.services.admin_user_service import AdminUserService
 from users_api.services.cognito_create_service import CognitoCreateService
 from users_api.services.create_user_service import CreateUserService
+from users_api.services.deactivation_service import DeactivationService
 from users_api.services.resend_invitation_service import ResendInvitationService
 from users_api.services.role_change_service import RoleChangeService
 from users_api.services.self_profile_service import SelfProfileService
@@ -149,6 +150,33 @@ def get_role_change_service() -> RoleChangeService:
     return RoleChangeService(
         users,
         saga,
+        environment=get_environment(),
+        audit_retention_days=get_audit_retention_days(),
+    )
+
+
+@lru_cache
+def get_deactivation_service() -> DeactivationService:
+    import time
+
+    dynamodb_client = boto3.client("dynamodb")
+    dynamodb_resource = boto3.resource("dynamodb")
+    saga_table: Any = dynamodb_resource.Table(get_idempotency_table_name())
+    users = UserRepository(
+        dynamodb_client,
+        get_users_table_name(),
+        get_audit_table_name(),
+    )
+    saga = InvitationSagaRepository(
+        saga_table,
+        get_idempotency_table_name(),
+        clock=time.time,
+    )
+    cognito = CognitoRepository(boto3.client("cognito-idp"), get_user_pool_id())
+    return DeactivationService(
+        users,
+        saga,
+        cognito,
         environment=get_environment(),
         audit_retention_days=get_audit_retention_days(),
     )
