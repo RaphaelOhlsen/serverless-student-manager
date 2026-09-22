@@ -914,8 +914,8 @@ run "plans_users_api_access" {
   command = plan
 
   assert {
-    condition     = length(data.aws_iam_policy_document.users_api.statement) == 12
-    error_message = "The users-api policy must contain exactly twelve semantic statements."
+    condition     = length(data.aws_iam_policy_document.users_api.statement) == 13
+    error_message = "The users-api policy must contain exactly thirteen semantic statements."
   }
 
   assert {
@@ -986,6 +986,31 @@ run "plans_users_api_access" {
   }
 
   assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.users_api.statement : statement.actions
+      if statement.sid == "SignOutAdministrativeUserForDeactivation"
+    ])) == toset(["cognito-idp:AdminUserGlobalSignOut"])
+    error_message = "User deactivation must grant only AdminUserGlobalSignOut."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.users_api.statement : statement.resources
+      if statement.sid == "SignOutAdministrativeUserForDeactivation"
+    ])) == toset([module.identity.user_pool_arn])
+    error_message = "User deactivation sign-out must target only the dev user pool."
+  }
+
+  assert {
+    condition = alltrue([
+      for statement in data.aws_iam_policy_document.users_api.statement :
+      !contains(statement.actions, "cognito-idp:AdminUserGlobalSignOut")
+      if statement.sid != "SignOutAdministrativeUserForDeactivation"
+    ])
+    error_message = "AdminUserGlobalSignOut must remain isolated to user deactivation."
+  }
+
+  assert {
     condition = length(setintersection(
       toset(flatten([
         for statement in data.aws_iam_policy_document.users_api.statement : statement.actions
@@ -995,7 +1020,6 @@ run "plans_users_api_access" {
         "cognito-idp:AdminResetUserPassword",
         "cognito-idp:AdminSetUserPassword",
         "cognito-idp:AdminUpdateUserAttributes",
-        "cognito-idp:AdminUserGlobalSignOut",
       ])
     )) == 0
     error_message = "The users-api policy must not grant unrelated Cognito administration actions."

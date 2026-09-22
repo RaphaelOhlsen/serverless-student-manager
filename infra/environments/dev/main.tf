@@ -271,6 +271,19 @@ data "aws_iam_policy_document" "users_api" {
   }
 
   statement {
+    sid    = "SignOutAdministrativeUserForDeactivation"
+    effect = "Allow"
+
+    actions = [
+      "cognito-idp:AdminUserGlobalSignOut",
+    ]
+
+    resources = [
+      module.identity.user_pool_arn,
+    ]
+  }
+
+  statement {
     sid    = "ReadAndTransactActivationState"
     effect = "Allow"
 
@@ -571,6 +584,12 @@ module "http_api" {
 
     change_user_role = {
       route_key          = "POST /users/{userId}/role-change"
+      integration_key    = "users"
+      authorization_type = "JWT"
+    }
+
+    deactivate_user = {
+      route_key          = "POST /users/{userId}/deactivation"
       integration_key    = "users"
       authorization_type = "JWT"
     }
