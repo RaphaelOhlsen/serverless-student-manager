@@ -7,6 +7,11 @@ from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 from users_api.errors import (
     AdminUserForbiddenError,
     AdminUserNotFoundError,
+    CognitoIdentityInvariantError,
+    CognitoResultAmbiguousError,
+    CognitoServiceError,
+    CognitoUserNotFoundError,
+    InvitationSagaConcurrentTransitionError,
     InvitationSagaInvariantError,
     LastActiveAdminConflictError,
     UserDeactivationReconciliationError,
@@ -66,7 +71,27 @@ class SagaRepositoryProtocol(Protocol):
         cognito_sub: str,
         role: str,
         resulting_version: int,
+        response: dict[str, object],
     ) -> dict[str, object]: ...
+
+    def transition(self, *, record: dict[str, object], next_state: str) -> None: ...
+
+    def mark_deactivation_disable_attempted(self, *, record: dict[str, object]) -> None: ...
+
+    def store_deactivation_completed(self, *, record: dict[str, object]) -> None: ...
+
+
+class CognitoRepositoryProtocol(Protocol):
+    def admin_user_global_sign_out(self, *, user_id: str) -> None: ...
+
+    def admin_disable_user(self, *, user_id: str) -> None: ...
+
+    def admin_get_deactivation_state(
+        self,
+        *,
+        user_id: str,
+        expected_cognito_sub: str,
+    ) -> object: ...
 
 
 @dataclass(frozen=True)
@@ -81,14 +106,34 @@ class DeactivationService:
         self,
         users: UserRepositoryProtocol,
         saga: SagaRepositoryProtocol,
+        cognito: CognitoRepositoryProtocol,
         *,
         environment: str,
         audit_retention_days: int,
     ) -> None:
         self._users = users
         self._saga = saga
+        self._cognito = cognito
         self._environment = environment
         self._audit_retention_days = audit_retention_days
+
+    def deactivate_user(
+        self,
+        *,
+        cognito_sub: str,
+        user_id: str,
+        idempotency_key: object,
+        request_id: str | None,
+        body: str,
+    ) -> dict[str, object]:
+        result = self.commit_domain(
+            cognito_sub=cognito_sub,
+            user_id=user_id,
+            idempotency_key=idempotency_key,
+            request_id=request_id,
+            body=body,
+        )
+        return self._resume(self._reload(result.record_id))
 
     def commit_domain(
         self,
@@ -130,6 +175,12 @@ class DeactivationService:
             cognito_sub=target.cognito_sub,
             role=target.role,
             resulting_version=version + 1,
+            response=self._public_user(
+                profile,
+                role=target.role,
+                version=version + 1,
+                updated_at=self._required_string(record, "startedAt"),
+            ),
         )
         try:
             self._users.deactivate_user(
@@ -157,6 +208,211 @@ class DeactivationService:
                 )
             raise UserDeactivationReconciliationError from None
         return DeactivationDomainResult(record_id, user_id, DeactivationState.DOMAIN_COMMITTED)
+
+    def _resume(self, record: dict[str, object]) -> dict[str, object]:
+        state = self._state(record)
+        if state == DeactivationState.COMPLETED:
+            return self._replay(record)
+        if state == DeactivationState.DOMAIN_COMMITTED:
+            record = self._complete_sign_out(record)
+            state = self._state(record)
+        if state == DeactivationState.SIGNOUT_COMPLETED:
+            record = self._complete_disable(record)
+            state = self._state(record)
+        if state == DeactivationState.DISABLE_COMPLETED:
+            record = self._complete_saga(record)
+            state = self._state(record)
+        if state != DeactivationState.COMPLETED:
+            raise UserDeactivationReconciliationError
+        return self._replay(record)
+
+    def _complete_sign_out(self, record: dict[str, object]) -> dict[str, object]:
+        try:
+            self._cognito.admin_user_global_sign_out(
+                user_id=self._required_string(record, "target")
+            )
+        except (
+            CognitoUserNotFoundError,
+            CognitoResultAmbiguousError,
+            CognitoServiceError,
+        ):
+            raise UserDeactivationReconciliationError from None
+        except Exception:
+            raise UserDeactivationReconciliationError from None
+        return self._advance(record, DeactivationState.SIGNOUT_COMPLETED)
+
+    def _complete_disable(self, record: dict[str, object]) -> dict[str, object]:
+        if self._disable_was_attempted(record):
+            return self._reconcile_disable(record, allow_retry=True)
+        try:
+            self._saga.mark_deactivation_disable_attempted(record=record)
+        except InvitationSagaConcurrentTransitionError:
+            record = self._reload(self._required_string(record, "id"))
+            if self._state(record) != DeactivationState.SIGNOUT_COMPLETED:
+                return record
+            if not self._disable_was_attempted(record):
+                raise UserDeactivationReconciliationError from None
+            return self._reconcile_disable(record, allow_retry=True)
+        except Exception:
+            raise UserDeactivationReconciliationError from None
+        marked = self._reload(self._required_string(record, "id"))
+        if self._state(marked) != DeactivationState.SIGNOUT_COMPLETED:
+            return marked
+        if not self._disable_was_attempted(marked):
+            raise UserDeactivationReconciliationError
+        return self._call_disable(marked, reconcile_ambiguous=True)
+
+    def _call_disable(
+        self,
+        record: dict[str, object],
+        *,
+        reconcile_ambiguous: bool,
+    ) -> dict[str, object]:
+        try:
+            self._cognito.admin_disable_user(user_id=self._required_string(record, "target"))
+        except CognitoResultAmbiguousError:
+            if reconcile_ambiguous:
+                return self._reconcile_disable(record, allow_retry=True)
+            raise UserDeactivationReconciliationError from None
+        except (
+            CognitoUserNotFoundError,
+            CognitoServiceError,
+        ):
+            raise UserDeactivationReconciliationError from None
+        except Exception:
+            raise UserDeactivationReconciliationError from None
+        return self._advance(record, DeactivationState.DISABLE_COMPLETED)
+
+    def _reconcile_disable(
+        self,
+        record: dict[str, object],
+        *,
+        allow_retry: bool,
+    ) -> dict[str, object]:
+        try:
+            state = self._cognito.admin_get_deactivation_state(
+                user_id=self._required_string(record, "target"),
+                expected_cognito_sub=self._required_string(record, "cognitoSub"),
+            )
+        except (
+            CognitoUserNotFoundError,
+            CognitoIdentityInvariantError,
+            CognitoResultAmbiguousError,
+            CognitoServiceError,
+        ):
+            raise UserDeactivationReconciliationError from None
+        except Exception:
+            raise UserDeactivationReconciliationError from None
+        enabled = getattr(state, "enabled", None)
+        user_id = getattr(state, "user_id", None)
+        cognito_sub = getattr(state, "cognito_sub", None)
+        if (
+            type(enabled) is not bool
+            or user_id != self._required_string(record, "target")
+            or cognito_sub != self._required_string(record, "cognitoSub")
+        ):
+            raise UserDeactivationReconciliationError
+        if not enabled:
+            return self._advance(record, DeactivationState.DISABLE_COMPLETED)
+        if not allow_retry:
+            raise UserDeactivationReconciliationError
+        return self._call_disable(record, reconcile_ambiguous=False)
+
+    def _complete_saga(self, record: dict[str, object]) -> dict[str, object]:
+        try:
+            self._saga.store_deactivation_completed(record=record)
+        except InvitationSagaConcurrentTransitionError:
+            pass
+        except Exception:
+            current = self._reload(self._required_string(record, "id"))
+            if self._state(current) != DeactivationState.COMPLETED:
+                raise UserDeactivationReconciliationError from None
+            return current
+        current = self._reload(self._required_string(record, "id"))
+        if self._state(current) != DeactivationState.COMPLETED:
+            raise UserDeactivationReconciliationError
+        return current
+
+    def _advance(
+        self,
+        record: dict[str, object],
+        next_state: DeactivationState,
+    ) -> dict[str, object]:
+        try:
+            self._saga.transition(record=record, next_state=next_state.value)
+        except InvitationSagaConcurrentTransitionError:
+            pass
+        except Exception:
+            current = self._reload(self._required_string(record, "id"))
+            if self._state_rank(self._state(current)) < self._state_rank(next_state):
+                raise UserDeactivationReconciliationError from None
+            return current
+        current = self._reload(self._required_string(record, "id"))
+        if self._state_rank(self._state(current)) < self._state_rank(next_state):
+            raise UserDeactivationReconciliationError
+        return current
+
+    def _replay(self, record: dict[str, object]) -> dict[str, object]:
+        if self._state(record) != DeactivationState.COMPLETED or record.get("httpStatus") != 200:
+            raise InvitationSagaInvariantError("deactivation replay is invalid")
+        response = {
+            "userId": self._required_string(record, "responseUserId"),
+            "fullName": self._required_string(record, "responseFullName"),
+            "email": self._required_string(record, "responseEmail"),
+            "role": self._required_string(record, "responseRole"),
+            "status": self._required_string(record, "responseStatus"),
+            "version": self._required_int(record, "responseVersion"),
+            "createdAt": self._required_string(record, "responseCreatedAt"),
+            "updatedAt": self._required_string(record, "responseUpdatedAt"),
+        }
+        if (
+            response["userId"] != record.get("target")
+            or response["role"] != record.get("domainRole")
+            or response["status"] != "INACTIVE"
+            or response["version"] != record.get("resultingVersion")
+        ):
+            raise InvitationSagaInvariantError("deactivation replay response is incompatible")
+        return response
+
+    @staticmethod
+    def _public_user(
+        profile: dict[str, object],
+        *,
+        role: str,
+        version: int,
+        updated_at: str,
+    ) -> dict[str, object]:
+        return {
+            "userId": DeactivationService._required_string(profile, "userId"),
+            "fullName": DeactivationService._required_string(profile, "fullName"),
+            "email": DeactivationService._required_string(profile, "email"),
+            "role": role,
+            "status": "INACTIVE",
+            "version": version,
+            "createdAt": DeactivationService._required_string(profile, "createdAt"),
+            "updatedAt": updated_at,
+        }
+
+    def _reload(self, record_id: str) -> dict[str, object]:
+        current = self._saga.get(record_id)
+        if current is None:
+            raise InvitationSagaInvariantError("deactivation saga disappeared")
+        return current
+
+    @staticmethod
+    def _disable_was_attempted(record: dict[str, object]) -> bool:
+        value = record.get("disableAttemptedAt")
+        return isinstance(value, str) and bool(value)
+
+    @staticmethod
+    def _state_rank(state: DeactivationState) -> int:
+        return {
+            DeactivationState.CLAIMED: 0,
+            DeactivationState.DOMAIN_COMMITTED: 1,
+            DeactivationState.SIGNOUT_COMPLETED: 2,
+            DeactivationState.DISABLE_COMPLETED: 3,
+            DeactivationState.COMPLETED: 4,
+        }[state]
 
     def _authorize(self, cognito_sub: str) -> str:
         try:
@@ -273,6 +529,13 @@ class DeactivationService:
     def _required_string(record: dict[str, object], name: str) -> str:
         value = record.get(name)
         if not isinstance(value, str) or not value:
+            raise InvitationSagaInvariantError("deactivation context is invalid")
+        return value
+
+    @staticmethod
+    def _required_int(record: dict[str, object], name: str) -> int:
+        value = record.get(name)
+        if type(value) is not int or value < 1:
             raise InvitationSagaInvariantError("deactivation context is invalid")
         return value
 

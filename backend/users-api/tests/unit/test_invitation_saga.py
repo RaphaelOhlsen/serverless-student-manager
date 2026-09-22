@@ -133,7 +133,7 @@ def repository(
 def test_deactivation_claim_hash_ttl_replay_and_privacy() -> None:
     table = FakeTable()
     repo = repository(table)
-    kwargs = dict(
+    kwargs: Any = dict(
         environment="dev",
         actor_id="actor-1",
         idempotency_key=KEY,
@@ -160,7 +160,7 @@ def test_deactivation_claim_hash_ttl_replay_and_privacy() -> None:
 def test_deactivation_transition_cas_and_resume_after_domain_commit() -> None:
     table = FakeTable()
     repo = repository(table)
-    kwargs = dict(
+    kwargs: Any = dict(
         environment="dev",
         actor_id="actor-1",
         idempotency_key=KEY,
@@ -169,11 +169,21 @@ def test_deactivation_transition_cas_and_resume_after_domain_commit() -> None:
         request_id=None,
     )
     claim = repo.claim_deactivation(**kwargs)
-    transition = repo.build_deactivation_domain_transition(
+    transition: Any = repo.build_deactivation_domain_transition(
         record=claim.record,
         cognito_sub=str(IDS[2]),
         role="OPERATOR",
         resulting_version=2,
+        response={
+            "userId": "target-1",
+            "fullName": "Synthetic User",
+            "email": "synthetic@example.test",
+            "role": "OPERATOR",
+            "status": "INACTIVE",
+            "version": 2,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "updatedAt": "2027-01-15T08:00:00.000Z",
+        },
     )["Update"]
     assert transition["TableName"] == "idempotency"
     assert transition["ConditionExpression"] == "#state = :current AND requestHash = :request_hash"
@@ -184,6 +194,8 @@ def test_deactivation_transition_cas_and_resume_after_domain_commit() -> None:
     assert values[":current"] == DeactivationState.CLAIMED.value
     assert values[":next"] == DeactivationState.DOMAIN_COMMITTED.value
     assert values[":version"] == 2
+    assert "Synthetic User" in values.values()
+    assert "synthetic@example.test" in values.values()
     assert DEACTIVATION_TRANSITIONS[DeactivationState.CLAIMED] == {
         DeactivationState.DOMAIN_COMMITTED
     }
@@ -194,6 +206,14 @@ def test_deactivation_transition_cas_and_resume_after_domain_commit() -> None:
         cognitoSub=str(IDS[2]),
         domainRole="OPERATOR",
         resultingVersion=2,
+        responseUserId="target-1",
+        responseFullName="Synthetic User",
+        responseEmail="synthetic@example.test",
+        responseRole="OPERATOR",
+        responseStatus="INACTIVE",
+        responseVersion=2,
+        responseCreatedAt="2026-01-01T00:00:00.000Z",
+        responseUpdatedAt="2027-01-15T08:00:00.000Z",
         inProgressExpiration=NOW * 1000,
     )
     resumed = repo.claim_deactivation(**kwargs)
@@ -202,6 +222,109 @@ def test_deactivation_transition_cas_and_resume_after_domain_commit() -> None:
         and resumed.record["state"] == DeactivationState.DOMAIN_COMMITTED.value
     )
     assert resumed.record["eventId"] == claim.record["eventId"]
+
+
+def test_deactivation_disable_marker_is_conditional_metadata_without_state_change() -> None:
+    table = FakeTable()
+    repo = repository(table)
+    claim = repo.claim_deactivation(
+        environment="dev",
+        actor_id="actor-1",
+        idempotency_key=KEY,
+        user_id="target-1",
+        expected_version=1,
+        request_id=None,
+    )
+    record = table.items[str(claim.record["id"])]
+    record.update(
+        state=DeactivationState.SIGNOUT_COMPLETED.value,
+        cognitoSub=str(IDS[2]),
+        domainRole="OPERATOR",
+        resultingVersion=2,
+        responseUserId="target-1",
+        responseFullName="Synthetic User",
+        responseEmail="synthetic@example.test",
+        responseRole="OPERATOR",
+        responseStatus="INACTIVE",
+        responseVersion=2,
+        responseCreatedAt="2026-01-01T00:00:00.000Z",
+        responseUpdatedAt="2027-01-15T08:00:00.000Z",
+    )
+
+    repo.mark_deactivation_disable_attempted(record=deepcopy(record))
+
+    update = table.updates[-1]
+    assert "attribute_not_exists(disableAttemptedAt)" in str(update["ConditionExpression"])
+    update_values = update["ExpressionAttributeValues"]
+    assert isinstance(update_values, dict)
+    assert update_values[":state"] == "SIGNOUT_COMPLETED"
+    assert ":next" not in update_values
+    assert record["state"] == DeactivationState.SIGNOUT_COMPLETED.value
+
+
+def test_deactivation_disable_marker_cas_reports_concurrent_owner() -> None:
+    table = FakeTable()
+    repo = repository(table)
+    claim = repo.claim_deactivation(
+        environment="dev",
+        actor_id="actor-1",
+        idempotency_key=KEY,
+        user_id="target-1",
+        expected_version=1,
+        request_id=None,
+    )
+    record = table.items[str(claim.record["id"])]
+    record.update(
+        state=DeactivationState.SIGNOUT_COMPLETED.value,
+        disableAttemptedAt="2027-01-15T08:00:00.000Z",
+    )
+    table.reject_update = True
+
+    with pytest.raises(InvitationSagaConcurrentTransitionError):
+        repo.mark_deactivation_disable_attempted(record=deepcopy(record))
+
+
+def test_deactivation_completion_stores_terminal_http_status() -> None:
+    table = FakeTable()
+    repo = repository(table)
+    claim = repo.claim_deactivation(
+        environment="dev",
+        actor_id="actor-1",
+        idempotency_key=KEY,
+        user_id="target-1",
+        expected_version=1,
+        request_id=None,
+    )
+    record = table.items[str(claim.record["id"])]
+    record.update(
+        state=DeactivationState.DISABLE_COMPLETED.value,
+        cognitoSub=str(IDS[2]),
+        domainRole="OPERATOR",
+        resultingVersion=2,
+        responseUserId="target-1",
+        responseFullName="Synthetic User",
+        responseEmail="synthetic@example.test",
+        responseRole="OPERATOR",
+        responseStatus="INACTIVE",
+        responseVersion=2,
+        responseCreatedAt="2026-01-01T00:00:00.000Z",
+        responseUpdatedAt="2027-01-15T08:00:00.000Z",
+    )
+
+    repo.store_deactivation_completed(record=deepcopy(record))
+
+    assert record["state"] == DeactivationState.COMPLETED.value
+    assert record["httpStatus"] == 200
+    replay = repo.claim_deactivation(
+        environment="dev",
+        actor_id="actor-1",
+        idempotency_key=KEY,
+        user_id="target-1",
+        expected_version=1,
+        request_id=None,
+    )
+    assert replay.created is False
+    assert replay.record["responseEmail"] == "synthetic@example.test"
 
 
 def claim_create(repo: InvitationSagaRepository, *, email: str = "admin@example.test") -> Any:

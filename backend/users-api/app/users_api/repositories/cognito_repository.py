@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, Never, Protocol
+from typing import Any, Never, Protocol, cast
 from uuid import UUID
 
 from botocore.exceptions import (  # type: ignore[import-untyped]
@@ -48,10 +48,21 @@ class CognitoClient(Protocol):
     def admin_disable_user(self, **kwargs: object) -> dict[str, Any]: ...
 
 
+class CognitoDeactivationClient(Protocol):
+    def admin_user_global_sign_out(self, **kwargs: object) -> dict[str, Any]: ...
+
+
 @dataclass(frozen=True)
 class ReconciledCognitoIdentity:
     user_id: str
     cognito_sub: str
+
+
+@dataclass(frozen=True)
+class ReconciledCognitoDeactivationState:
+    user_id: str
+    cognito_sub: str
+    enabled: bool
 
 
 class CognitoRepository:
@@ -107,6 +118,35 @@ class CognitoRepository:
 
     def admin_disable_user(self, *, user_id: str) -> None:
         self._compensation_call("disable", user_id=user_id)
+
+    def admin_user_global_sign_out(self, *, user_id: str) -> None:
+        client = cast(CognitoDeactivationClient, self._client)
+        try:
+            client.admin_user_global_sign_out(
+                UserPoolId=self._user_pool_id,
+                Username=user_id,
+            )
+        except Exception as error:
+            self._raise_read_error(error)
+
+    def admin_get_deactivation_state(
+        self,
+        *,
+        user_id: str,
+        expected_cognito_sub: str,
+    ) -> ReconciledCognitoDeactivationState:
+        try:
+            response = self._client.admin_get_user(
+                UserPoolId=self._user_pool_id,
+                Username=user_id,
+            )
+        except Exception as error:
+            self._raise_read_error(error)
+        return self._parse_deactivation_state(
+            response,
+            user_id=user_id,
+            expected_cognito_sub=expected_cognito_sub,
+        )
 
     def admin_resend_invitation(self, *, user_id: str) -> None:
         try:
@@ -183,6 +223,43 @@ class CognitoRepository:
         if relevant.get("email_verified") != "true":
             raise CognitoIdentityInvariantError("Cognito email is not verified")
         return ReconciledCognitoIdentity(user_id=user_id, cognito_sub=cognito_sub)
+
+    @staticmethod
+    def _parse_deactivation_state(
+        response: object,
+        *,
+        user_id: str,
+        expected_cognito_sub: str,
+    ) -> ReconciledCognitoDeactivationState:
+        if not isinstance(response, dict):
+            raise CognitoIdentityInvariantError("Cognito response is malformed")
+        if response.get("Username") != user_id:
+            raise CognitoIdentityInvariantError("Cognito username is incompatible")
+        enabled = response.get("Enabled")
+        if type(enabled) is not bool:
+            raise CognitoIdentityInvariantError("Cognito enabled state is malformed")
+        attributes = response.get("UserAttributes")
+        if not isinstance(attributes, list):
+            raise CognitoIdentityInvariantError("Cognito attributes are malformed")
+        subs: list[str] = []
+        for attribute in attributes:
+            if not isinstance(attribute, dict):
+                raise CognitoIdentityInvariantError("Cognito attribute is malformed")
+            name = attribute.get("Name")
+            value = attribute.get("Value")
+            if not isinstance(name, str) or not isinstance(value, str):
+                raise CognitoIdentityInvariantError("Cognito attribute is malformed")
+            if name == "sub":
+                subs.append(value)
+        if len(subs) != 1 or not CognitoRepository._is_canonical_uuid(subs[0]):
+            raise CognitoIdentityInvariantError("Cognito sub is missing, duplicated, or invalid")
+        if subs[0] != expected_cognito_sub:
+            raise CognitoIdentityInvariantError("Cognito sub is incompatible")
+        return ReconciledCognitoDeactivationState(
+            user_id=user_id,
+            cognito_sub=subs[0],
+            enabled=enabled,
+        )
 
     @staticmethod
     def _raise_create_error(error: Exception) -> Never:
