@@ -44,8 +44,11 @@ def serialized(item: dict[str, object]) -> dict[str, object]:
 def test_deactivation_transaction_shape_and_conditions(role: str, expected_items: int) -> None:
     client = FakeClient()
     repository = UserRepository(client, "users", "audit")
-    audit = {"PK": "RESOURCE#USER#user-1", "SK": "TS#now#EVENT#event-1"}
-    saga = {"Update": {"TableName": "idempotency"}}
+    audit: dict[str, object] = {
+        "PK": "RESOURCE#USER#user-1",
+        "SK": "TS#now#EVENT#event-1",
+    }
+    saga: dict[str, object] = {"Update": {"TableName": "idempotency"}}
     repository.deactivate_user(
         user_id="user-1",
         cognito_sub="sub-1",
