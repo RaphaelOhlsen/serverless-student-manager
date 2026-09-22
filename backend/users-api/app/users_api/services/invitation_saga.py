@@ -10,6 +10,7 @@ from users_api.validation import normalize_admin_user_email, normalize_admin_use
 CREATE_USER_OPERATION: Final = "create-user"
 RESEND_INVITATION_OPERATION: Final = "resend-user-invitation"
 CHANGE_USER_ROLE_OPERATION: Final = "change-user-role"
+DEACTIVATE_USER_OPERATION: Final = "deactivate-user"
 IDEMPOTENCY_TTL_SECONDS: Final = 24 * 60 * 60
 IN_PROGRESS_TTL_SECONDS: Final = 60
 INVITATION_DELIVERY_FAILED: Final = "INVITATION_DELIVERY_FAILED"
@@ -39,6 +40,14 @@ class ResendSagaState(StrEnum):
 
 class RoleChangeState(StrEnum):
     CLAIMED = "CLAIMED"
+    COMPLETED = "COMPLETED"
+
+
+class DeactivationState(StrEnum):
+    CLAIMED = "CLAIMED"
+    DOMAIN_COMMITTED = "DOMAIN_COMMITTED"
+    SIGNOUT_COMPLETED = "SIGNOUT_COMPLETED"
+    DISABLE_COMPLETED = "DISABLE_COMPLETED"
     COMPLETED = "COMPLETED"
 
 
@@ -112,6 +121,14 @@ RESEND_TRANSITIONS: Final = {
     ResendSagaState.RECONCILIATION_REQUIRED: set(),
 }
 
+DEACTIVATION_TRANSITIONS: Final = {
+    DeactivationState.CLAIMED: {DeactivationState.DOMAIN_COMMITTED},
+    DeactivationState.DOMAIN_COMMITTED: {DeactivationState.SIGNOUT_COMPLETED},
+    DeactivationState.SIGNOUT_COMPLETED: {DeactivationState.DISABLE_COMPLETED},
+    DeactivationState.DISABLE_COMPLETED: {DeactivationState.COMPLETED},
+    DeactivationState.COMPLETED: set(),
+}
+
 
 @dataclass(frozen=True)
 class SagaClaim:
@@ -168,6 +185,18 @@ def role_change_request_hash(*, user_id: str, role: str, expected_version: int) 
     )
 
 
+def deactivation_request_hash(*, user_id: str, expected_version: int) -> str:
+    if type(expected_version) is not int or expected_version < 1:
+        raise InvitationSagaInvariantError("invalid deactivate-user request hash")
+    return _hash(
+        {
+            "operation": DEACTIVATE_USER_OPERATION,
+            "targetUserId": user_id,
+            "expectedVersion": expected_version,
+        }
+    )
+
+
 def validate_transition(*, operation: str, current_state: str, next_state: str) -> None:
     try:
         if operation == CREATE_USER_OPERATION:
@@ -185,6 +214,12 @@ def validate_transition(*, operation: str, current_state: str, next_state: str) 
                 raise InvitationSagaInvariantError(
                     f"invalid invitation saga transition: {current_state} -> {next_state}"
                 )
+            return
+        if operation == DEACTIVATE_USER_OPERATION:
+            current = DeactivationState(current_state)
+            following = DeactivationState(next_state)
+            if following not in DEACTIVATION_TRANSITIONS[current]:
+                raise InvitationSagaInvariantError("invalid deactivation saga transition")
             return
         raise InvitationSagaInvariantError("unsupported invitation saga operation")
     except ValueError:

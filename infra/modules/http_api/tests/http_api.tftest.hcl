@@ -114,6 +114,11 @@ variables {
       integration_key    = "users"
       authorization_type = "JWT"
     }
+    deactivate_user = {
+      route_key          = "POST /users/{userId}/deactivation"
+      integration_key    = "users"
+      authorization_type = "JWT"
+    }
   }
 
   cors_allow_origins = [
@@ -629,7 +634,7 @@ run "wires_computed_references" {
 
   assert {
     condition = alltrue([
-      for route_name in ["create_user", "resend_user_invitation", "change_user_role"] :
+      for route_name in ["create_user", "resend_user_invitation", "change_user_role", "deactivate_user"] :
       aws_apigatewayv2_route.this[route_name].authorization_type == "JWT" &&
       aws_apigatewayv2_route.this[route_name].authorizer_id == aws_apigatewayv2_authorizer.jwt.id &&
       aws_apigatewayv2_route.this[route_name].target == "integrations/${aws_apigatewayv2_integration.lambda["users"].id}"
@@ -641,7 +646,8 @@ run "wires_computed_references" {
     condition = (
       aws_apigatewayv2_route.this["create_user"].route_key == "POST /users" &&
       aws_apigatewayv2_route.this["resend_user_invitation"].route_key == "POST /users/{userId}/invitation/resend" &&
-      aws_apigatewayv2_route.this["change_user_role"].route_key == "POST /users/{userId}/role-change"
+      aws_apigatewayv2_route.this["change_user_role"].route_key == "POST /users/{userId}/role-change" &&
+      aws_apigatewayv2_route.this["deactivate_user"].route_key == "POST /users/{userId}/deactivation"
     )
     error_message = "Administrative user write route keys are incorrect."
   }
@@ -649,11 +655,33 @@ run "wires_computed_references" {
   assert {
     condition = alltrue([
       for route in values(aws_apigatewayv2_route.this) : !contains([
-        "POST /users/{userId}/deactivation",
         "POST /users/{userId}/reactivation",
       ], route.route_key)
     ])
     error_message = "Unimplemented administrative user write routes must remain absent."
+  }
+
+  assert {
+    condition = (
+      aws_lambda_permission.api_gateway["users"].principal == "apigateway.amazonaws.com" &&
+      aws_lambda_permission.api_gateway["users"].action == "lambda:InvokeFunction" &&
+      aws_lambda_permission.api_gateway["users"].function_name == "users-api" &&
+      aws_lambda_permission.api_gateway["users"].qualifier == "live"
+    )
+    error_message = "The existing users Lambda permission must allow API Gateway to invoke the live alias."
+  }
+
+  assert {
+    condition = (
+      aws_lambda_permission.api_gateway["users"].source_arn
+      == "${aws_apigatewayv2_api.this.execution_arn}/*/*/*"
+    )
+    error_message = "The users Lambda permission must cover every route in this HTTP API."
+  }
+
+  assert {
+    condition     = length(aws_lambda_permission.api_gateway) == 2
+    error_message = "The deactivation route must reuse the existing Lambda permission."
   }
 
   assert {

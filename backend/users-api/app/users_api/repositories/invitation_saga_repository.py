@@ -15,6 +15,7 @@ from users_api.repositories.dynamodb_values import normalize_dynamodb_value
 from users_api.services.invitation_saga import (
     CHANGE_USER_ROLE_OPERATION,
     CREATE_USER_OPERATION,
+    DEACTIVATE_USER_OPERATION,
     IDEMPOTENCY_TTL_SECONDS,
     IN_PROGRESS_TTL_SECONDS,
     INVITATION_DELIVERY_FAILED,
@@ -23,10 +24,12 @@ from users_api.services.invitation_saga import (
     CognitoIdentityEvidence,
     CognitoReconciliationReason,
     CreateSagaState,
+    DeactivationState,
     ResendSagaState,
     RoleChangeState,
     SagaClaim,
     create_request_hash,
+    deactivation_request_hash,
     resend_request_hash,
     role_change_request_hash,
     validate_transition,
@@ -200,6 +203,181 @@ class InvitationSagaRepository:
             "inProgressExpiration": (now + IN_PROGRESS_TTL_SECONDS) * 1000,
         }
         return self._create_or_resolve(record)
+
+    def claim_deactivation(
+        self,
+        *,
+        environment: str,
+        actor_id: str,
+        idempotency_key: str,
+        user_id: str,
+        expected_version: int,
+        request_id: str | None,
+    ) -> SagaClaim:
+        validate_idempotency_key(idempotency_key)
+        record_id = self._record_id(
+            environment, actor_id, DEACTIVATE_USER_OPERATION, idempotency_key
+        )
+        attempted_context: dict[str, object] = {
+            "id": record_id,
+            "environment": environment,
+            "actorId": actor_id,
+            "operation": DEACTIVATE_USER_OPERATION,
+            "idempotencyKey": idempotency_key,
+            "requestHash": deactivation_request_hash(
+                user_id=user_id, expected_version=expected_version
+            ),
+        }
+        existing = self.get(record_id)
+        if existing is not None:
+            return self._resolve_existing(existing, attempted_context)
+        now = self._now_seconds()
+        timestamp = self._timestamp(now)
+        record: dict[str, object] = {
+            **attempted_context,
+            "target": user_id,
+            "state": DeactivationState.CLAIMED.value,
+            "expectedVersion": expected_version,
+            "eventId": str(self._identifier_factory()),
+            "correlationId": request_id or str(self._identifier_factory()),
+            "startedAt": timestamp,
+            "updatedAt": timestamp,
+            "expiration": now + IDEMPOTENCY_TTL_SECONDS,
+            "inProgressExpiration": (now + IN_PROGRESS_TTL_SECONDS) * 1000,
+        }
+        return self._create_or_resolve(record)
+
+    def build_deactivation_domain_transition(
+        self,
+        *,
+        record: dict[str, object],
+        cognito_sub: str,
+        role: str,
+        resulting_version: int,
+        response: dict[str, object],
+    ) -> dict[str, object]:
+        record_id, operation, current_state, request_hash = self._transition_context(record)
+        response_fields = self._deactivation_response_fields(response)
+        if (
+            operation != DEACTIVATE_USER_OPERATION
+            or current_state != DeactivationState.CLAIMED.value
+            or not self._is_canonical_uuid(cognito_sub)
+            or role not in {"ADMIN", "OPERATOR"}
+            or type(resulting_version) is not int
+            or resulting_version < 2
+            or response_fields["responseUserId"] != record.get("target")
+            or response_fields["responseRole"] != role
+            or response_fields["responseStatus"] != "INACTIVE"
+            or response_fields["responseVersion"] != resulting_version
+        ):
+            raise InvitationSagaInvariantError("invalid deactivation domain transition")
+        validate_transition(
+            operation=operation,
+            current_state=current_state,
+            next_state=DeactivationState.DOMAIN_COMMITTED.value,
+        )
+        started_at = record.get("startedAt")
+        if not isinstance(started_at, str) or not started_at:
+            raise InvitationSagaInvariantError("deactivation requires stable startedAt")
+        names = {"#state": "state"}
+        values: dict[str, object] = {
+            ":current": current_state,
+            ":next": DeactivationState.DOMAIN_COMMITTED.value,
+            ":request_hash": request_hash,
+            ":updated": started_at,
+            ":sub": cognito_sub,
+            ":role": role,
+            ":version": resulting_version,
+        }
+        assignments = [
+            "#state = :next",
+            "updatedAt = :updated",
+            "cognitoSub = :sub",
+            "domainRole = :role",
+            "resultingVersion = :version",
+        ]
+        for index, (name, value) in enumerate(response_fields.items()):
+            names[f"#response{index}"] = name
+            values[f":response{index}"] = value
+            assignments.append(f"#response{index} = :response{index}")
+        return {
+            "Update": {
+                "TableName": self._table_name,
+                "Key": self._serialize({"id": record_id}),
+                "UpdateExpression": f"SET {', '.join(assignments)}",
+                "ConditionExpression": "#state = :current AND requestHash = :request_hash",
+                "ExpressionAttributeNames": names,
+                "ExpressionAttributeValues": self._serialize(values),
+            }
+        }
+
+    def mark_deactivation_disable_attempted(self, *, record: dict[str, object]) -> None:
+        record_id, operation, current_state, request_hash = self._transition_context(record)
+        if (
+            operation != DEACTIVATE_USER_OPERATION
+            or current_state != DeactivationState.SIGNOUT_COMPLETED.value
+        ):
+            raise InvitationSagaInvariantError("disable attempt marker requires SIGNOUT_COMPLETED")
+        now = self._now_seconds()
+        attempted_at = self._timestamp(now)
+        try:
+            self._table.update_item(
+                Key={"id": record_id},
+                UpdateExpression=(
+                    "SET disableAttemptedAt = :attempted, updatedAt = :updated, "
+                    "inProgressExpiration = :lease"
+                ),
+                ConditionExpression=(
+                    "#state = :state AND requestHash = :request_hash "
+                    "AND attribute_not_exists(disableAttemptedAt)"
+                ),
+                ExpressionAttributeNames={"#state": "state"},
+                ExpressionAttributeValues={
+                    ":state": DeactivationState.SIGNOUT_COMPLETED.value,
+                    ":request_hash": request_hash,
+                    ":attempted": attempted_at,
+                    ":updated": attempted_at,
+                    ":lease": (now + IN_PROGRESS_TTL_SECONDS) * 1000,
+                },
+            )
+        except ClientError as error:
+            if self._error_code(error) == "ConditionalCheckFailedException":
+                current = self.get(record_id)
+                if (
+                    current is not None
+                    and current.get("requestHash") == request_hash
+                    and (
+                        (
+                            current.get("state") == DeactivationState.SIGNOUT_COMPLETED.value
+                            and isinstance(current.get("disableAttemptedAt"), str)
+                            and current["disableAttemptedAt"]
+                        )
+                        or current.get("state")
+                        in {
+                            DeactivationState.DISABLE_COMPLETED.value,
+                            DeactivationState.COMPLETED.value,
+                        }
+                    )
+                ):
+                    raise InvitationSagaConcurrentTransitionError(
+                        "disable attempt was marked concurrently"
+                    ) from None
+                raise InvitationSagaInvariantError("disable attempt marker CAS mismatch") from None
+            raise
+
+    def store_deactivation_completed(self, *, record: dict[str, object]) -> None:
+        _, operation, current_state, _ = self._transition_context(record)
+        if (
+            operation != DEACTIVATE_USER_OPERATION
+            or current_state != DeactivationState.DISABLE_COMPLETED.value
+        ):
+            raise InvitationSagaInvariantError("deactivation completion requires DISABLE_COMPLETED")
+        self._deactivation_response_fields(record)
+        self._state_update(
+            record=record,
+            next_state=DeactivationState.COMPLETED.value,
+            assignments={"httpStatus": 200},
+        )
 
     def transition(self, *, record: dict[str, object], next_state: str) -> None:
         record_id, operation, current_state, request_hash = self._transition_context(record)
@@ -680,6 +858,38 @@ class InvitationSagaRepository:
                 if state == RoleChangeState.COMPLETED.value and record.get("httpStatus") != 200:
                     raise InvitationSagaInvariantError("role change replay status is invalid")
                 return
+            if operation == DEACTIVATE_USER_OPERATION:
+                deactivation_state = DeactivationState(str(state))
+                expected_version = record.get("expectedVersion")
+                if type(expected_version) is not int or expected_version < 1:
+                    raise InvitationSagaInvariantError("deactivation claim is invalid")
+                if deactivation_state != DeactivationState.CLAIMED and (
+                    not InvitationSagaRepository._is_canonical_uuid(str(record.get("cognitoSub")))
+                    or record.get("domainRole") not in {"ADMIN", "OPERATOR"}
+                    or type(record.get("resultingVersion")) is not int
+                    or record["resultingVersion"] != expected_version + 1
+                ):
+                    raise InvitationSagaInvariantError("deactivation committed context is invalid")
+                if deactivation_state != DeactivationState.CLAIMED:
+                    InvitationSagaRepository._deactivation_response_fields(record)
+                disable_attempted_at = record.get("disableAttemptedAt")
+                if disable_attempted_at is not None and (
+                    deactivation_state
+                    not in {
+                        DeactivationState.SIGNOUT_COMPLETED,
+                        DeactivationState.DISABLE_COMPLETED,
+                        DeactivationState.COMPLETED,
+                    }
+                    or not isinstance(disable_attempted_at, str)
+                    or not disable_attempted_at
+                ):
+                    raise InvitationSagaInvariantError("deactivation disable marker is invalid")
+                if (
+                    deactivation_state == DeactivationState.COMPLETED
+                    and record.get("httpStatus") != 200
+                ):
+                    raise InvitationSagaInvariantError("deactivation replay status is invalid")
+                return
         except ValueError:
             raise InvitationSagaInvariantError("idempotency claim has unknown state") from None
         raise InvitationSagaInvariantError("idempotency claim has unsupported operation")
@@ -718,6 +928,32 @@ class InvitationSagaRepository:
             raise InvitationSagaInvariantError("invalid invitation saga transition context")
         record_id, operation, state, request_hash = cast(tuple[str, str, str, str], values)
         return record_id, operation, state, request_hash
+
+    @staticmethod
+    def _deactivation_response_fields(response: dict[str, object]) -> dict[str, object]:
+        fields = {
+            "responseUserId": response.get("responseUserId", response.get("userId")),
+            "responseFullName": response.get("responseFullName", response.get("fullName")),
+            "responseEmail": response.get("responseEmail", response.get("email")),
+            "responseRole": response.get("responseRole", response.get("role")),
+            "responseStatus": response.get("responseStatus", response.get("status")),
+            "responseVersion": response.get("responseVersion", response.get("version")),
+            "responseCreatedAt": response.get("responseCreatedAt", response.get("createdAt")),
+            "responseUpdatedAt": response.get("responseUpdatedAt", response.get("updatedAt")),
+        }
+        if (
+            not all(
+                isinstance(value, str) and value
+                for name, value in fields.items()
+                if name != "responseVersion"
+            )
+            or type(fields["responseVersion"]) is not int
+            or fields["responseVersion"] < 1
+            or fields["responseRole"] not in {"ADMIN", "OPERATOR"}
+            or fields["responseStatus"] != "INACTIVE"
+        ):
+            raise InvitationSagaInvariantError("deactivation response is invalid")
+        return fields
 
     @staticmethod
     def _record_id(environment: str, actor_id: str, operation: str, key: str) -> str:
