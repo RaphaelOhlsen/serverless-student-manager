@@ -4,16 +4,27 @@ VENV_BIN := $(VENV)/bin
 NPM ?= npm
 TERRAFORM ?= terraform
 TFLINT ?= tflint
+SHELLCHECK ?= shellcheck
 TERRAFORM_DIR := infra/bootstrap
 
 PYTHON_DIRS := backend tools
+HARNESS_SCRIPTS := scripts/agentic-preflight.sh scripts/agentic-scope-check.sh \
+	scripts/agentic-staging-check.sh scripts/lib/agentic-common.sh
 
-.PHONY: agentic-preflight setup format format-check lint typecheck test coverage security check \
+.PHONY: agentic-preflight harness-test harness-shellcheck harness-check setup format format-check lint typecheck test coverage security check \
 	terraform-init terraform-format terraform-format-check terraform-validate \
 	terraform-test tflint-init terraform-lint terraform-check
 
 agentic-preflight:
 	./scripts/agentic-preflight.sh
+
+harness-test:
+	$(PYTHON) -m unittest discover -s scripts/tests -p 'test_*.py'
+
+harness-shellcheck:
+	$(SHELLCHECK) -x $(HARNESS_SCRIPTS)
+
+harness-check: harness-test harness-shellcheck
 
 setup:
 	@$(PYTHON) -c 'import sys; assert sys.version_info[:2] == (3, 13), "Python 3.13 is required"'

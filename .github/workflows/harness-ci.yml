@@ -1,0 +1,44 @@
+name: Harness CI
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/harness-ci.yml"
+      - "Makefile"
+      - "scripts/agentic-*.sh"
+      - "scripts/lib/agentic-common.sh"
+      - "scripts/tests/**"
+      - "AGENTS.md"
+      - "docs/decisions/adr/adr-031-agentic-development-harness.md"
+      - "docs/operations/agentic-development-harness-local.md"
+      - "docs/operations/agentic-development-harness-v1.md"
+      - "docs/MANIFEST.md"
+
+permissions:
+  contents: read
+
+jobs:
+  harness:
+    name: Technical Guards
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Test Harness scripts
+        run: make harness-test PYTHON=python3
+
+      - name: Check Harness shell scripts
+        run: |
+          docker run --rm --network=none \
+            --volume "$GITHUB_WORKSPACE:/mnt:ro" \
+            --workdir /mnt \
+            koalaman/shellcheck-alpine@sha256:9955be09ea7f0dbf7ae942ac1f2094355bb30d96fffba0ec09f5432207544002 \
+            shellcheck -x \
+            scripts/agentic-preflight.sh \
+            scripts/agentic-scope-check.sh \
+            scripts/agentic-staging-check.sh \
+            scripts/lib/agentic-common.sh
