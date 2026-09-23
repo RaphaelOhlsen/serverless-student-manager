@@ -11,6 +11,7 @@ CREATE_USER_OPERATION: Final = "create-user"
 RESEND_INVITATION_OPERATION: Final = "resend-user-invitation"
 CHANGE_USER_ROLE_OPERATION: Final = "change-user-role"
 DEACTIVATE_USER_OPERATION: Final = "deactivate-user"
+REACTIVATE_USER_OPERATION: Final = "reactivate-user"
 IDEMPOTENCY_TTL_SECONDS: Final = 24 * 60 * 60
 IN_PROGRESS_TTL_SECONDS: Final = 60
 INVITATION_DELIVERY_FAILED: Final = "INVITATION_DELIVERY_FAILED"
@@ -48,6 +49,14 @@ class DeactivationState(StrEnum):
     DOMAIN_COMMITTED = "DOMAIN_COMMITTED"
     SIGNOUT_COMPLETED = "SIGNOUT_COMPLETED"
     DISABLE_COMPLETED = "DISABLE_COMPLETED"
+    COMPLETED = "COMPLETED"
+
+
+class ReactivationState(StrEnum):
+    CLAIMED = "CLAIMED"
+    ENABLE_DISPATCHING = "ENABLE_DISPATCHING"
+    COGNITO_ENABLED = "COGNITO_ENABLED"
+    RECONCILIATION_REQUIRED = "RECONCILIATION_REQUIRED"
     COMPLETED = "COMPLETED"
 
 
@@ -129,6 +138,26 @@ DEACTIVATION_TRANSITIONS: Final = {
     DeactivationState.COMPLETED: set(),
 }
 
+REACTIVATION_TRANSITIONS: Final = {
+    ReactivationState.CLAIMED: {
+        ReactivationState.ENABLE_DISPATCHING,
+        ReactivationState.RECONCILIATION_REQUIRED,
+    },
+    ReactivationState.ENABLE_DISPATCHING: {
+        ReactivationState.COGNITO_ENABLED,
+        ReactivationState.RECONCILIATION_REQUIRED,
+    },
+    ReactivationState.COGNITO_ENABLED: {
+        ReactivationState.COMPLETED,
+        ReactivationState.RECONCILIATION_REQUIRED,
+    },
+    ReactivationState.RECONCILIATION_REQUIRED: {
+        ReactivationState.ENABLE_DISPATCHING,
+        ReactivationState.COGNITO_ENABLED,
+    },
+    ReactivationState.COMPLETED: set(),
+}
+
 
 @dataclass(frozen=True)
 class SagaClaim:
@@ -197,6 +226,18 @@ def deactivation_request_hash(*, user_id: str, expected_version: int) -> str:
     )
 
 
+def reactivation_request_hash(*, user_id: str, expected_version: int) -> str:
+    if type(expected_version) is not int or expected_version < 1:
+        raise InvitationSagaInvariantError("invalid reactivate-user request hash")
+    return _hash(
+        {
+            "operation": REACTIVATE_USER_OPERATION,
+            "targetUserId": user_id,
+            "expectedVersion": expected_version,
+        }
+    )
+
+
 def validate_transition(*, operation: str, current_state: str, next_state: str) -> None:
     try:
         if operation == CREATE_USER_OPERATION:
@@ -220,6 +261,12 @@ def validate_transition(*, operation: str, current_state: str, next_state: str) 
             following = DeactivationState(next_state)
             if following not in DEACTIVATION_TRANSITIONS[current]:
                 raise InvitationSagaInvariantError("invalid deactivation saga transition")
+            return
+        if operation == REACTIVATE_USER_OPERATION:
+            reactivation_current = ReactivationState(current_state)
+            reactivation_next = ReactivationState(next_state)
+            if reactivation_next not in REACTIVATION_TRANSITIONS[reactivation_current]:
+                raise InvitationSagaInvariantError("invalid reactivation saga transition")
             return
         raise InvitationSagaInvariantError("unsupported invitation saga operation")
     except ValueError:

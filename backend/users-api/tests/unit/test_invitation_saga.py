@@ -22,16 +22,20 @@ from users_api.services.invitation_saga import (
     IN_PROGRESS_TTL_SECONDS,
     INVITATION_DELIVERY_FAILED,
     INVITATION_DELIVERY_UNCERTAIN,
+    REACTIVATE_USER_OPERATION,
+    REACTIVATION_TRANSITIONS,
     RESEND_INVITATION_OPERATION,
     RESEND_TRANSITIONS,
     CognitoIdentityEvidence,
     CognitoReconciliationReason,
     CreateSagaState,
     DeactivationState,
+    ReactivationState,
     ResendSagaState,
     RoleChangeState,
     create_request_hash,
     deactivation_request_hash,
+    reactivation_request_hash,
     replay_from_record,
     resend_request_hash,
     role_change_request_hash,
@@ -94,6 +98,9 @@ class FakeTable:
             and isinstance(now, int)
             and expiration > now
         ):
+            raise conditional_error()
+        current_lease = values.get(":current_lease")
+        if current_lease is not None and expiration != current_lease:
             raise conditional_error()
         if ":next" in values:
             item["state"] = values[":next"]
@@ -327,6 +334,244 @@ def test_deactivation_completion_stores_terminal_http_status() -> None:
     assert replay.record["responseEmail"] == "synthetic@example.test"
 
 
+def test_reactivation_claim_namespace_hash_lease_stable_ids_and_privacy() -> None:
+    table = FakeTable()
+    repo = repository(table)
+    kwargs: Any = dict(
+        environment="dev",
+        actor_id="actor-1",
+        idempotency_key=KEY,
+        user_id="target-1",
+        expected_version=3,
+        request_id=None,
+    )
+
+    claim = repo.claim_reactivation(**kwargs)
+    record = claim.record
+
+    assert claim.created and record["operation"] == REACTIVATE_USER_OPERATION
+    assert record["state"] == ReactivationState.CLAIMED.value
+    assert record["requestHash"] == reactivation_request_hash(
+        user_id="target-1", expected_version=3
+    )
+    assert record["eventId"] == str(IDS[0])
+    assert record["correlationId"] == str(IDS[1])
+    assert record["startedAt"] == "2027-01-15T08:00:00.000Z"
+    assert record["expiration"] == NOW + IDEMPOTENCY_TTL_SECONDS
+    assert record["inProgressExpiration"] == (NOW + IN_PROGRESS_TTL_SECONDS) * 1000
+    assert "email" not in repr(record).lower() and "fullName" not in repr(record)
+
+    with pytest.raises(OperationInProgressError):
+        repo.claim_reactivation(**kwargs)
+    with pytest.raises(IdempotencyKeyReusedError):
+        repo.claim_reactivation(**{**kwargs, "expected_version": 4})
+
+
+def test_reactivation_marker_is_cas_protected_and_required_before_enable() -> None:
+    table = FakeTable()
+    repo = repository(table)
+    claim = repo.claim_reactivation(
+        environment="dev",
+        actor_id="actor-1",
+        idempotency_key=KEY,
+        user_id="target-1",
+        expected_version=3,
+        request_id="request-1",
+    )
+
+    with pytest.raises(InvitationSagaInvariantError, match="durable enable marker"):
+        repo.transition(
+            record=claim.record,
+            next_state=ReactivationState.ENABLE_DISPATCHING.value,
+        )
+
+    repo.mark_reactivation_enable_dispatching(
+        record=claim.record,
+        role="ADMIN",
+        cognito_sub=str(IDS[2]),
+        observed_version=3,
+        observed_auth_version=7,
+    )
+
+    stored = repo.get(str(claim.record["id"]))
+    assert stored is not None
+    assert stored["state"] == ReactivationState.ENABLE_DISPATCHING.value
+    assert stored["domainRole"] == "ADMIN"
+    assert stored["cognitoSub"] == str(IDS[2])
+    assert stored["observedVersion"] == 3
+    assert stored["observedAuthVersion"] == 7
+    assert stored["enableAttemptedAt"] == "2027-01-15T08:00:00.000Z"
+    assert table.updates[-1]["ConditionExpression"] == (
+        "#state = :current AND requestHash = :request_hash "
+        "AND inProgressExpiration = :current_lease"
+    )
+
+    repo.transition(record=stored, next_state=ReactivationState.COGNITO_ENABLED.value)
+    enabled = repo.get(str(claim.record["id"]))
+    assert enabled is not None
+    with pytest.raises(InvitationSagaInvariantError, match="atomic domain transaction"):
+        repo.transition(record=enabled, next_state=ReactivationState.COMPLETED.value)
+
+
+def test_reactivation_reconciliation_resumes_under_lease_with_stable_context() -> None:
+    table = FakeTable()
+    repo = repository(table)
+    kwargs: Any = dict(
+        environment="dev",
+        actor_id="actor-1",
+        idempotency_key=KEY,
+        user_id="target-1",
+        expected_version=3,
+        request_id="request-1",
+    )
+    claim = repo.claim_reactivation(**kwargs)
+    repo.mark_reactivation_enable_dispatching(
+        record=claim.record,
+        role="OPERATOR",
+        cognito_sub=str(IDS[2]),
+        observed_version=3,
+        observed_auth_version=7,
+    )
+    dispatching = repo.get(str(claim.record["id"]))
+    assert dispatching is not None
+    marker = dispatching["enableAttemptedAt"]
+    repo.transition(
+        record=dispatching,
+        next_state=ReactivationState.RECONCILIATION_REQUIRED.value,
+    )
+
+    with pytest.raises(OperationInProgressError):
+        repo.claim_reactivation(**kwargs)
+
+    resumed = repository(table, clock=lambda: NOW + IN_PROGRESS_TTL_SECONDS + 1).claim_reactivation(
+        **kwargs
+    )
+    assert resumed.created is False
+    assert resumed.record["state"] == ReactivationState.RECONCILIATION_REQUIRED.value
+    assert resumed.record["eventId"] == claim.record["eventId"]
+    assert resumed.record["correlationId"] == claim.record["correlationId"]
+    assert resumed.record["startedAt"] == claim.record["startedAt"]
+
+    repository(
+        table, clock=lambda: NOW + IN_PROGRESS_TTL_SECONDS + 1
+    ).mark_reactivation_enable_dispatching(
+        record=resumed.record,
+        role="OPERATOR",
+        cognito_sub=str(IDS[2]),
+        observed_version=3,
+        observed_auth_version=7,
+    )
+    redispatched = repo.get(str(claim.record["id"]))
+    assert redispatched is not None
+    assert redispatched["state"] == ReactivationState.ENABLE_DISPATCHING.value
+    assert redispatched["enableAttemptedAt"] == marker
+
+
+def test_reactivation_reconciliation_without_marker_cannot_adopt_enable() -> None:
+    table = FakeTable()
+    repo = repository(table)
+    claim = repo.claim_reactivation(
+        environment="dev",
+        actor_id="actor-1",
+        idempotency_key=KEY,
+        user_id="target-1",
+        expected_version=3,
+        request_id=None,
+    )
+    repo.transition(
+        record=claim.record,
+        next_state=ReactivationState.RECONCILIATION_REQUIRED.value,
+    )
+    record = repo.get(str(claim.record["id"]))
+    assert record is not None
+
+    with pytest.raises(InvitationSagaInvariantError, match="enable context"):
+        repo.transition(record=record, next_state=ReactivationState.COGNITO_ENABLED.value)
+
+
+def test_reactivation_transition_rejects_worker_with_stale_lease() -> None:
+    table = FakeTable()
+    first = repository(table)
+    kwargs: Any = dict(
+        environment="dev",
+        actor_id="actor-1",
+        idempotency_key=KEY,
+        user_id="target-1",
+        expected_version=3,
+        request_id=None,
+    )
+    stale = first.claim_reactivation(**kwargs).record
+    resumed_repo = repository(table, clock=lambda: NOW + IN_PROGRESS_TTL_SECONDS + 1)
+    resumed = resumed_repo.claim_reactivation(**kwargs).record
+
+    with pytest.raises(InvitationSagaInvariantError, match="CAS mismatch"):
+        first.mark_reactivation_enable_dispatching(
+            record=stale,
+            role="ADMIN",
+            cognito_sub=str(IDS[2]),
+            observed_version=3,
+            observed_auth_version=7,
+        )
+
+    current = first.get(str(stale["id"]))
+    assert current is not None
+    assert current["state"] == ReactivationState.CLAIMED.value
+    assert "enableAttemptedAt" not in current
+
+    resumed_repo.mark_reactivation_enable_dispatching(
+        record=resumed,
+        role="ADMIN",
+        cognito_sub=str(IDS[2]),
+        observed_version=3,
+        observed_auth_version=7,
+    )
+    current = first.get(str(stale["id"]))
+    assert current is not None
+    assert current["state"] == ReactivationState.ENABLE_DISPATCHING.value
+
+
+def test_reactivation_completed_record_is_terminal_and_replayable() -> None:
+    table = FakeTable()
+    repo = repository(table)
+    kwargs: Any = dict(
+        environment="dev",
+        actor_id="actor-1",
+        idempotency_key=KEY,
+        user_id="target-1",
+        expected_version=3,
+        request_id="request-1",
+    )
+    claim = repo.claim_reactivation(**kwargs)
+    repo.mark_reactivation_enable_dispatching(
+        record=claim.record,
+        role="ADMIN",
+        cognito_sub=str(IDS[2]),
+        observed_version=3,
+        observed_auth_version=7,
+    )
+    stored = table.items[str(claim.record["id"])]
+    stored.update(state=ReactivationState.COMPLETED.value, httpStatus=200)
+
+    replay = repo.claim_reactivation(**kwargs)
+
+    assert replay.created is False
+    assert replay.record["state"] == ReactivationState.COMPLETED.value
+    assert replay.record["eventId"] == claim.record["eventId"]
+    assert replay.record["correlationId"] == claim.record["correlationId"]
+    with pytest.raises(InvitationSagaInvariantError, match="reactivation saga transition"):
+        validate_transition(
+            operation=REACTIVATE_USER_OPERATION,
+            current_state=ReactivationState.COMPLETED.value,
+            next_state=ReactivationState.CLAIMED.value,
+        )
+
+
+@pytest.mark.parametrize("value", [True, "1", 1.0, None, 0, -1])
+def test_reactivation_hash_rejects_invalid_expected_version(value: object) -> None:
+    with pytest.raises(InvitationSagaInvariantError, match="reactivate-user request hash"):
+        reactivation_request_hash(user_id="target-1", expected_version=value)  # type: ignore[arg-type]
+
+
 def claim_create(repo: InvitationSagaRepository, *, email: str = "admin@example.test") -> Any:
     return repo.claim_create(
         environment="dev",
@@ -449,6 +694,19 @@ def test_all_declared_saga_transitions_are_valid() -> None:
                 current_state=resend_current.value,
                 next_state=resend_next.value,
             )
+    for current, next_states in REACTIVATION_TRANSITIONS.items():
+        for next_state in next_states:
+            validate_transition(
+                operation=REACTIVATE_USER_OPERATION,
+                current_state=current.value,
+                next_state=next_state.value,
+            )
+    with pytest.raises(InvitationSagaInvariantError):
+        validate_transition(
+            operation=REACTIVATE_USER_OPERATION,
+            current_state=ReactivationState.COMPLETED.value,
+            next_state=ReactivationState.CLAIMED.value,
+        )
 
 
 def test_completed_concurrent_cas_is_recoverable_but_not_silent() -> None:

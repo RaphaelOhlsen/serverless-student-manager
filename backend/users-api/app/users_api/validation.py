@@ -48,6 +48,14 @@ class DeactivationInput:
         return {"expectedVersion": self.expected_version}
 
 
+@dataclass(frozen=True)
+class ReactivationInput:
+    expected_version: int
+
+    def canonical_payload(self) -> dict[str, int]:
+        return {"expectedVersion": self.expected_version}
+
+
 def parse_create_user_body(body: str) -> CreateUserInput:
     value = _parse_strict_object(body)
     if set(value) != {"fullName", "email", "role"}:
@@ -100,6 +108,17 @@ def parse_deactivation_body(body: str) -> DeactivationInput:
     ):
         raise InvalidAdminUserWriteRequestError
     return DeactivationInput(expected_version=value["expectedVersion"])
+
+
+def parse_reactivation_body(body: str) -> ReactivationInput:
+    value = _parse_strict_object(body)
+    if (
+        set(value) != {"expectedVersion"}
+        or type(value["expectedVersion"]) is not int
+        or value["expectedVersion"] < 1
+    ):
+        raise InvalidAdminUserWriteRequestError
+    return ReactivationInput(expected_version=value["expectedVersion"])
 
 
 def validate_idempotency_key(value: object) -> str:
