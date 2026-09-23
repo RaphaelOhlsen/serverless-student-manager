@@ -2,6 +2,8 @@
 
 # Shared, read-only helpers for the Agentic Development Harness guards.
 
+# Referenced by each guard after this shared library is sourced.
+# shellcheck disable=SC2034
 AGENTIC_SCHEMA_VERSION=1
 AGENTIC_CHECKPOINTS=(
   "prompt_inicio_dia.txt"
@@ -87,7 +89,7 @@ agentic_json_quote() {
     character="${value:index:1}"
     case "$character" in
       '"') printf '\\"' ;;
-      '\\') printf '\\\\' ;;
+      \\) printf '%s' $'\\\\' ;;
       $'\b') printf '\\b' ;;
       $'\f') printf '\\f' ;;
       $'\n') printf '\\n' ;;
@@ -166,6 +168,8 @@ agentic_capture_nul_array() {
 agentic_capture_lines_array() {
   local array_name="$1"
   shift
+  # ShellCheck cannot infer the caller-owned array behind this nameref.
+  # shellcheck disable=SC2178
   local -n target="$array_name"
   local temporary
 
@@ -175,6 +179,8 @@ agentic_capture_lines_array() {
     return 1
   fi
   target=()
+  # The nameref assignment updates the caller-owned array.
+  # shellcheck disable=SC2034
   mapfile -t target <"$temporary"
   rm -f -- "$temporary"
 }
@@ -201,6 +207,8 @@ agentic_sort_unique_array() {
 agentic_array_contains() {
   local array_name="$1"
   local expected="$2"
+  # ShellCheck cannot infer the caller-owned array behind this nameref.
+  # shellcheck disable=SC2178
   local -n values="$array_name"
   local value
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck source-path=SCRIPTDIR
 
 set -uo pipefail
 
@@ -138,7 +139,7 @@ if [[ -n "$repository_root" ]]; then
     agentic_add_error "head_unavailable"
     head_sha=""
   fi
-  origin_main="$(git rev-parse --verify refs/remotes/origin/main^{commit} 2>/dev/null || true)"
+  origin_main="$(git rev-parse --verify 'refs/remotes/origin/main^{commit}' 2>/dev/null || true)"
 
   if [[ -z "$branch" ]]; then
     agentic_add_error "detached_head"

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck source-path=SCRIPTDIR
 
 set -uo pipefail
 
@@ -227,7 +228,7 @@ if [[ -n "$repository_root" ]]; then
       */.aws-sam/*) artifact_rule="sam_build_artifact" ;;
       */node_modules/*) artifact_rule="dependency_artifact" ;;
       */coverage/*) artifact_rule="coverage_artifact" ;;
-      */.aws/credentials/*|*/.aws/credentials) artifact_rule="aws_credentials_file" ;;
+      */.aws/credentials/*) artifact_rule="aws_credentials_file" ;;
     esac
 
     if [[ -n "$artifact_rule" ]]; then
