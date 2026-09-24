@@ -65,6 +65,8 @@ class SagaRepositoryProtocol(Protocol):
 
     def get(self, record_id: str) -> dict[str, object] | None: ...
 
+    def release_reactivation_claim(self, *, record: dict[str, object]) -> None: ...
+
     def mark_reactivation_enable_dispatching(
         self,
         *,
@@ -164,7 +166,11 @@ class ReactivationService:
         return self._mark_reconciliation(record)
 
     def _start(self, record: dict[str, object]) -> dict[str, object]:
-        target = self._initial_target(record)
+        try:
+            target = self._initial_target(record)
+        except (AdminUserNotFoundError, UserVersionConflictError, UserStateConflictError):
+            self._saga.release_reactivation_claim(record=record)
+            raise
         try:
             self._read_cognito(record, target, expected_enabled=False)
         except Exception:

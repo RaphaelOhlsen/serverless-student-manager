@@ -62,7 +62,9 @@ class FakeTable:
     def __init__(self) -> None:
         self.items: dict[str, dict[str, object]] = {}
         self.updates: list[dict[str, object]] = []
+        self.deletes: list[dict[str, object]] = []
         self.reject_update = False
+        self.reject_delete = False
 
     def put_item(self, **kwargs: object) -> dict[str, Any]:
         item = kwargs["Item"]
@@ -116,6 +118,32 @@ class FakeTable:
         if isinstance(expression, str) and " REMOVE " in expression:
             for name in expression.split(" REMOVE ", 1)[1].split(","):
                 item.pop(name.strip(), None)
+        return {}
+
+    def delete_item(self, **kwargs: object) -> dict[str, Any]:
+        self.deletes.append(dict(kwargs))
+        if self.reject_delete:
+            raise conditional_error()
+        key = kwargs["Key"]
+        values = kwargs["ExpressionAttributeValues"]
+        assert isinstance(key, dict) and isinstance(values, dict)
+        record_id = str(key["id"])
+        item = self.items.get(record_id)
+        if item is None:
+            raise conditional_error()
+        expected_fields = {
+            "operation": ":operation",
+            "state": ":claimed",
+            "requestHash": ":request_hash",
+            "actorId": ":actor_id",
+            "idempotencyKey": ":idempotency_key",
+            "target": ":target",
+            "expectedVersion": ":expected_version",
+            "inProgressExpiration": ":current_lease",
+        }
+        if any(item.get(field) != values[value] for field, value in expected_fields.items()):
+            raise conditional_error()
+        del self.items[record_id]
         return {}
 
 
@@ -365,6 +393,83 @@ def test_reactivation_claim_namespace_hash_lease_stable_ids_and_privacy() -> Non
         repo.claim_reactivation(**kwargs)
     with pytest.raises(IdempotencyKeyReusedError):
         repo.claim_reactivation(**{**kwargs, "expected_version": 4})
+
+
+def test_release_reactivation_claim_deletes_only_matching_claimed_record() -> None:
+    table = FakeTable()
+    repo = repository(table)
+    claim = repo.claim_reactivation(
+        environment="dev",
+        actor_id="actor-1",
+        idempotency_key=KEY,
+        user_id="target-1",
+        expected_version=3,
+        request_id=None,
+    )
+
+    repo.release_reactivation_claim(record=claim.record)
+
+    assert repo.get(str(claim.record["id"])) is None
+    delete = table.deletes[0]
+    assert delete["ConditionExpression"] == (
+        "#operation = :operation AND #state = :claimed "
+        "AND requestHash = :request_hash AND actorId = :actor_id "
+        "AND idempotencyKey = :idempotency_key AND #target = :target "
+        "AND expectedVersion = :expected_version "
+        "AND inProgressExpiration = :current_lease"
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("state", ReactivationState.ENABLE_DISPATCHING.value),
+        ("requestHash", "different-request-hash"),
+        ("operation", DEACTIVATE_USER_OPERATION),
+    ],
+)
+def test_release_reactivation_claim_cas_preserves_changed_record(
+    field: str, replacement: object
+) -> None:
+    table = FakeTable()
+    repo = repository(table)
+    claim = repo.claim_reactivation(
+        environment="dev",
+        actor_id="actor-1",
+        idempotency_key=KEY,
+        user_id="target-1",
+        expected_version=3,
+        request_id=None,
+    )
+    record_id = str(claim.record["id"])
+    table.items[record_id][field] = replacement
+
+    with pytest.raises(InvitationSagaInvariantError, match="release CAS mismatch"):
+        repo.release_reactivation_claim(record=claim.record)
+
+    assert repo.get(record_id) is not None
+
+
+def test_release_reactivation_claim_stale_worker_cannot_delete_renewed_lease() -> None:
+    table = FakeTable()
+    repo = repository(table)
+    claim = repo.claim_reactivation(
+        environment="dev",
+        actor_id="actor-1",
+        idempotency_key=KEY,
+        user_id="target-1",
+        expected_version=3,
+        request_id=None,
+    )
+    record_id = str(claim.record["id"])
+    current_lease = claim.record["inProgressExpiration"]
+    assert isinstance(current_lease, int)
+    table.items[record_id]["inProgressExpiration"] = current_lease + 1
+
+    with pytest.raises(InvitationSagaInvariantError, match="release CAS mismatch"):
+        repo.release_reactivation_claim(record=claim.record)
+
+    assert repo.get(record_id) is not None
 
 
 def test_reactivation_marker_is_cas_protected_and_required_before_enable() -> None:

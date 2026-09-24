@@ -47,6 +47,8 @@ class IdempotencyTable(Protocol):
 
     def update_item(self, **kwargs: object) -> dict[str, Any]: ...
 
+    def delete_item(self, **kwargs: object) -> dict[str, Any]: ...
+
 
 class InvitationSagaRepository:
     def __init__(
@@ -341,6 +343,60 @@ class InvitationSagaRepository:
             next_state=ReactivationState.ENABLE_DISPATCHING.value,
             assignments={**context_fields, "enableAttemptedAt": attempted_at},
         )
+
+    def release_reactivation_claim(self, *, record: dict[str, object]) -> None:
+        record_id, operation, state, request_hash = self._transition_context(record)
+        actor_id = record.get("actorId")
+        idempotency_key = record.get("idempotencyKey")
+        target = record.get("target")
+        expected_version = record.get("expectedVersion")
+        current_lease = record.get("inProgressExpiration")
+        if (
+            operation != REACTIVATE_USER_OPERATION
+            or state != ReactivationState.CLAIMED.value
+            or not isinstance(actor_id, str)
+            or not actor_id
+            or not isinstance(idempotency_key, str)
+            or not idempotency_key
+            or not isinstance(target, str)
+            or not target
+            or type(expected_version) is not int
+            or expected_version < 1
+            or type(current_lease) is not int
+        ):
+            raise InvitationSagaInvariantError("invalid reactivation claim release context")
+        try:
+            self._table.delete_item(
+                Key={"id": record_id},
+                ConditionExpression=(
+                    "#operation = :operation AND #state = :claimed "
+                    "AND requestHash = :request_hash AND actorId = :actor_id "
+                    "AND idempotencyKey = :idempotency_key AND #target = :target "
+                    "AND expectedVersion = :expected_version "
+                    "AND inProgressExpiration = :current_lease"
+                ),
+                ExpressionAttributeNames={
+                    "#operation": "operation",
+                    "#state": "state",
+                    "#target": "target",
+                },
+                ExpressionAttributeValues={
+                    ":operation": REACTIVATE_USER_OPERATION,
+                    ":claimed": ReactivationState.CLAIMED.value,
+                    ":request_hash": request_hash,
+                    ":actor_id": actor_id,
+                    ":idempotency_key": idempotency_key,
+                    ":target": target,
+                    ":expected_version": expected_version,
+                    ":current_lease": current_lease,
+                },
+            )
+        except ClientError as error:
+            if self._error_code(error) == "ConditionalCheckFailedException":
+                raise InvitationSagaInvariantError(
+                    "reactivation claim release CAS mismatch"
+                ) from None
+            raise
 
     def build_reactivation_completion_transition(
         self,

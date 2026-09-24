@@ -6,6 +6,7 @@ import pytest
 from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 from users_api.errors import (
     AdminUserForbiddenError,
+    AdminUserNotFoundError,
     CognitoIdentityInvariantError,
     CognitoResultAmbiguousError,
     IdempotencyKeyReusedError,
@@ -59,6 +60,9 @@ class FakeSaga:
         }
         self.claim_error: Exception | None = None
         self.claim_calls: list[dict[str, object]] = []
+        self.release_calls: list[dict[str, object]] = []
+        self.release_error: Exception | None = None
+        self.claim_present = True
         self.transition_calls: list[str] = []
         self.transition_error: Exception | None = None
         self.transition_winner: ReactivationState | None = None
@@ -84,7 +88,19 @@ class FakeSaga:
         self.claim_calls.append(dict(kwargs))
         if self.claim_error is not None:
             raise self.claim_error
-        return SagaClaim(deepcopy(self.record), created=False)
+        created = not self.claim_present
+        if created:
+            self.record["state"] = ReactivationState.CLAIMED.value
+            self.claim_present = True
+        return SagaClaim(deepcopy(self.record), created=created)
+
+    def release_reactivation_claim(self, *, record: dict[str, object]) -> None:
+        self.release_calls.append(deepcopy(record))
+        if self.release_error is not None:
+            raise self.release_error
+        assert self.claim_present
+        assert record["state"] == ReactivationState.CLAIMED.value
+        self.claim_present = False
 
     def get(self, record_id: str) -> dict[str, object] | None:
         if record_id != self.record["id"]:
@@ -340,6 +356,7 @@ def test_happy_path_completes_once_with_public_response_and_stable_context(role:
     assert saga.marker_calls == 1
     assert saga.transition_calls == [ReactivationState.COGNITO_ENABLED.value]
     assert saga.builder_calls == 1
+    assert saga.release_calls == []
     assert cognito.enable_calls == [TARGET_ID]
     assert [call["expected_enabled"] for call in cognito.read_calls] == [False, True]
     assert len(users.transaction_calls) == 1
@@ -383,12 +400,28 @@ def test_claim_conflicts_stop_before_target_or_cognito(error: Exception) -> None
 
 
 def test_stale_version_stops_before_cognito_side_effect() -> None:
-    service, users, _, cognito = build_service()
+    service, users, saga, cognito = build_service()
     users.profiles[TARGET_ID]["version"] = 4
 
     with pytest.raises(UserVersionConflictError):
         execute(service)
 
+    assert cognito.read_calls == []
+    assert cognito.enable_calls == []
+    assert users.transaction_calls == []
+    assert len(saga.release_calls) == 1
+    assert saga.claim_present is False
+
+
+def test_missing_target_releases_claim_before_returning_not_found() -> None:
+    service, users, saga, cognito = build_service()
+    users.profiles.pop(TARGET_ID)
+
+    with pytest.raises(AdminUserNotFoundError):
+        execute(service)
+
+    assert len(saga.release_calls) == 1
+    assert saga.claim_present is False
     assert cognito.read_calls == []
     assert cognito.enable_calls == []
     assert users.transaction_calls == []
@@ -408,13 +441,49 @@ def test_actor_must_reconcile_as_active_admin_before_claim() -> None:
 
 
 def test_new_intent_requires_inactive_target_before_cognito() -> None:
-    service, users, _, cognito = build_service()
+    service, users, saga, cognito = build_service()
     users.authorizations[TARGET_SUB]["status"] = "ACTIVE"
     users.profiles[TARGET_ID]["status"] = "ACTIVE"
 
     with pytest.raises(UserStateConflictError):
         execute(service)
 
+    assert cognito.read_calls == []
+    assert cognito.enable_calls == []
+    assert users.transaction_calls == []
+    assert len(saga.release_calls) == 1
+    assert saga.claim_present is False
+
+
+def test_active_target_immediate_same_key_replay_reclaims_and_releases_again() -> None:
+    service, users, saga, cognito = build_service()
+    users.authorizations[TARGET_SUB]["status"] = "ACTIVE"
+    users.profiles[TARGET_ID]["status"] = "ACTIVE"
+
+    with pytest.raises(UserStateConflictError):
+        execute(service)
+    with pytest.raises(UserStateConflictError):
+        execute(service)
+
+    assert len(saga.claim_calls) == 2
+    assert len(saga.release_calls) == 2
+    assert saga.claim_present is False
+    assert cognito.read_calls == []
+    assert cognito.enable_calls == []
+    assert users.transaction_calls == []
+
+
+def test_release_failure_fails_closed_instead_of_returning_business_conflict() -> None:
+    service, users, saga, cognito = build_service()
+    users.authorizations[TARGET_SUB]["status"] = "ACTIVE"
+    users.profiles[TARGET_ID]["status"] = "ACTIVE"
+    saga.release_error = InvitationSagaInvariantError("release failed")
+
+    with pytest.raises(InvitationSagaInvariantError, match="release failed"):
+        execute(service)
+
+    assert len(saga.release_calls) == 1
+    assert saga.claim_present is True
     assert cognito.read_calls == []
     assert cognito.enable_calls == []
     assert users.transaction_calls == []
@@ -462,6 +531,7 @@ def test_second_ambiguous_result_is_read_back_before_reconciliation() -> None:
     assert cognito.enable_calls == [TARGET_ID, TARGET_ID]
     assert [call["expected_enabled"] for call in cognito.read_calls] == [False, None, None]
     assert saga.record["state"] == ReactivationState.RECONCILIATION_REQUIRED.value
+    assert saga.release_calls == []
     assert users.transaction_calls == []
 
 
