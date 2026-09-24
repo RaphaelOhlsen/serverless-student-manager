@@ -181,3 +181,33 @@ mudanças de produção ou decisões arquiteturais novas. Essas ações continua
 às regras de aprovação deste arquivo.
 
 ADRs novas devem começar em ADR-021.
+
+## graphify
+
+This project has a knowledge graph at `graphify-out/` with code, documentation,
+infrastructure relationships, community structure, and cross-file relationships.
+
+When using Graphify in Codex, use the installed Graphify skill and these instructions.
+
+Rules:
+
+- For codebase discovery and navigation, use Graphify before broad repository searches when `graphify-out/graph.json` exists.
+- When the relevant component is already known, prefer:
+  `graphify explain "<component>"`.
+- When investigating the relationship between two known components, prefer:
+  `graphify path "<A>" "<B>"`.
+- Use `graphify query "<question>"` when the relevant components are not yet known.
+- Keep `graphify query` prompts narrow and use the default token budget unless additional graph context is demonstrably required.
+- Do not respond to truncation by immediately increasing `--budget`. First narrow the query or switch to `explain` or `path`.
+- Avoid broad multi-concept queries and large custom `--budget` values as the first navigation step.
+- After Graphify identifies the relevant implementation, inspect only the minimum source files required to verify the requested facts.
+- Treat `EXTRACTED` graph relationships as structural evidence.
+- Verify important `INFERRED` relationships against source code or canonical project documentation before relying on them.
+- The canonical documentation under `docs/` remains authoritative according to the precedence rules defined in this file. Source code is implementation evidence and must be used to verify Graphify findings without overriding approved requirements or architectural decisions.
+- Graphify is a discovery and navigation aid, not a replacement for the canonical project documentation or direct source verification.
+- Dirty `graphify-out/` files are expected after hooks or incremental updates; dirty graph files are not a reason to skip Graphify.
+- Only skip Graphify when the task concerns stale or incorrect graph output, when no graph exists, or when the user explicitly asks not to use it.
+- If `graphify-out/wiki/index.md` exists, use it for broad navigation instead of raw source browsing.
+- Read `graphify-out/GRAPH_REPORT.md` only for broad architecture review or when `explain`, `path`, and narrow `query` calls do not provide enough context.
+- Do not broadly scan the repository when Graphify has already identified the relevant implementation.
+- After modifying code, run `graphify update .` to keep the graph current.
