@@ -40,6 +40,11 @@ def serialized(item: dict[str, object]) -> dict[str, object]:
     return {key: serializer.serialize(value) for key, value in item.items()}
 
 
+def deserialized(values: dict[str, object]) -> dict[str, object]:
+    deserializer = TypeDeserializer()
+    return {key: deserializer.deserialize(value) for key, value in values.items()}
+
+
 @pytest.mark.parametrize(("role", "expected_items"), [("OPERATOR", 4), ("ADMIN", 5)])
 def test_deactivation_transaction_shape_and_conditions(role: str, expected_items: int) -> None:
     client = FakeClient()
@@ -106,6 +111,246 @@ def test_deactivation_version_condition_guards_legacy_and_versioned_profiles() -
     condition = items[0]["Update"]["ConditionExpression"]
     assert "attribute_not_exists(#version)" not in condition
     assert "#version = :version" in condition
+
+
+def reactivation_transaction(
+    role: str,
+    *,
+    version: int = 3,
+    transaction_error: ClientError | None = None,
+) -> tuple[FakeClient, list[dict[str, object]], dict[str, object]]:
+    client = FakeClient()
+    client.transaction_error = transaction_error
+    audit: dict[str, object] = {
+        "PK": "RESOURCE#USER#user-1",
+        "SK": "TS#now#EVENT#event-1",
+        "eventId": "event-1",
+        "eventType": "USER_REACTIVATED",
+        "resourceType": "USER",
+        "resourceId": "user-1",
+        "actorId": "actor-1",
+        "occurredAt": "2026-09-23T14:00:00.000Z",
+        "result": "SUCCESS",
+        "correlationId": "request-1",
+        "changes": {
+            "status": {"from": "INACTIVE", "to": "ACTIVE"},
+            "version": {"from": version, "to": version + 1},
+        },
+    }
+    saga: dict[str, object] = {
+        "Update": {
+            "TableName": "idempotency",
+            "Key": serialized({"id": "reactivation-operation"}),
+            "UpdateExpression": (
+                "SET #state = :completed, httpStatus = :status, "
+                "responseUserId = :user_id, responseFullName = :full_name, "
+                "responseEmail = :email, responseRole = :role, "
+                "responseStatus = :active, responseVersion = :version, "
+                "responseCreatedAt = :created_at, responseUpdatedAt = :updated_at"
+            ),
+            "ConditionExpression": ("#state = :cognito_enabled AND requestHash = :request_hash"),
+            "ExpressionAttributeNames": {"#state": "state"},
+            "ExpressionAttributeValues": serialized(
+                {
+                    ":cognito_enabled": "COGNITO_ENABLED",
+                    ":completed": "COMPLETED",
+                    ":status": 200,
+                    ":user_id": "user-1",
+                    ":full_name": "Synthetic User",
+                    ":email": "user@example.test",
+                    ":role": role,
+                    ":active": "ACTIVE",
+                    ":version": version + 1,
+                    ":created_at": "2026-01-01T00:00:00.000Z",
+                    ":updated_at": "2026-09-23T14:00:00.000Z",
+                    ":request_hash": "request-hash",
+                }
+            ),
+        }
+    }
+    repository = UserRepository(client, "users", "audit")
+    try:
+        repository.reactivate_user(
+            user_id="user-1",
+            cognito_sub="11111111-1111-4111-8111-111111111111",
+            normalized_email="user@example.test",
+            role=role,
+            version=version,
+            auth_version=7,
+            updated_at="2026-09-23T14:00:00.000Z",
+            actor_id="actor-1",
+            audit=audit,
+            idempotency_transition=saga,
+            client_request_token="66666666-6666-4666-8666-666666666666",
+        )
+    finally:
+        assert client.transaction is not None
+    items = client.transaction["TransactItems"]
+    assert isinstance(items, list)
+    return client, items, saga
+
+
+def test_operator_reactivation_has_four_atomic_actions_and_no_counter() -> None:
+    client, items, saga = reactivation_transaction("OPERATOR")
+
+    assert len(items) == 4
+    assert [next(iter(item)) for item in items] == ["Update", "Update", "Put", "Update"]
+    assert items[3] == saga
+    assert "CONTROL#ACTIVE_ADMIN_COUNT" not in repr(items)
+    assert client.transaction is not None
+    assert client.transaction["ClientRequestToken"] == ("66666666-6666-4666-8666-666666666666")
+
+
+def test_admin_reactivation_adds_counter_as_exactly_the_fifth_action() -> None:
+    _, items, saga = reactivation_transaction("ADMIN")
+
+    assert len(items) == 5
+    assert [next(iter(item)) for item in items] == [
+        "Update",
+        "Update",
+        "Put",
+        "Update",
+        "Update",
+    ]
+    assert items[3] == saga
+    counter = items[4]["Update"]
+    assert isinstance(counter, dict)
+    assert counter["Key"] == serialized({"PK": "CONTROL#ACTIVE_ADMIN_COUNT", "SK": "CONTROL"})
+    assert counter["UpdateExpression"] == "ADD activeAdminCount :increment"
+    assert counter["ConditionExpression"] == (
+        "attribute_type(activeAdminCount, :number_type) AND activeAdminCount >= :zero"
+    )
+    values = deserialized(counter["ExpressionAttributeValues"])
+    assert values == {":increment": 1, ":zero": 0, ":number_type": "N"}
+
+
+def test_reactivation_updates_both_projections_and_guards_all_observed_context() -> None:
+    _, items, _ = reactivation_transaction("OPERATOR")
+    profile = items[0]["Update"]
+    authorization = items[1]["Update"]
+    assert isinstance(profile, dict) and isinstance(authorization, dict)
+
+    assert profile["UpdateExpression"] == (
+        "SET #status = :active, #version = :next_version, "
+        "authVersion = :next_auth_version, updatedAt = :updated_at, "
+        "updatedBy = :actor_id REMOVE deactivatedAt, deactivatedBy, deactivationReason"
+    )
+    assert authorization["UpdateExpression"] == (
+        "SET #status = :active, authVersion = :next_auth_version"
+    )
+    profile_condition = str(profile["ConditionExpression"])
+    authorization_condition = str(authorization["ConditionExpression"])
+    for predicate in (
+        "attribute_exists(PK)",
+        "attribute_exists(SK)",
+        "userId = :user_id",
+        "cognitoSub = :sub",
+        "#email = :email",
+        "#role = :role",
+        "#status = :inactive",
+        "authVersion = :auth_version",
+        "#version = :version",
+    ):
+        assert predicate in profile_condition
+    for predicate in (
+        "attribute_exists(PK)",
+        "attribute_exists(SK)",
+        "userId = :user_id",
+        "#role = :role",
+        "#status = :inactive",
+        "authVersion = :auth_version",
+    ):
+        assert predicate in authorization_condition
+
+    profile_values = deserialized(profile["ExpressionAttributeValues"])
+    authorization_values = deserialized(authorization["ExpressionAttributeValues"])
+    assert profile_values[":sub"] == "11111111-1111-4111-8111-111111111111"
+    assert profile_values[":email"] == "user@example.test"
+    assert profile_values[":role"] == authorization_values[":role"] == "OPERATOR"
+    assert profile_values[":auth_version"] == authorization_values[":auth_version"] == 7
+    assert profile_values[":next_auth_version"] == 8
+    assert authorization_values[":next_auth_version"] == 8
+    assert profile_values[":next_version"] == 4
+    assert profile_values[":active"] == authorization_values[":active"] == "ACTIVE"
+
+
+def test_reactivation_legacy_version_is_allowed_only_for_logical_version_one() -> None:
+    _, legacy_items, _ = reactivation_transaction("OPERATOR", version=1)
+    legacy = legacy_items[0]["Update"]
+    assert isinstance(legacy, dict)
+    assert (
+        "(attribute_not_exists(#version) OR #version = :version)" in legacy["ConditionExpression"]
+    )
+
+    _, versioned_items, _ = reactivation_transaction("OPERATOR", version=2)
+    versioned = versioned_items[0]["Update"]
+    assert isinstance(versioned, dict)
+    condition = str(versioned["ConditionExpression"])
+    assert "attribute_not_exists(#version)" not in condition
+    assert condition.endswith("#version = :version")
+    assert deserialized(versioned["ExpressionAttributeValues"])[":version"] == 2
+
+
+def test_reactivation_audit_and_terminal_completion_are_atomic_and_single() -> None:
+    _, items, saga = reactivation_transaction("OPERATOR")
+
+    audit_actions = [item["Put"] for item in items if "Put" in item]
+    assert len(audit_actions) == 1
+    audit = audit_actions[0]
+    assert isinstance(audit, dict)
+    assert audit["TableName"] == "audit"
+    assert audit["ConditionExpression"] == ("attribute_not_exists(PK) AND attribute_not_exists(SK)")
+    audit_item = deserialized(audit["Item"])
+    assert audit_item["eventType"] == "USER_REACTIVATED"
+    assert audit_item["result"] == "SUCCESS"
+    assert audit_item["changes"] == {
+        "status": {"from": "INACTIVE", "to": "ACTIVE"},
+        "version": {"from": 3, "to": 4},
+    }
+
+    assert items[3] == saga
+    terminal = items[3]["Update"]
+    assert isinstance(terminal, dict)
+    assert "httpStatus = :status" in terminal["UpdateExpression"]
+    assert "responseUserId = :user_id" in terminal["UpdateExpression"]
+    assert "responseFullName = :full_name" in terminal["UpdateExpression"]
+    assert "responseEmail = :email" in terminal["UpdateExpression"]
+    assert "responseRole = :role" in terminal["UpdateExpression"]
+    assert "responseStatus = :active" in terminal["UpdateExpression"]
+    assert "responseVersion = :version" in terminal["UpdateExpression"]
+    assert "responseCreatedAt = :created_at" in terminal["UpdateExpression"]
+    assert "responseUpdatedAt = :updated_at" in terminal["UpdateExpression"]
+    assert terminal["ConditionExpression"] == (
+        "#state = :cognito_enabled AND requestHash = :request_hash"
+    )
+    terminal_values = deserialized(terminal["ExpressionAttributeValues"])
+    assert terminal_values[":cognito_enabled"] == "COGNITO_ENABLED"
+    assert terminal_values[":completed"] == "COMPLETED"
+    assert terminal_values[":status"] == 200
+    assert terminal_values[":role"] == "OPERATOR"
+    assert terminal_values[":version"] == 4
+
+
+def test_reactivation_transaction_cancellation_remains_a_post_side_effect_signal() -> None:
+    error = ClientError(
+        {
+            "Error": {"Code": "TransactionCanceledException", "Message": "private"},
+            "CancellationReasons": [
+                {"Code": "ConditionalCheckFailed"},
+                {"Code": "None"},
+                {"Code": "None"},
+                {"Code": "None"},
+            ],
+        },
+        "TransactWriteItems",
+    )
+
+    with pytest.raises(ClientError) as raised:
+        reactivation_transaction("OPERATOR", transaction_error=error)
+
+    assert raised.value is error
+    assert raised.value.response["Error"]["Code"] == "TransactionCanceledException"
+    assert raised.value.response["CancellationReasons"][0]["Code"] == ("ConditionalCheckFailed")
 
 
 def activate(repository: UserRepository, client: FakeClient, role: str) -> dict[str, object]:

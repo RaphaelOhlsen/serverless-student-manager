@@ -353,21 +353,171 @@ Idempotency-Key: <UUID>
 {"expectedVersion": 2}
 ```
 
-A saga:
+O body é um objeto estrito contendo somente `expectedVersion`, que deve ser JSON
+integer >= 1. Campo extra, chave duplicada, boolean, string, float, null, array e
+body ausente ou inválido são rejeitados com `400 INVALID_REQUEST`.
 
-1. claima a idempotência;
-2. reconcilia Cognito e exige identidade preservada e estado compatível;
-3. executa `AdminEnableUser`;
-4. transaciona PROFILE/AUTHORIZATION para `ACTIVE`, incrementa
-   version/authVersion, incrementa opcionalmente o contador, insere
-   `USER_REACTIVATED / SUCCESS` e persiste a fase/conclusão durável;
-5. retorna HTTP 200 e User público.
+Uma nova intenção é válida somente para target `INACTIVE`, integralmente
+reconciliado entre PROFILE e AUTHORIZATION. Target `ACTIVE` ou `INVITED` retorna
+`409 USER_STATE_CONFLICT`; reactivation não admite no-op com nova chave. Target
+inexistente retorna 404. Depois do claim, replay exato `COMPLETED` retorna a
+resposta terminal antes de nova leitura do target ou validação de versão.
 
-Se Cognito estiver habilitado e a transação falhar, AUTHORIZATION permanece
-`INACTIVE`, mantendo bloqueio funcional, e o retry retoma a saga. Reativação
-preserva userId, cognitoSub, senha, email/email_verified e TOTP/MFA; não é novo
-convite, activation ou reset. Para usuário anteriormente ativo, o estado Cognito
-normal esperado é `CONFIRMED`; incompatibilidades exigem reconciliação técnica.
+O ator é derivado exclusivamente do `sub` do access token validado. PROFILE e
+AUTHORIZATION do ator devem reconciliar `userId`, role, status e `authVersion`, e
+o ator deve ser `ACTIVE ADMIN`; claims JWT de role ou status não são autoridade.
+Não existe erro artificial de self-reactivation: em estado reconciliado, a mesma
+identidade não pode ser simultaneamente ator `ACTIVE` e target `INACTIVE`.
+
+Reactivation preserva role, userId, cognitoSub, e-mail, senha, identidade Cognito
+e TOTP/MFA. Ela não é convite, activation, reset ou substituição de identidade.
+Uma transição efetiva incrementa `version` e `authVersion` exatamente uma vez,
+remove `deactivatedAt`, `deactivatedBy` e eventual `deactivationReason` do estado
+corrente e mantém o histórico somente na auditoria. PROFILE e AUTHORIZATION
+terminam com a mesma role, status `ACTIVE` e novo `authVersion`. Para target
+`ADMIN`, `ACTIVE_ADMIN_COUNT` é incrementado exatamente uma vez; para `OPERATOR`,
+o contador não participa.
+
+### Predicado de compatibilidade Cognito
+
+Antes da primeira mutação e em todo readback, `AdminGetUser` usa
+`Username=userId` e deve comprovar simultaneamente:
+
+- `Username` exatamente igual ao `userId` técnico preservado;
+- exatamente um atributo `sub`, UUID canônico e igual ao `cognitoSub` do PROFILE;
+- `UserStatus = CONFIRMED`, estado normal de uma identidade anteriormente ativa;
+- atributo `email` normalizado igual ao e-mail normalizado do PROFILE;
+- `email_verified = true`;
+- `Enabled` coerente com a fase durável da saga.
+
+E-mail e `email_verified` não são requisitos novos: RN-USR-001 exige e-mail
+administrativo obrigatório, único e verificado; ADR-017/025 e Create/Invite já
+preservam a mesma identidade e e-mail verificado. A reativação somente confirma
+esses invariantes, sem alterar atributos. Não se chama
+`AdminGetUserAuthFactors`: `AdminEnableUser` não altera senha ou TOTP/MFA, e a
+reativação não reexecuta o enrollment já concluído.
+
+Para uma operação nova em `CLAIMED`, o predicado exige `Enabled=false` antes de
+qualquer side effect. Encontrar `Enabled=true` sem marker de tentativa pertencente
+à mesma operação é divergência e não pode ser adotado como sucesso. Em
+`ENABLE_DISPATCHING`, `RECONCILIATION_REQUIRED` com marker de tentativa ou
+`COGNITO_ENABLED`, o valor esperado segue as regras de retomada abaixo.
+
+### Ordem Cognito e saga
+
+A reativação possui namespace `reactivate-user` e os estados duráveis:
+
+```text
+CLAIMED
+ENABLE_DISPATCHING
+COGNITO_ENABLED
+RECONCILIATION_REQUIRED
+COMPLETED
+```
+
+Transições válidas:
+
+```text
+CLAIMED -> ENABLE_DISPATCHING
+CLAIMED -> RECONCILIATION_REQUIRED
+ENABLE_DISPATCHING -> COGNITO_ENABLED
+ENABLE_DISPATCHING -> RECONCILIATION_REQUIRED
+COGNITO_ENABLED -> COMPLETED
+COGNITO_ENABLED -> RECONCILIATION_REQUIRED
+RECONCILIATION_REQUIRED -> ENABLE_DISPATCHING
+RECONCILIATION_REQUIRED -> COGNITO_ENABLED
+```
+
+`COMPLETED` não possui transição de saída. Toda transição usa CAS sobre estado e
+request hash. O registro mantém lease curto de execução: lease válido em posse de
+outra execução retorna `409 OPERATION_IN_PROGRESS`; após expiração, a mesma
+operação readquire o lease por CAS e retoma do estado durável, sem reiniciar a
+saga. `eventId`, `correlationId`, actor, target, expectedVersion, startedAt,
+contexto Cognito e resposta planejada permanecem estáveis.
+
+A ordem obrigatória é:
+
+1. autorizar o ator, validar request, claimar idempotência e resolver replay;
+2. ler consistentemente e reconciliar target, versão, role, status e authVersion;
+3. executar `AdminGetUser` e validar o predicado completo com `Enabled=false`;
+4. persistir por CAS `ENABLE_DISPATCHING`, incluindo marker durável da tentativa,
+   antes de qualquer chamada mutável;
+5. executar somente `AdminEnableUser(UserPoolId, Username=userId)`;
+6. sucesso conhecido avança por CAS para `COGNITO_ENABLED`;
+7. validar novamente a identidade habilitada quando a execução for retomada em
+   `COGNITO_ENABLED` e então tentar a transação final;
+8. a transação promove o domínio e a saga atomicamente para `COMPLETED`;
+9. somente `COMPLETED` retorna HTTP 200 com o User público.
+
+Resultado ambíguo, queda depois de `AdminEnableUser` ou retomada em
+`ENABLE_DISPATCHING` exige `AdminGetUser` antes de qualquer repetição. Identidade
+compatível com `Enabled=true` comprova o side effect e avança para
+`COGNITO_ENABLED` sem novo enable. Identidade compatível com `Enabled=false`
+permite que a mesma operação volte por CAS a `ENABLE_DISPATCHING` e repita o
+enable. Ausência, leitura inconclusiva ou qualquer incompatibilidade leva a
+`RECONCILIATION_REQUIRED` e HTTP 503
+`USER_REACTIVATION_RECONCILIATION_REQUIRED`.
+
+`RECONCILIATION_REQUIRED` é retomável somente pela mesma operação e
+`Idempotency-Key`. Um readback posterior pode avançar para `COGNITO_ENABLED`
+apenas quando existe marker durável de tentativa da própria operação e a
+identidade compatível está habilitada; pode voltar a `ENABLE_DISPATCHING` quando
+a identidade compatível está comprovadamente desabilitada. Cognito habilitado
+sem marker da operação não é adotado. Enquanto não houver decisão segura, cada
+tentativa permanece 503, sem promover o domínio.
+
+Não há compensação com `AdminDisableUser`, nem chamada a global sign-out,
+create, resend, reset ou update de atributos. A ordem Cognito-antes-do-domínio
+elimina a janela normal de domínio `ACTIVE` com Cognito ainda desabilitado. Se a
+transação final falhar, AUTHORIZATION permanece `INACTIVE` e bloqueia o acesso
+funcional mesmo com Cognito habilitado.
+
+### Concorrência depois do side effect e transação final
+
+Depois de `COGNITO_ENABLED`, mudança concorrente de version, role, status,
+authVersion, identidade ou qualquer outro predicado protegido não é convertida
+automaticamente em `409 USER_VERSION_CONFLICT` ou outro conflito comum. O side
+effect externo já ocorreu; a operação avança para
+`RECONCILIATION_REQUIRED`, mantém o domínio fail-closed e retorna HTTP 503
+`USER_REACTIVATION_RECONCILIATION_REQUIRED`. Não há rollback automático do
+enable. Falha transiente cuja leitura consistente confirme todos os predicados
+originais pode repetir a mesma transação com o contexto estável.
+
+A transação final possui, para `OPERATOR`, quatro ações:
+
+1. PROFILE: exige item, userId, cognitoSub, e-mail normalizado, role, `INACTIVE`,
+   authVersion e expectedVersion observados; atualiza status para `ACTIVE`, incrementa
+   version/authVersion, atualiza autoria e remove metadados correntes de
+   desativação;
+2. AUTHORIZATION: exige userId, role, `INACTIVE` e authVersion observados;
+   atualiza status para `ACTIVE` e o mesmo novo authVersion;
+3. insere `USER_REACTIVATED / SUCCESS` com condição de não existência;
+4. avança a saga de `COGNITO_ENABLED` para `COMPLETED`, grava HTTP 200 e a
+   resposta pública terminal sob CAS do request hash.
+
+Para `ADMIN`, uma quinta ação incrementa `CONTROL#ACTIVE_ADMIN_COUNT / CONTROL`
+em um, exigindo contador numérico e não negativo. A condição de version para
+PROFILE histórico aceita `attribute_not_exists(version) OR version = 1` somente
+quando `expectedVersion = 1`. A transação usa `ClientRequestToken` estável derivado
+da operação idempotente. A promoção do domínio, contador, auditoria e resposta
+terminal são indivisíveis.
+
+Sucesso e replay retornam exatamente `userId`, `fullName`, `email`, `role`,
+`status`, `version`, `createdAt` e `updatedAt`. Não expõem cognitoSub,
+authVersion, estado/metadata da saga, chaves físicas ou detalhes Cognito/MFA.
+
+O fingerprint idempotente contém somente operação, target userId e
+expectedVersion, sem PII. Mesma key/request `COMPLETED` retorna o HTTP 200 e body
+originais sem novo readback, enable, transação, contador ou auditoria. Mesma key
+com request diferente retorna `409 IDEMPOTENCY_KEY_REUSED`. Execução concorrente
+com lease válido retorna `409 OPERATION_IN_PROGRESS`; após o lease, a mesma key
+retoma a fase persistida. A leitura isolada de PROFILE não prova conclusão.
+
+Uma reativação efetiva produz exatamente um `USER_REACTIVATED / SUCCESS`, na
+transação final. O evento inclui target, actor, correlationId, timestamp/result e
+transições de status e version; não inclui nome, e-mail, senha, token, sub,
+authVersion, resposta Cognito ou informação MFA. Falha, replay e retomada não
+duplicam o evento.
 
 ## Resend invitation
 
@@ -511,6 +661,7 @@ nomes específicos somente onde a distinção é funcional:
 | Remoção do último Admin ativo | 409 | `LAST_ACTIVE_ADMIN_CONFLICT` |
 | Estado alvo incompatível | 409 | `USER_STATE_CONFLICT` |
 | Deactivation após commit de domínio com Cognito ainda não reconciliado | 503 | `USER_DEACTIVATION_RECONCILIATION_REQUIRED` |
+| Reactivation após tentativa de enable sem reconciliação segura ou com falha pós-side-effect | 503 | `USER_REACTIVATION_RECONCILIATION_REQUIRED` |
 | Entrega conclusivamente não realizada | 503 | `INVITATION_DELIVERY_FAILED` |
 | Resultado de entrega potencialmente aplicado | 503 | `INVITATION_DELIVERY_UNCERTAIN` |
 | Reconciliação necessária/falha técnica | 500 | `INTERNAL_ERROR` |
@@ -524,6 +675,13 @@ esperadas tabelas ou GSIs novos. IAM deve crescer por capacidade e menor privil�
 Query/transações DynamoDB e somente `AdminCreateUser`, `AdminGetUser`,
 `AdminDisableUser`, `AdminEnableUser` e `AdminUserGlobalSignOut` onde necessários.
 `AdminDeleteUser` fica restrito à compensação técnica aprovada.
+
+Para Reactivation, o único novo requisito IAM é
+`cognito-idp:AdminEnableUser`; a operação reutiliza
+`cognito-idp:AdminGetUser` já existente. Ambas as ações ficam restritas a
+`module.identity.user_pool_arn`, o ARN exato do User Pool aplicável no formato
+`arn:aws:cognito-idp:<region>:<account-id>:userpool/<user-pool-id>`, sem wildcard
+e sem qualquer permissão Cognito adicional.
 
 A futura UI ADMIN oferece list, busca/filtros, detail, invite, role change,
 deactivate/reactivate e resend. Writes carregam detail fresco, usam version e UUID

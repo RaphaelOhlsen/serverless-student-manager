@@ -132,3 +132,7 @@ class UserRoleChangeReconciliationError(RuntimeError):
 
 class UserDeactivationReconciliationError(RuntimeError):
     pass
+
+
+class UserReactivationReconciliationError(RuntimeError):
+    pass

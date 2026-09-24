@@ -52,6 +52,10 @@ class CognitoDeactivationClient(Protocol):
     def admin_user_global_sign_out(self, **kwargs: object) -> dict[str, Any]: ...
 
 
+class CognitoReactivationClient(Protocol):
+    def admin_enable_user(self, **kwargs: object) -> dict[str, Any]: ...
+
+
 @dataclass(frozen=True)
 class ReconciledCognitoIdentity:
     user_id: str
@@ -60,6 +64,13 @@ class ReconciledCognitoIdentity:
 
 @dataclass(frozen=True)
 class ReconciledCognitoDeactivationState:
+    user_id: str
+    cognito_sub: str
+    enabled: bool
+
+
+@dataclass(frozen=True)
+class ReconciledCognitoReactivationState:
     user_id: str
     cognito_sub: str
     enabled: bool
@@ -147,6 +158,41 @@ class CognitoRepository:
             user_id=user_id,
             expected_cognito_sub=expected_cognito_sub,
         )
+
+    def admin_get_reactivation_state(
+        self,
+        *,
+        user_id: str,
+        expected_cognito_sub: str,
+        expected_email: str,
+        expected_enabled: bool | None,
+    ) -> ReconciledCognitoReactivationState:
+        try:
+            response = self._client.admin_get_user(
+                UserPoolId=self._user_pool_id,
+                Username=user_id,
+            )
+        except Exception as error:
+            self._raise_reactivation_read_error(error)
+        return self._parse_reactivation_state(
+            response,
+            user_id=user_id,
+            expected_cognito_sub=expected_cognito_sub,
+            expected_email=expected_email,
+            expected_enabled=expected_enabled,
+        )
+
+    def admin_enable_user(self, *, user_id: str) -> None:
+        client = cast(CognitoReactivationClient, self._client)
+        try:
+            response = client.admin_enable_user(
+                UserPoolId=self._user_pool_id,
+                Username=user_id,
+            )
+        except Exception as error:
+            self._raise_enable_error(error)
+        if not isinstance(response, dict):
+            raise CognitoResultAmbiguousError from None
 
     def admin_resend_invitation(self, *, user_id: str) -> None:
         try:
@@ -262,6 +308,71 @@ class CognitoRepository:
         )
 
     @staticmethod
+    def _parse_reactivation_state(
+        response: object,
+        *,
+        user_id: str,
+        expected_cognito_sub: str,
+        expected_email: str,
+        expected_enabled: bool | None,
+    ) -> ReconciledCognitoReactivationState:
+        if expected_enabled is not None and type(expected_enabled) is not bool:
+            raise CognitoIdentityInvariantError("Expected Cognito enabled state is invalid")
+        if not CognitoRepository._is_canonical_uuid(expected_cognito_sub):
+            raise CognitoIdentityInvariantError("Expected Cognito sub is invalid")
+        if not isinstance(response, dict):
+            raise CognitoIdentityInvariantError("Cognito response is malformed")
+        if response.get("Username") != user_id:
+            raise CognitoIdentityInvariantError("Cognito username is incompatible")
+        if response.get("UserStatus") != "CONFIRMED":
+            raise CognitoIdentityInvariantError("Cognito user status is incompatible")
+        enabled = response.get("Enabled")
+        if type(enabled) is not bool:
+            raise CognitoIdentityInvariantError("Cognito enabled state is malformed")
+        if expected_enabled is not None and enabled is not expected_enabled:
+            raise CognitoIdentityInvariantError("Cognito enabled state is incompatible")
+        attributes = response.get("UserAttributes")
+        if not isinstance(attributes, list):
+            raise CognitoIdentityInvariantError("Cognito attributes are malformed")
+
+        relevant: dict[str, str] = {}
+        for attribute in attributes:
+            if not isinstance(attribute, dict):
+                raise CognitoIdentityInvariantError("Cognito attribute is malformed")
+            name = attribute.get("Name")
+            value = attribute.get("Value")
+            if not isinstance(name, str) or not isinstance(value, str):
+                raise CognitoIdentityInvariantError("Cognito attribute is malformed")
+            if name not in {"sub", "email", "email_verified"}:
+                continue
+            if name in relevant:
+                raise CognitoIdentityInvariantError("Cognito identity attribute is duplicated")
+            relevant[name] = value
+
+        cognito_sub = relevant.get("sub")
+        if cognito_sub is None or not CognitoRepository._is_canonical_uuid(cognito_sub):
+            raise CognitoIdentityInvariantError("Cognito sub is missing or invalid")
+        if cognito_sub != expected_cognito_sub:
+            raise CognitoIdentityInvariantError("Cognito sub is incompatible")
+        email = relevant.get("email")
+        if email is None:
+            raise CognitoIdentityInvariantError("Cognito email is missing")
+        try:
+            actual_email = normalize_admin_user_email(email)
+            normalized_expected = normalize_admin_user_email(expected_email)
+        except ValueError:
+            raise CognitoIdentityInvariantError("Cognito email is invalid") from None
+        if actual_email != normalized_expected:
+            raise CognitoIdentityInvariantError("Cognito email is incompatible")
+        if relevant.get("email_verified") != "true":
+            raise CognitoIdentityInvariantError("Cognito email is not verified")
+        return ReconciledCognitoReactivationState(
+            user_id=user_id,
+            cognito_sub=cognito_sub,
+            enabled=enabled,
+        )
+
+    @staticmethod
     def _raise_create_error(error: Exception) -> Never:
         code, http_status = CognitoRepository._error_details(error)
         if code == "UsernameExistsException":
@@ -286,6 +397,26 @@ class CognitoRepository:
         if isinstance(error, ClientError):
             raise CognitoServiceError from None
         raise error
+
+    @staticmethod
+    def _raise_reactivation_read_error(error: Exception) -> Never:
+        code, http_status = CognitoRepository._error_details(error)
+        if code == "UserNotFoundException":
+            raise CognitoUserNotFoundError from None
+        if CognitoRepository._is_ambiguous(error, code, http_status):
+            raise CognitoResultAmbiguousError from None
+        raise CognitoServiceError from None
+
+    @staticmethod
+    def _raise_enable_error(error: Exception) -> Never:
+        code, http_status = CognitoRepository._error_details(error)
+        if code == "UserNotFoundException":
+            raise CognitoUserNotFoundError from None
+        if CognitoRepository._is_ambiguous(error, code, http_status) or not isinstance(
+            error, ClientError
+        ):
+            raise CognitoResultAmbiguousError from None
+        raise CognitoServiceError from None
 
     @staticmethod
     def _is_ambiguous(error: Exception, code: str | None, http_status: int | None) -> bool:

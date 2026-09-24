@@ -536,6 +536,86 @@ reactivation.
 
 Only Administrators shall reactivate an inactive user.
 
+The contract is `POST /users/{userId}/reactivation`, with a mandatory canonical
+UUID `Idempotency-Key` header and a strict JSON body containing only integer
+`expectedVersion >= 1`. Extra or duplicate fields, and boolean, string, float,
+null, array, missing or otherwise invalid bodies are rejected with `400
+INVALID_REQUEST`.
+
+The actor shall be derived exclusively from the validated access-token `sub` and
+reconciled in DynamoDB as an `ACTIVE ADMIN`; JWT role/status claims are not an
+authority. A new intent is valid only when PROFILE and AUTHORIZATION reconcile
+the target as `INACTIVE` at `expectedVersion`. An `ACTIVE` or `INVITED` target
+returns `409 USER_STATE_CONFLICT`, without no-op success; a missing target
+returns `404 USER_NOT_FOUND`. Exact `COMPLETED` replay shall be returned before
+any new target read or version/state validation. No self-reactivation error is
+defined because a reconciled identity cannot be both the `ACTIVE` actor and the
+`INACTIVE` target.
+
+Reactivation shall preserve role, userId, cognitoSub, email, password, Cognito
+identity and TOTP/MFA. It increments `version` and `authVersion` exactly once,
+leaves PROFILE and AUTHORIZATION consistent as `ACTIVE`, removes current
+deactivation metadata, and retains deactivation history only in immutable audit.
+Reactivating an `ADMIN` increments `ACTIVE_ADMIN_COUNT` exactly once;
+reactivating an `OPERATOR` does not modify the counter.
+
+Before the first mutation and on every readback, `AdminGetUser` shall prove that
+`Username == userId`, exactly one canonical `sub` equals PROFILE `cognitoSub`,
+`UserStatus == CONFIRMED`, normalized Cognito email equals normalized PROFILE
+email, `email_verified == true`, and `Enabled` is compatible with the durable
+saga phase. Email and verification are existing RN-USR-001 and identity
+invariants, not new business requirements. Reactivation shall not change those
+attributes, password or MFA and does not require `AdminGetUserAuthFactors`.
+
+The durable saga states are `CLAIMED`, `ENABLE_DISPATCHING`,
+`COGNITO_ENABLED`, `RECONCILIATION_REQUIRED` and `COMPLETED`. A fresh operation
+may enable only after a compatible read proves `Enabled=false` and a CAS has
+persisted its `ENABLE_DISPATCHING` attempt marker. It then invokes only
+`AdminEnableUser`. Known success advances to `COGNITO_ENABLED`. Ambiguous result
+or restart after dispatch requires `AdminGetUser` before repetition: compatible
+`Enabled=true` proves the marked side effect and must not repeat enable;
+compatible `Enabled=false` permits the same operation to dispatch again. An
+incompatible or inconclusive read advances to `RECONCILIATION_REQUIRED`.
+
+`RECONCILIATION_REQUIRED` is resumable only by the same operation and key after
+readback permits a safe decision. It may advance to `COGNITO_ENABLED` only with
+the same operation's durable marker and compatible enabled identity, or return
+to `ENABLE_DISPATCHING` when that identity is provably disabled. Cognito enabled
+without the operation marker shall not be adopted. There is no compensating
+`AdminDisableUser` or other Cognito mutation.
+
+After Cognito has been proven enabled, any concurrent change of version, role,
+status, authVersion, identity or another protected predicate shall keep the
+domain fail-closed and return `503
+USER_REACTIVATION_RECONCILIATION_REQUIRED`, not an ordinary 409 conflict. The
+final DynamoDB transaction atomically promotes PROFILE and AUTHORIZATION,
+inserts exactly one `USER_REACTIVATED / SUCCESS`, increments the active-Admin
+counter only for an ADMIN, and persists the saga `COMPLETED` state with the
+terminal HTTP response. It uses a stable `ClientRequestToken` and conditions on
+all observed protected predicates.
+
+Success and completed replay return HTTP 200 with exactly `userId`, `fullName`,
+`email`, `role`, `status`, `version`, `createdAt` and `updatedAt`. They shall not
+expose cognitoSub, authVersion, physical keys, saga metadata, Cognito details or
+MFA information. The `reactivate-user` fingerprint contains only operation,
+target userId and expectedVersion. Same key/body `COMPLETED` replays the original
+response; same key with a different fingerprint returns `409
+IDEMPOTENCY_KEY_REUSED`; a valid lease held by another execution returns `409
+OPERATION_IN_PROGRESS`; an expired lease permits CAS resume with stable eventId,
+correlationId and operation context.
+
+The complete public error mapping is `400 INVALID_REQUEST`, `401 UNAUTHORIZED`,
+`403 FORBIDDEN`, `404 USER_NOT_FOUND`, `409 USER_VERSION_CONFLICT`, `409
+USER_STATE_CONFLICT`, `409 IDEMPOTENCY_KEY_REUSED`, `409
+OPERATION_IN_PROGRESS`, `503 USER_REACTIVATION_RECONCILIATION_REQUIRED` and `500
+INTERNAL_ERROR`. `LAST_ACTIVE_ADMIN_CONFLICT` does not apply to reactivation.
+
+The capability requires only `cognito-idp:AdminEnableUser` in addition to the
+existing `cognito-idp:AdminGetUser`, both restricted to the exact applicable
+User Pool ARN exposed by `module.identity.user_pool_arn`, in the form
+`arn:aws:cognito-idp:<region>:<account-id>:userpool/<user-pool-id>`, with no
+wildcard or additional Cognito permissions.
+
 ### RF-USR-008 — Resend invitation
 
 Only Administrators shall resend invitations to users in a compatible state.
