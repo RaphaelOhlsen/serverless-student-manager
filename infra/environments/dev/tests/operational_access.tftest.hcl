@@ -914,8 +914,8 @@ run "plans_users_api_access" {
   command = plan
 
   assert {
-    condition     = length(data.aws_iam_policy_document.users_api.statement) == 13
-    error_message = "The users-api policy must contain exactly thirteen semantic statements."
+    condition     = length(data.aws_iam_policy_document.users_api.statement) == 14
+    error_message = "The users-api policy must contain exactly fourteen semantic statements."
   }
 
   assert {
@@ -1011,12 +1011,27 @@ run "plans_users_api_access" {
   }
 
   assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.users_api.statement : statement.actions
+      if statement.sid == "EnableAdministrativeUserForReactivation"
+    ])) == toset(["cognito-idp:AdminEnableUser"])
+    error_message = "User reactivation must grant only AdminEnableUser."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.users_api.statement : statement.resources
+      if statement.sid == "EnableAdministrativeUserForReactivation"
+    ])) == toset([module.identity.user_pool_arn])
+    error_message = "User reactivation must target only the dev user pool."
+  }
+
+  assert {
     condition = length(setintersection(
       toset(flatten([
         for statement in data.aws_iam_policy_document.users_api.statement : statement.actions
       ])),
       toset([
-        "cognito-idp:AdminEnableUser",
         "cognito-idp:AdminResetUserPassword",
         "cognito-idp:AdminSetUserPassword",
         "cognito-idp:AdminUpdateUserAttributes",
