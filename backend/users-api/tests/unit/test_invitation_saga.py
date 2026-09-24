@@ -413,6 +413,75 @@ def test_reactivation_marker_is_cas_protected_and_required_before_enable() -> No
         repo.transition(record=enabled, next_state=ReactivationState.COMPLETED.value)
 
 
+def test_reactivation_completion_builder_is_stable_and_atomic_ready() -> None:
+    table = FakeTable()
+    repo = repository(table)
+    claim = repo.claim_reactivation(
+        environment="dev",
+        actor_id="actor-1",
+        idempotency_key=KEY,
+        user_id="target-1",
+        expected_version=3,
+        request_id="request-1",
+    )
+    repo.mark_reactivation_enable_dispatching(
+        record=claim.record,
+        role="ADMIN",
+        cognito_sub=str(IDS[2]),
+        observed_version=3,
+        observed_auth_version=7,
+    )
+    dispatching = repo.get(str(claim.record["id"]))
+    assert dispatching is not None
+    repo.transition(record=dispatching, next_state=ReactivationState.COGNITO_ENABLED.value)
+    enabled = repo.get(str(claim.record["id"]))
+    assert enabled is not None
+    response: dict[str, object] = {
+        "userId": "target-1",
+        "fullName": "Synthetic User",
+        "email": "synthetic@example.test",
+        "role": "ADMIN",
+        "status": "ACTIVE",
+        "version": 4,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "updatedAt": "2027-01-15T08:00:00.000Z",
+    }
+
+    first = repo.build_reactivation_completion_transition(record=enabled, response=response)
+    second = repo.build_reactivation_completion_transition(
+        record={**enabled, "inProgressExpiration": 1_900_000_000_000},
+        response=response,
+    )
+
+    assert first == second
+    update = first["Update"]
+    assert isinstance(update, dict)
+    assert update["TableName"] == "idempotency"
+    assert update["ConditionExpression"] == (
+        "#state = :cognito_enabled AND requestHash = :request_hash "
+        "AND domainRole = :domain_role AND cognitoSub = :sub "
+        "AND observedVersion = :observed_version "
+        "AND observedAuthVersion = :observed_auth_version "
+        "AND enableAttemptedAt = :enable_attempted_at"
+    )
+    values = update["ExpressionAttributeValues"]
+    assert isinstance(values, dict)
+    decoded = {key: TypeDeserializer().deserialize(value) for key, value in values.items()}
+    assert decoded[":cognito_enabled"] == ReactivationState.COGNITO_ENABLED.value
+    assert decoded[":completed"] == ReactivationState.COMPLETED.value
+    assert decoded[":status"] == 200
+    assert decoded[":observed_version"] == 3
+    assert decoded[":observed_auth_version"] == 7
+    assert "Synthetic User" in decoded.values()
+    assert "synthetic@example.test" in decoded.values()
+
+    with pytest.raises(InvitationSagaInvariantError, match="completion transition"):
+        repo.build_reactivation_completion_transition(
+            record={**enabled, "state": ReactivationState.ENABLE_DISPATCHING.value},
+            response=response,
+        )
+
+
 def test_reactivation_reconciliation_resumes_under_lease_with_stable_context() -> None:
     table = FakeTable()
     repo = repository(table)
@@ -550,7 +619,18 @@ def test_reactivation_completed_record_is_terminal_and_replayable() -> None:
         observed_auth_version=7,
     )
     stored = table.items[str(claim.record["id"])]
-    stored.update(state=ReactivationState.COMPLETED.value, httpStatus=200)
+    stored.update(
+        state=ReactivationState.COMPLETED.value,
+        httpStatus=200,
+        responseUserId="target-1",
+        responseFullName="Synthetic User",
+        responseEmail="synthetic@example.test",
+        responseRole="ADMIN",
+        responseStatus="ACTIVE",
+        responseVersion=4,
+        responseCreatedAt="2026-01-01T00:00:00.000Z",
+        responseUpdatedAt="2027-01-15T08:00:00.000Z",
+    )
 
     replay = repo.claim_reactivation(**kwargs)
 

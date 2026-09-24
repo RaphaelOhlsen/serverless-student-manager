@@ -342,6 +342,69 @@ class InvitationSagaRepository:
             assignments={**context_fields, "enableAttemptedAt": attempted_at},
         )
 
+    def build_reactivation_completion_transition(
+        self,
+        *,
+        record: dict[str, object],
+        response: dict[str, object],
+    ) -> dict[str, object]:
+        record_id, operation, current_state, request_hash = self._transition_context(record)
+        self._validate_reactivation_enable_context(record)
+        response_fields = self._reactivation_response_fields(response)
+        observed_version = record.get("observedVersion")
+        if (
+            operation != REACTIVATE_USER_OPERATION
+            or current_state != ReactivationState.COGNITO_ENABLED.value
+            or response_fields["responseUserId"] != record.get("target")
+            or response_fields["responseRole"] != record.get("domainRole")
+            or response_fields["responseStatus"] != "ACTIVE"
+            or type(observed_version) is not int
+            or response_fields["responseVersion"] != observed_version + 1
+        ):
+            raise InvitationSagaInvariantError("invalid reactivation completion transition")
+
+        started_at = record.get("startedAt")
+        if not isinstance(started_at, str) or not started_at:
+            raise InvitationSagaInvariantError("reactivation completion requires stable startedAt")
+        names = {"#state": "state"}
+        values: dict[str, object] = {
+            ":cognito_enabled": ReactivationState.COGNITO_ENABLED.value,
+            ":completed": ReactivationState.COMPLETED.value,
+            ":request_hash": request_hash,
+            ":domain_role": record["domainRole"],
+            ":sub": record["cognitoSub"],
+            ":observed_version": observed_version,
+            ":observed_auth_version": record["observedAuthVersion"],
+            ":enable_attempted_at": record["enableAttemptedAt"],
+            ":status": 200,
+            ":updated": started_at,
+        }
+        assignments = [
+            "#state = :completed",
+            "httpStatus = :status",
+            "updatedAt = :updated",
+        ]
+        for index, (name, value) in enumerate(response_fields.items()):
+            names[f"#response{index}"] = name
+            values[f":response{index}"] = value
+            assignments.append(f"#response{index} = :response{index}")
+        return {
+            "Update": {
+                "TableName": self._table_name,
+                "Key": self._serialize({"id": record_id}),
+                "UpdateExpression": f"SET {', '.join(assignments)}",
+                "ConditionExpression": (
+                    "#state = :cognito_enabled AND requestHash = :request_hash "
+                    "AND domainRole = :domain_role AND cognitoSub = :sub "
+                    "AND observedVersion = :observed_version "
+                    "AND observedAuthVersion = :observed_auth_version "
+                    "AND enableAttemptedAt = :enable_attempted_at"
+                ),
+                "ExpressionAttributeNames": names,
+                "ExpressionAttributeValues": self._serialize(values),
+            }
+        }
+
     def build_deactivation_domain_transition(
         self,
         *,
@@ -1049,6 +1112,8 @@ class InvitationSagaRepository:
                     and record.get("httpStatus") != 200
                 ):
                     raise InvitationSagaInvariantError("reactivation replay status is invalid")
+                if reactivation_state == ReactivationState.COMPLETED:
+                    InvitationSagaRepository._reactivation_response_fields(record)
                 return
         except ValueError:
             raise InvitationSagaInvariantError("idempotency claim has unknown state") from None
@@ -1133,6 +1198,32 @@ class InvitationSagaRepository:
             or not attempted_at
         ):
             raise InvitationSagaInvariantError("reactivation enable context is invalid")
+
+    @staticmethod
+    def _reactivation_response_fields(response: dict[str, object]) -> dict[str, object]:
+        fields = {
+            "responseUserId": response.get("responseUserId", response.get("userId")),
+            "responseFullName": response.get("responseFullName", response.get("fullName")),
+            "responseEmail": response.get("responseEmail", response.get("email")),
+            "responseRole": response.get("responseRole", response.get("role")),
+            "responseStatus": response.get("responseStatus", response.get("status")),
+            "responseVersion": response.get("responseVersion", response.get("version")),
+            "responseCreatedAt": response.get("responseCreatedAt", response.get("createdAt")),
+            "responseUpdatedAt": response.get("responseUpdatedAt", response.get("updatedAt")),
+        }
+        if (
+            not all(
+                isinstance(value, str) and value
+                for name, value in fields.items()
+                if name != "responseVersion"
+            )
+            or type(fields["responseVersion"]) is not int
+            or fields["responseVersion"] < 2
+            or fields["responseRole"] not in {"ADMIN", "OPERATOR"}
+            or fields["responseStatus"] != "ACTIVE"
+        ):
+            raise InvitationSagaInvariantError("reactivation response is invalid")
+        return fields
 
     @staticmethod
     def _record_id(environment: str, actor_id: str, operation: str, key: str) -> str:

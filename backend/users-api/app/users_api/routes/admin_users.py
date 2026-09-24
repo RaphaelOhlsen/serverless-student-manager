@@ -11,6 +11,7 @@ from users_api.dependencies import (
     get_admin_user_service,
     get_create_user_service,
     get_deactivation_service,
+    get_reactivation_service,
     get_resend_invitation_service,
     get_role_change_service,
 )
@@ -29,6 +30,7 @@ from users_api.errors import (
     UserDeactivationReconciliationError,
     UserEmailAlreadyExistsError,
     UserInvitationReconciliationError,
+    UserReactivationReconciliationError,
     UserRoleChangeReconciliationError,
     UserStateConflictError,
     UserVersionConflictError,
@@ -107,6 +109,18 @@ class DeactivationServiceProtocol(Protocol):
     ) -> dict[str, object]: ...
 
 
+class ReactivationServiceProtocol(Protocol):
+    def reactivate_user(
+        self,
+        *,
+        cognito_sub: str,
+        user_id: str,
+        idempotency_key: object,
+        request_id: str | None,
+        body: str,
+    ) -> dict[str, object]: ...
+
+
 def register_admin_user_routes(
     app: APIGatewayHttpResolver,
     service: AdminUserServiceProtocol | None = None,
@@ -114,6 +128,7 @@ def register_admin_user_routes(
     resend_service: ResendInvitationServiceProtocol | None = None,
     role_change_service: RoleChangeServiceProtocol | None = None,
     deactivation_service: DeactivationServiceProtocol | None = None,
+    reactivation_service: ReactivationServiceProtocol | None = None,
 ) -> None:
     @app.post("/users")
     def create_user() -> Response[dict[str, object]] | Response[dict[str, str]]:
@@ -312,6 +327,55 @@ def register_admin_user_routes(
                 503,
                 "USER_DEACTIVATION_RECONCILIATION_REQUIRED",
                 "User deactivation requires reconciliation",
+            )
+        except Exception:
+            return _error_response(500, "INTERNAL_ERROR", "Unexpected internal error")
+
+    @app.post("/users/<user_id>/reactivation")
+    def reactivate_user(
+        user_id: str,
+    ) -> Response[dict[str, object]] | Response[dict[str, str]]:
+        try:
+            event = app.current_event.raw_event
+            cognito_sub, key, request_id, body = _parse_create_request(event)
+            active_service = (
+                reactivation_service
+                if reactivation_service is not None
+                else get_reactivation_service()
+            )
+            result = active_service.reactivate_user(
+                cognito_sub=cognito_sub,
+                user_id=user_id,
+                idempotency_key=key,
+                request_id=request_id,
+                body=body,
+            )
+            return Response(
+                status_code=200,
+                content_type=content_types.APPLICATION_JSON,
+                body=result,
+            )
+        except InvalidAdminUserWriteRequestError:
+            return _error_response(400, "INVALID_REQUEST", "Invalid user reactivation request")
+        except AdminUserUnauthorizedError:
+            return _error_response(401, "UNAUTHORIZED", "Unauthorized")
+        except AdminUserForbiddenError:
+            return _error_response(403, "FORBIDDEN", "Forbidden")
+        except AdminUserNotFoundError:
+            return _error_response(404, "USER_NOT_FOUND", "User not found")
+        except UserVersionConflictError:
+            return _error_response(409, "USER_VERSION_CONFLICT", "User version conflict")
+        except UserStateConflictError:
+            return _error_response(409, "USER_STATE_CONFLICT", "User state conflict")
+        except IdempotencyKeyReusedError:
+            return _error_response(409, "IDEMPOTENCY_KEY_REUSED", "Idempotency key reused")
+        except OperationInProgressError:
+            return _error_response(409, "OPERATION_IN_PROGRESS", "Operation in progress")
+        except UserReactivationReconciliationError:
+            return _error_response(
+                503,
+                "USER_REACTIVATION_RECONCILIATION_REQUIRED",
+                "User reactivation requires reconciliation",
             )
         except Exception:
             return _error_response(500, "INTERNAL_ERROR", "Unexpected internal error")
