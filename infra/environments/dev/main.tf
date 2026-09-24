@@ -284,6 +284,19 @@ data "aws_iam_policy_document" "users_api" {
   }
 
   statement {
+    sid    = "EnableAdministrativeUserForReactivation"
+    effect = "Allow"
+
+    actions = [
+      "cognito-idp:AdminEnableUser",
+    ]
+
+    resources = [
+      module.identity.user_pool_arn,
+    ]
+  }
+
+  statement {
     sid    = "ReadAndTransactActivationState"
     effect = "Allow"
 
@@ -590,6 +603,12 @@ module "http_api" {
 
     deactivate_user = {
       route_key          = "POST /users/{userId}/deactivation"
+      integration_key    = "users"
+      authorization_type = "JWT"
+    }
+
+    reactivate_user = {
+      route_key          = "POST /users/{userId}/reactivation"
       integration_key    = "users"
       authorization_type = "JWT"
     }

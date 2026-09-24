@@ -119,6 +119,11 @@ variables {
       integration_key    = "users"
       authorization_type = "JWT"
     }
+    reactivate_user = {
+      route_key          = "POST /users/{userId}/reactivation"
+      integration_key    = "users"
+      authorization_type = "JWT"
+    }
   }
 
   cors_allow_origins = [
@@ -634,7 +639,7 @@ run "wires_computed_references" {
 
   assert {
     condition = alltrue([
-      for route_name in ["create_user", "resend_user_invitation", "change_user_role", "deactivate_user"] :
+      for route_name in ["create_user", "resend_user_invitation", "change_user_role", "deactivate_user", "reactivate_user"] :
       aws_apigatewayv2_route.this[route_name].authorization_type == "JWT" &&
       aws_apigatewayv2_route.this[route_name].authorizer_id == aws_apigatewayv2_authorizer.jwt.id &&
       aws_apigatewayv2_route.this[route_name].target == "integrations/${aws_apigatewayv2_integration.lambda["users"].id}"
@@ -647,18 +652,10 @@ run "wires_computed_references" {
       aws_apigatewayv2_route.this["create_user"].route_key == "POST /users" &&
       aws_apigatewayv2_route.this["resend_user_invitation"].route_key == "POST /users/{userId}/invitation/resend" &&
       aws_apigatewayv2_route.this["change_user_role"].route_key == "POST /users/{userId}/role-change" &&
-      aws_apigatewayv2_route.this["deactivate_user"].route_key == "POST /users/{userId}/deactivation"
+      aws_apigatewayv2_route.this["deactivate_user"].route_key == "POST /users/{userId}/deactivation" &&
+      aws_apigatewayv2_route.this["reactivate_user"].route_key == "POST /users/{userId}/reactivation"
     )
     error_message = "Administrative user write route keys are incorrect."
-  }
-
-  assert {
-    condition = alltrue([
-      for route in values(aws_apigatewayv2_route.this) : !contains([
-        "POST /users/{userId}/reactivation",
-      ], route.route_key)
-    ])
-    error_message = "Unimplemented administrative user write routes must remain absent."
   }
 
   assert {
@@ -681,7 +678,7 @@ run "wires_computed_references" {
 
   assert {
     condition     = length(aws_lambda_permission.api_gateway) == 2
-    error_message = "The deactivation route must reuse the existing Lambda permission."
+    error_message = "Administrative user write routes must reuse the existing Lambda permission."
   }
 
   assert {
