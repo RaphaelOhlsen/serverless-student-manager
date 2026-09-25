@@ -1240,6 +1240,7 @@ run "plans_users_api_access" {
       for statement in data.aws_iam_policy_document.users_api.statement : statement.actions
       if statement.sid == "ManageActivationIdempotency"
       ])) == toset([
+      "dynamodb:DeleteItem",
       "dynamodb:GetItem",
       "dynamodb:PutItem",
       "dynamodb:UpdateItem",
