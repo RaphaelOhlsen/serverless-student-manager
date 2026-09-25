@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, cast
 from uuid import UUID
 
 import pytest
@@ -7,6 +8,7 @@ from students_api.errors import (
     OperationInProgressError,
     StudentEmailAlreadyExistsError,
     StudentNotFoundError,
+    StudentUpdateInvariantError,
     StudentUpdateUnresolvedError,
     StudentVersionConflictError,
 )
@@ -28,7 +30,15 @@ CURRENT: dict[str, object] = {
     "updatedAt": "2025-01-01T00:00:00.000Z",
     "updatedBy": "previous",
 }
-RECORD = UpdateIdempotencyRecord("update-student#scoped", "request-hash")
+RECORD = cast(
+    UpdateIdempotencyRecord,
+    SimpleNamespace(
+        idempotency_id="update-student#scoped",
+        request_hash="request-hash",
+        response=None,
+        in_progress_expiration=1_000_000,
+    ),
+)
 
 
 class Authorization:
@@ -44,6 +54,8 @@ class Idempotency:
         self.payload: dict[str, str | int] | None = None
         self.completed: dict[str, object] | None = None
         self.recovery: UpdateIdempotencyRecord | Exception = record
+        self.released: list[UpdateIdempotencyRecord] = []
+        self.release_error: Exception | None = None
 
     def acquire(self, **kwargs: Any) -> UpdateIdempotencyRecord:
         self.calls.append("acquire")
@@ -65,6 +77,9 @@ class Idempotency:
 
     def release(self, record: UpdateIdempotencyRecord) -> None:
         self.calls.append("release")
+        self.released.append(record)
+        if self.release_error is not None:
+            raise self.release_error
 
 
 class Repository:
@@ -157,6 +172,7 @@ def test_definitive_pretransaction_failures_release_acquisition(
     with pytest.raises(error):
         update(service(Repository(current), idempotency), patch)
     assert idempotency.calls == ["acquire", "release"]
+    assert idempotency.released == [idempotency.record]
 
 
 def test_noop_preserves_public_state_and_completes_idempotency() -> None:
@@ -206,7 +222,7 @@ def test_effective_update_resolves_only_present_fields_and_calls_gate2_primitive
     }
 
 
-def test_client_request_token_is_stable_and_scoped() -> None:
+def test_same_claim_generation_keeps_transaction_context_and_token_stable() -> None:
     first_repository = Repository()
     update(
         service(first_repository, Idempotency()),
@@ -221,10 +237,41 @@ def test_client_request_token_is_stable_and_scoped() -> None:
     first = first_repository.update["context"].client_request_token
     second = second_repository.update["context"].client_request_token
     assert first == second
+    assert first_repository.update["context"] == second_repository.update["context"]
     other = UpdateStudentService._client_request_token(
-        UpdateIdempotencyRecord("update-student#other-actor", "request-hash")
+        cast(
+            UpdateIdempotencyRecord,
+            SimpleNamespace(
+                idempotency_id="update-student#other-actor",
+                request_hash="request-hash",
+                in_progress_expiration=1_000_000,
+            ),
+        )
     )
     assert other != first
+
+
+def test_reclaimed_claim_generation_gets_a_distinct_client_request_token() -> None:
+    first = cast(
+        UpdateIdempotencyRecord,
+        SimpleNamespace(
+            idempotency_id="update-student#scoped",
+            request_hash="request-hash",
+            in_progress_expiration=1_000_000,
+        ),
+    )
+    reclaimed = cast(
+        UpdateIdempotencyRecord,
+        SimpleNamespace(
+            idempotency_id=first.idempotency_id,
+            request_hash=first.request_hash,
+            in_progress_expiration=1_061_000,
+        ),
+    )
+
+    assert UpdateStudentService._client_request_token(
+        first
+    ) != UpdateStudentService._client_request_token(reclaimed)
 
 
 def test_unresolved_transaction_recovers_completed_response() -> None:
@@ -263,3 +310,18 @@ def test_transactional_functional_conflict_releases_idempotency(error: Exception
             UpdateStudentInput(3, phone="+5521999999999"),
         )
     assert idempotency.calls == ["acquire", "release"]
+    assert idempotency.released == [idempotency.record]
+
+
+def test_release_failure_suppresses_business_error_and_fails_closed() -> None:
+    idempotency = Idempotency()
+    idempotency.release_error = StudentUpdateInvariantError("release failed")
+
+    with pytest.raises(StudentUpdateInvariantError, match="release failed"):
+        update(
+            service(Repository(None), idempotency),
+            UpdateStudentInput(3, full_name="Outro Nome"),
+        )
+
+    assert idempotency.calls == ["acquire", "release"]
+    assert idempotency.released == [idempotency.record]

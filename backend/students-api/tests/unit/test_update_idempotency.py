@@ -1,4 +1,5 @@
 import json
+from decimal import Decimal
 from typing import Any
 
 import boto3  # type: ignore[import-untyped]
@@ -47,7 +48,10 @@ class Client:
         item = decode(kwargs["Item"])
         key = item["id"]
         if key in self.items:
-            raise ClientError({"Error": {"Code": "ConditionalCheckFailedException"}}, "PutItem")
+            values = decode(kwargs.get("ExpressionAttributeValues", {}))
+            now = values.get(":now")
+            if not isinstance(now, (int, Decimal)) or self.items[key].get("expiration", now) >= now:
+                raise self._conditional_failure("PutItem")
         self.items[key] = item
         return {}
 
@@ -64,9 +68,12 @@ class Client:
         values = decode(kwargs["ExpressionAttributeValues"])
         key = decode(kwargs["Key"])["id"]
         item = self.items[key]
-        assert item["status"] == values[":pending"]
-        assert item["validation"] == values[":hash"]
-        item.update(status=values[":completed"], data=values[":data"])
+        if not self._condition_matches_generation(item, kwargs, values):
+            raise self._conditional_failure("UpdateItem")
+        if ":new_lease" in values:
+            item["in_progress_expiration"] = values[":new_lease"]
+        else:
+            item.update(status=values[":completed"], data=values[":data"])
         return {}
 
     def delete_item(self, **kwargs: Any) -> dict[str, Any]:
@@ -74,10 +81,42 @@ class Client:
         values = decode(kwargs["ExpressionAttributeValues"])
         key = decode(kwargs["Key"])["id"]
         item = self.items[key]
-        assert item["status"] == values[":pending"]
-        assert item["validation"] == values[":hash"]
+        if not self._condition_matches_generation(item, kwargs, values):
+            raise self._conditional_failure("DeleteItem")
         del self.items[key]
         return {}
+
+    @staticmethod
+    def _condition_matches_generation(
+        item: dict[str, Any],
+        request: dict[str, Any],
+        values: dict[str, Any],
+    ) -> bool:
+        if ":pending" in values and item.get("status") != values[":pending"]:
+            return False
+        if ":hash" in values and item.get("validation") != values[":hash"]:
+            return False
+        condition = request.get("ConditionExpression", "")
+        names = request.get("ExpressionAttributeNames", {})
+        if names.get("#lease") == "in_progress_expiration" and "#lease" in condition:
+            expected = values.get(":lease", values.get(":old_lease"))
+            if (
+                not isinstance(expected, (int, Decimal))
+                or item.get("in_progress_expiration") != expected
+            ):
+                return False
+        if "#expiration" in condition and ":now" in values:
+            expiration = item.get("expiration")
+            if not isinstance(expiration, (int, Decimal)) or expiration < values[":now"]:
+                return False
+        return True
+
+    @staticmethod
+    def _conditional_failure(operation: str) -> ClientError:
+        return ClientError(
+            {"Error": {"Code": "ConditionalCheckFailedException"}},
+            operation,
+        )
 
 
 def acquire(
@@ -166,6 +205,16 @@ def test_completed_replay_returns_stored_response() -> None:
     assert get["ConsistentRead"] is True
 
 
+def test_completed_record_with_different_request_is_rejected() -> None:
+    client = Client()
+    idempotency = UpdateStudentIdempotency(client, "idempotency")
+    record = acquire(idempotency)
+    client.items[record.idempotency_id].update(status="COMPLETED", data=json.dumps(RESPONSE))
+
+    with pytest.raises(IdempotencyKeyReusedError):
+        acquire(idempotency, payload={"expectedVersion": 3, "fullName": "Outro Nome"})
+
+
 def test_same_key_different_request_is_rejected() -> None:
     client = Client()
     idempotency = UpdateStudentIdempotency(client, "idempotency")
@@ -182,6 +231,52 @@ def test_matching_inprogress_reports_operation_in_progress() -> None:
 
     with pytest.raises(OperationInProgressError):
         acquire(idempotency)
+
+
+def test_expired_matching_inprogress_claim_is_reclaimed_with_a_new_lease() -> None:
+    client = Client()
+    first = acquire(UpdateStudentIdempotency(client, "idempotency", clock=lambda: 1000))
+    old_lease = client.items[first.idempotency_id]["in_progress_expiration"]
+
+    reclaimed = acquire(UpdateStudentIdempotency(client, "idempotency", clock=lambda: 1061))
+
+    new_lease = getattr(reclaimed, "in_progress_expiration", None)
+    assert type(new_lease) is int
+    assert new_lease > old_lease
+    assert client.items[first.idempotency_id]["in_progress_expiration"] == new_lease
+
+
+def test_lost_reclaim_cas_rereads_and_classifies_concurrent_winner() -> None:
+    class ReclaimRaceClient(Client):
+        def update_item(self, **kwargs: Any) -> dict[str, Any]:
+            values = decode(kwargs["ExpressionAttributeValues"])
+            if ":new_lease" not in values:
+                return super().update_item(**kwargs)
+            self.calls.append(("update", kwargs))
+            key = decode(kwargs["Key"])["id"]
+            self.items[key]["in_progress_expiration"] = values[":new_lease"] + 1
+            raise self._conditional_failure("UpdateItem")
+
+    client = ReclaimRaceClient()
+    first = acquire(UpdateStudentIdempotency(client, "idempotency", clock=lambda: 1000))
+
+    with pytest.raises(OperationInProgressError):
+        acquire(UpdateStudentIdempotency(client, "idempotency", clock=lambda: 1061))
+
+    assert len([call for name, call in client.calls if name == "update"]) == 1
+    assert len([call for name, call in client.calls if name == "get"]) == 2
+    assert client.items[first.idempotency_id]["in_progress_expiration"] == 1_121_001
+
+
+def test_different_request_is_rejected_after_lease_expiry_within_logical_ttl() -> None:
+    client = Client()
+    acquire(UpdateStudentIdempotency(client, "idempotency", clock=lambda: 1000))
+
+    with pytest.raises(IdempotencyKeyReusedError):
+        acquire(
+            UpdateStudentIdempotency(client, "idempotency", clock=lambda: 1061),
+            payload={"expectedVersion": 3, "fullName": "Outro Nome"},
+        )
 
 
 def test_noop_completion_persists_replay_response() -> None:
@@ -203,6 +298,31 @@ def test_uncertain_noop_completion_recovers_durable_completed_result() -> None:
     client.fail_update = TimeoutError()
 
     assert idempotency.complete_noop(record, stored) == stored
+
+
+def test_ambiguous_client_error_recovers_durable_noop_completion() -> None:
+    client = Client()
+    idempotency = UpdateStudentIdempotency(client, "idempotency")
+    record = acquire(idempotency)
+    stored = {**RESPONSE, "version": 3, "updatedAt": "2025-01-01T00:00:00.000Z"}
+    client.items[record.idempotency_id].update(status="COMPLETED", data=json.dumps(stored))
+    client.fail_update = ClientError({"Error": {"Code": "InternalServerError"}}, "UpdateItem")
+
+    assert idempotency.complete_noop(record, stored) == stored
+    assert [name for name, _ in client.calls[-2:]] == ["update", "get"]
+
+
+def test_ambiguous_client_error_still_inprogress_fails_closed() -> None:
+    client = Client()
+    idempotency = UpdateStudentIdempotency(client, "idempotency")
+    record = acquire(idempotency)
+    client.fail_update = ClientError({"Error": {"Code": "InternalServerError"}}, "UpdateItem")
+
+    with pytest.raises(OperationInProgressError):
+        idempotency.complete_noop(record, {"version": 3})
+
+    assert len([call for name, call in client.calls if name == "update"]) == 2
+    assert len([call for name, call in client.calls if name == "get"]) == 2
 
 
 def test_uncertain_noop_still_inprogress_is_not_a_version_conflict() -> None:
@@ -242,6 +362,52 @@ def test_release_conditionally_removes_only_matching_inprogress_record() -> None
     idempotency.release(record)
 
     assert record.idempotency_id not in client.items
+
+
+def test_stale_worker_cannot_release_reclaimed_generation() -> None:
+    client = Client()
+    idempotency = UpdateStudentIdempotency(client, "idempotency", clock=lambda: 1000)
+    stale = acquire(idempotency)
+    item = client.items[stale.idempotency_id]
+    item["in_progress_expiration"] += 61_000
+
+    with pytest.raises(StudentUpdateInvariantError):
+        idempotency.release(stale)
+
+    assert client.items[stale.idempotency_id] is item
+    assert item["status"] == "INPROGRESS"
+
+
+def test_stale_worker_cannot_complete_noop_after_reclaim() -> None:
+    client = Client()
+    idempotency = UpdateStudentIdempotency(client, "idempotency", clock=lambda: 1000)
+    stale = acquire(idempotency)
+    item = client.items[stale.idempotency_id]
+    item["in_progress_expiration"] += 61_000
+
+    with pytest.raises(StudentUpdateInvariantError):
+        idempotency.complete_noop(stale, RESPONSE)
+
+    assert item["status"] == "INPROGRESS"
+    assert "data" not in item
+
+
+def test_logically_expired_record_starts_a_fresh_idempotency_window() -> None:
+    client = Client()
+    first = acquire(UpdateStudentIdempotency(client, "idempotency", clock=lambda: 1000))
+    client.items[first.idempotency_id].update(status="COMPLETED", data=json.dumps(RESPONSE))
+
+    fresh = acquire(
+        UpdateStudentIdempotency(client, "idempotency", clock=lambda: 87_401),
+        payload={"expectedVersion": 9, "phone": "+5521999999999"},
+    )
+
+    item = client.items[fresh.idempotency_id]
+    assert fresh.request_hash != first.request_hash
+    assert item["status"] == "INPROGRESS"
+    assert item["validation"] == fresh.request_hash
+    assert item["expiration"] == 173_801
+    assert "data" not in item
 
 
 @pytest.mark.parametrize("status", ["FAILED", None])

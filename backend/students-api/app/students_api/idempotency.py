@@ -3,6 +3,7 @@ import json
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any, Literal, Protocol
 
 from aws_lambda_powertools.utilities.idempotency import (
@@ -110,6 +111,7 @@ class UpdateIdempotencyRecord:
     idempotency_id: str
     request_hash: str
     response: dict[str, object] | None = None
+    in_progress_expiration: int | None = None
 
 
 class UpdateStudentIdempotency:
@@ -150,7 +152,13 @@ class UpdateStudentIdempotency:
             }
         )
         now = int(self._clock())
-        record = UpdateIdempotencyRecord(idempotency_id, request_hash)
+        now_millis = now * 1000
+        lease = (now + 60) * 1000
+        record = UpdateIdempotencyRecord(
+            idempotency_id,
+            request_hash,
+            in_progress_expiration=lease,
+        )
         try:
             self._client.put_item(
                 TableName=self._table_name,
@@ -159,7 +167,7 @@ class UpdateStudentIdempotency:
                         "id": idempotency_id,
                         "status": "INPROGRESS",
                         "expiration": now + 86400,
-                        "in_progress_expiration": (now + 60) * 1000,
+                        "in_progress_expiration": lease,
                         "validation": request_hash,
                     }
                 ),
@@ -173,7 +181,11 @@ class UpdateStudentIdempotency:
         except ClientError as error:
             if error.response.get("Error", {}).get("Code") != "ConditionalCheckFailedException":
                 raise StudentUpdateUnresolvedError from error
-            return self.resolve(record)
+            return self._resolve_acquisition(
+                record,
+                now=now,
+                now_millis=now_millis,
+            )
         except Exception as error:
             raise StudentUpdateUnresolvedError from error
         return record
@@ -186,6 +198,8 @@ class UpdateStudentIdempotency:
         for attempt in range(2):
             try:
                 self._complete_noop_once(record, response)
+            except StudentUpdateInvariantError:
+                raise
             except Exception:
                 try:
                     recovered = self.resolve(record)
@@ -204,27 +218,125 @@ class UpdateStudentIdempotency:
         record: UpdateIdempotencyRecord,
         response: dict[str, object],
     ) -> None:
-        self._client.update_item(
-            TableName=self._table_name,
-            Key=self._serialize({"id": record.idempotency_id}),
-            UpdateExpression="SET #status = :completed, #data = :data",
-            ConditionExpression="#status = :pending AND #validation = :hash",
-            ExpressionAttributeNames={
-                "#status": "status",
-                "#data": "data",
-                "#validation": "validation",
-            },
-            ExpressionAttributeValues=self._serialize(
-                {
-                    ":completed": "COMPLETED",
-                    ":pending": "INPROGRESS",
-                    ":data": self._canonical_json(response),
-                    ":hash": record.request_hash,
-                }
-            ),
+        try:
+            self._client.update_item(
+                TableName=self._table_name,
+                Key=self._serialize({"id": record.idempotency_id}),
+                UpdateExpression="SET #status = :completed, #data = :data",
+                ConditionExpression=(
+                    "#status = :pending AND #validation = :hash AND #lease = :lease"
+                ),
+                ExpressionAttributeNames={
+                    "#status": "status",
+                    "#data": "data",
+                    "#validation": "validation",
+                    "#lease": "in_progress_expiration",
+                },
+                ExpressionAttributeValues=self._serialize(
+                    {
+                        ":completed": "COMPLETED",
+                        ":pending": "INPROGRESS",
+                        ":data": self._canonical_json(response),
+                        ":hash": record.request_hash,
+                        ":lease": self._required_lease(record),
+                    }
+                ),
+            )
+        except ClientError as error:
+            if error.response.get("Error", {}).get("Code") == ("ConditionalCheckFailedException"):
+                raise StudentUpdateInvariantError from error
+            raise
+
+    def _resolve_acquisition(
+        self,
+        record: UpdateIdempotencyRecord,
+        *,
+        now: int,
+        now_millis: int,
+    ) -> UpdateIdempotencyRecord:
+        item = self._get_record(record)
+        if item.get("validation") != record.request_hash:
+            raise IdempotencyKeyReusedError
+        status = item.get("status")
+        if status == "COMPLETED":
+            return self._completed_record(record, item)
+        if status != "INPROGRESS":
+            raise StudentUpdateInvariantError
+        previous_lease = self._integer(item.get("in_progress_expiration"))
+        expiration = self._integer(item.get("expiration"))
+        if previous_lease is None or expiration is None:
+            raise StudentUpdateInvariantError
+        if previous_lease > now_millis:
+            raise OperationInProgressError
+        if expiration < now:
+            raise StudentUpdateInvariantError
+        new_lease = max((now + 60) * 1000, previous_lease + 1)
+        try:
+            self._client.update_item(
+                TableName=self._table_name,
+                Key=self._serialize({"id": record.idempotency_id}),
+                UpdateExpression="SET #lease = :new_lease",
+                ConditionExpression=(
+                    "#status = :pending AND #validation = :hash "
+                    "AND #lease = :old_lease AND #expiration >= :now"
+                ),
+                ExpressionAttributeNames={
+                    "#status": "status",
+                    "#validation": "validation",
+                    "#lease": "in_progress_expiration",
+                    "#expiration": "expiration",
+                },
+                ExpressionAttributeValues=self._serialize(
+                    {
+                        ":pending": "INPROGRESS",
+                        ":hash": record.request_hash,
+                        ":old_lease": previous_lease,
+                        ":new_lease": new_lease,
+                        ":now": now,
+                    }
+                ),
+            )
+        except ClientError as error:
+            if error.response.get("Error", {}).get("Code") != ("ConditionalCheckFailedException"):
+                raise StudentUpdateUnresolvedError from error
+            return self._classify_reclaim_winner(record, now_millis=now_millis)
+        except Exception as error:
+            raise StudentUpdateUnresolvedError from error
+        return UpdateIdempotencyRecord(
+            record.idempotency_id,
+            record.request_hash,
+            in_progress_expiration=new_lease,
         )
 
+    def _classify_reclaim_winner(
+        self,
+        record: UpdateIdempotencyRecord,
+        *,
+        now_millis: int,
+    ) -> UpdateIdempotencyRecord:
+        item = self._get_record(record)
+        if item.get("validation") != record.request_hash:
+            raise IdempotencyKeyReusedError
+        status = item.get("status")
+        if status == "COMPLETED":
+            return self._completed_record(record, item)
+        lease = self._integer(item.get("in_progress_expiration"))
+        if status == "INPROGRESS" and lease is not None and lease > now_millis:
+            raise OperationInProgressError
+        raise StudentUpdateInvariantError
+
     def resolve(self, record: UpdateIdempotencyRecord) -> UpdateIdempotencyRecord:
+        item = self._get_record(record)
+        if item.get("validation") != record.request_hash:
+            raise IdempotencyKeyReusedError
+        status = item.get("status")
+        if status == "INPROGRESS":
+            raise OperationInProgressError
+        if status != "COMPLETED":
+            raise StudentUpdateInvariantError
+        return self._completed_record(record, item)
+
+    def _get_record(self, record: UpdateIdempotencyRecord) -> dict[str, object]:
         try:
             result = self._client.get_item(
                 TableName=self._table_name,
@@ -239,13 +351,13 @@ class UpdateStudentIdempotency:
         item = self._deserialize(raw)
         if item.get("id") != record.idempotency_id:
             raise StudentUpdateInvariantError
-        if item.get("validation") != record.request_hash:
-            raise IdempotencyKeyReusedError
-        status = item.get("status")
-        if status == "INPROGRESS":
-            raise OperationInProgressError
-        if status != "COMPLETED":
-            raise StudentUpdateInvariantError
+        return item
+
+    def _completed_record(
+        self,
+        record: UpdateIdempotencyRecord,
+        item: dict[str, object],
+    ) -> UpdateIdempotencyRecord:
         data = item.get("data")
         if not isinstance(data, str):
             raise StudentUpdateInvariantError
@@ -267,6 +379,7 @@ class UpdateStudentIdempotency:
             record.idempotency_id,
             record.request_hash,
             response,
+            self._item_lease(item),
         )
 
     def release(self, record: UpdateIdempotencyRecord) -> None:
@@ -274,14 +387,42 @@ class UpdateStudentIdempotency:
             self._client.delete_item(
                 TableName=self._table_name,
                 Key=self._serialize({"id": record.idempotency_id}),
-                ConditionExpression="#status = :pending AND #validation = :hash",
-                ExpressionAttributeNames={"#status": "status", "#validation": "validation"},
+                ConditionExpression=(
+                    "#status = :pending AND #validation = :hash AND #lease = :lease"
+                ),
+                ExpressionAttributeNames={
+                    "#status": "status",
+                    "#validation": "validation",
+                    "#lease": "in_progress_expiration",
+                },
                 ExpressionAttributeValues=self._serialize(
-                    {":pending": "INPROGRESS", ":hash": record.request_hash}
+                    {
+                        ":pending": "INPROGRESS",
+                        ":hash": record.request_hash,
+                        ":lease": self._required_lease(record),
+                    }
                 ),
             )
         except Exception as error:
             raise StudentUpdateInvariantError from error
+
+    @staticmethod
+    def _required_lease(record: UpdateIdempotencyRecord) -> int:
+        if type(record.in_progress_expiration) is not int:
+            raise StudentUpdateInvariantError
+        return record.in_progress_expiration
+
+    @staticmethod
+    def _item_lease(item: dict[str, object]) -> int | None:
+        return UpdateStudentIdempotency._integer(item.get("in_progress_expiration"))
+
+    @staticmethod
+    def _integer(value: object) -> int | None:
+        if type(value) is int:
+            return value
+        if isinstance(value, Decimal) and value == value.to_integral_value():
+            return int(value)
+        return None
 
     @classmethod
     def _hash(cls, value: object) -> str:

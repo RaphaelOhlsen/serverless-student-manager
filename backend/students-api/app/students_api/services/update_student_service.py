@@ -135,6 +135,7 @@ class UpdateStudentService:
             idempotency_id=record.idempotency_id,
             request_hash=record.request_hash,
             client_request_token=self._client_request_token(record),
+            in_progress_expiration=self._required_lease(record),
         )
         try:
             self._repository.update_student(
@@ -197,4 +198,11 @@ class UpdateStudentService:
     @staticmethod
     def _client_request_token(record: UpdateIdempotencyRecord) -> str:
         # The scoped durable id and request hash contain no PII and distinguish actors/requests.
-        return str(uuid5(UUID(int=0), f"{record.idempotency_id}#{record.request_hash}"))
+        lease = UpdateStudentService._required_lease(record)
+        return str(uuid5(UUID(int=0), f"{record.idempotency_id}#{record.request_hash}#{lease}"))
+
+    @staticmethod
+    def _required_lease(record: UpdateIdempotencyRecord) -> int:
+        if type(record.in_progress_expiration) is not int:
+            raise StudentUpdateInvariantError
+        return record.in_progress_expiration
