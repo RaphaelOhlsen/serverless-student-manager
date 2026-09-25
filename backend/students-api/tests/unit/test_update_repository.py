@@ -1,4 +1,5 @@
 import json
+from copy import deepcopy
 from dataclasses import replace
 from typing import Any
 
@@ -50,6 +51,7 @@ CURRENT = {
     "version": 3,
     "fullName": "Aluno Teste",
     "studentEmail": "old@example.com",
+    "normalizedEmail": "old@example.com",
     "phone": "+5511999999999",
     "birthDate": "2000-01-01",
 }
@@ -62,6 +64,7 @@ CONTEXT = UpdateTransactionContext(
     idempotency_id="update-student#scoped-id",
     request_hash="request-hash",
     client_request_token="stable-transaction-token",
+    in_progress_expiration=1_000_000,
 )
 
 
@@ -169,6 +172,33 @@ def test_atomic_update(email: bool) -> None:
         stub.assert_no_pending_responses()
 
 
+def test_effective_completion_is_guarded_by_exact_claim_generation() -> None:
+    client = Client()
+    run(client)
+
+    completion = client.calls[0]["TransactItems"][-1]["Update"]
+    values = decode(completion["ExpressionAttributeValues"])
+    assert completion["ExpressionAttributeNames"]["#lease"] == "in_progress_expiration"
+    assert "#lease = :lease" in completion["ConditionExpression"]
+    assert values[":lease"] == CONTEXT.in_progress_expiration
+
+
+def test_email_change_synchronizes_profile_and_reservation_normalized_email() -> None:
+    client = Client()
+    run(client, email=True)
+
+    items = client.calls[0]["TransactItems"]
+    profile = items[0]["Update"]
+    names = profile["ExpressionAttributeNames"]
+    values = decode(profile["ExpressionAttributeValues"])
+    assigned = {
+        names[left.strip()]: values[right.strip()]
+        for left, right in (part.split("=") for part in profile["UpdateExpression"][4:].split(","))
+    }
+    assert assigned["studentEmail"] == assigned["normalizedEmail"] == "new@example.com"
+    assert decode(items[1]["Put"]["Item"])["PK"] == (f"UNIQUE#EMAIL#{assigned['normalizedEmail']}")
+
+
 @pytest.mark.parametrize(
     ("failed", "expected"),
     [
@@ -234,7 +264,14 @@ def test_phone_only_does_not_touch_name_indexes_or_reservations() -> None:
     items = client.calls[0]["TransactItems"]
     assert len(items) == 3
     names = items[0]["Update"]["ExpressionAttributeNames"].values()
-    assert not {"GSI1SK", "GSI2SK", "normalizedName", "fullName", "studentEmail"} & set(names)
+    assert not {
+        "GSI1SK",
+        "GSI2SK",
+        "normalizedName",
+        "normalizedEmail",
+        "fullName",
+        "studentEmail",
+    } & set(names)
     assert decode(items[1]["Put"]["Item"])["changes"]["fields"] == ["phone"]
 
 
@@ -292,3 +329,120 @@ def test_rejects_client_request_token_outside_sdk_limits(token: str) -> None:
 def test_non_cancellation_service_error_remains_unresolved() -> None:
     with pytest.raises(StudentUpdateUnresolvedError):
         run(Client(ClientError({"Error": {"Code": "InternalServerError"}}, "TransactWriteItems")))
+
+
+def test_same_generation_retries_use_identical_transaction_payload_and_token() -> None:
+    client = Client()
+
+    run(client, email=True)
+    run(client, email=True)
+
+    assert client.calls[0] == client.calls[1]
+
+
+class RollbackClient(Client):
+    def __init__(self, failed_index: int) -> None:
+        super().__init__()
+        self.failed_index = failed_index
+        self.state: dict[str, object] = {
+            "profile": deepcopy(CURRENT),
+            "newReservation": None,
+            "oldReservation": {"studentId": "student-1"},
+            "audit": None,
+            "idempotency": {
+                "status": "INPROGRESS",
+                "validation": CONTEXT.request_hash,
+                "in_progress_expiration": CONTEXT.in_progress_expiration,
+            },
+        }
+
+    def transact_write_items(self, **kwargs: Any) -> dict[str, Any]:
+        self.calls.append(kwargs)
+        reasons = [
+            {"Code": "ConditionalCheckFailed" if index == self.failed_index else "None"}
+            for index in range(len(kwargs["TransactItems"]))
+        ]
+        raise ClientError(
+            {"Error": {"Code": "TransactionCanceledException"}, "CancellationReasons": reasons},
+            "TransactWriteItems",
+        )
+
+
+def test_duplicate_email_rolls_back_every_transaction_participant() -> None:
+    client = RollbackClient(failed_index=1)
+    before = deepcopy(client.state)
+
+    with pytest.raises(StudentEmailAlreadyExistsError):
+        run(client, email=True)
+
+    assert client.state == before
+    assert len(client.calls[0]["TransactItems"]) == 5
+
+
+def test_old_email_reservation_wrong_owner_is_invariant_and_rolls_back() -> None:
+    client = RollbackClient(failed_index=2)
+    client.state["oldReservation"] = {"studentId": "other-student"}
+    before = deepcopy(client.state)
+
+    with pytest.raises(StudentUpdateInvariantError):
+        run(client, email=True)
+
+    assert client.state == before
+    old_reservation_delete = client.calls[0]["TransactItems"][2]["Delete"]
+    assert "#owner = :owner" in old_reservation_delete["ConditionExpression"]
+
+
+class StaleCompletionClient(Client):
+    def __init__(self) -> None:
+        super().__init__()
+        self.state: dict[str, object] = {
+            "profile": deepcopy(CURRENT),
+            "newReservation": None,
+            "oldReservation": {"studentId": "student-1"},
+            "audit": None,
+            "idempotency": {
+                "status": "INPROGRESS",
+                "validation": CONTEXT.request_hash,
+                "in_progress_expiration": CONTEXT.in_progress_expiration + 61_000,
+            },
+        }
+
+    def transact_write_items(self, **kwargs: Any) -> dict[str, Any]:
+        self.calls.append(kwargs)
+        items = kwargs["TransactItems"]
+        completion = items[-1]["Update"]
+        names = completion["ExpressionAttributeNames"]
+        values = decode(completion["ExpressionAttributeValues"])
+        protects_lease = (
+            names.get("#lease") == "in_progress_expiration"
+            and "#lease = :lease" in completion["ConditionExpression"]
+            and values.get(":lease") == CONTEXT.in_progress_expiration
+        )
+        if protects_lease:
+            reasons = [{"Code": "None"} for _ in items]
+            reasons[-1] = {"Code": "ConditionalCheckFailed"}
+            raise ClientError(
+                {
+                    "Error": {"Code": "TransactionCanceledException"},
+                    "CancellationReasons": reasons,
+                },
+                "TransactWriteItems",
+            )
+        self.state.update(
+            profile={**CURRENT, "studentEmail": "new@example.com", "version": 4},
+            newReservation={"studentId": "student-1"},
+            oldReservation=None,
+            audit={"eventType": "STUDENT_UPDATED"},
+            idempotency={"status": "COMPLETED"},
+        )
+        return {}
+
+
+def test_stale_worker_effective_completion_fails_atomically() -> None:
+    client = StaleCompletionClient()
+    before = deepcopy(client.state)
+
+    with pytest.raises(StudentUpdateInvariantError):
+        run(client, email=True)
+
+    assert client.state == before

@@ -41,6 +41,7 @@ class UpdateTransactionContext:
     idempotency_id: str
     request_hash: str
     client_request_token: str
+    in_progress_expiration: int
 
 
 def serialize(item: dict[str, Any]) -> dict[str, Any]:
@@ -72,6 +73,7 @@ def build_update_transaction(
         or current.get("version") != expected_version
         or len({students_table, audit_table, idempotency_table}) != 3
         or not 1 <= len(context.client_request_token) <= 36
+        or type(context.in_progress_expiration) is not int
     ):
         raise StudentUpdateInvariantError
     changed = [name for name in MUTABLE_FIELDS if current[name] != target[name]]
@@ -86,6 +88,9 @@ def build_update_transaction(
         normalized = normalize_name(target["fullName"])
         name_key = f"NAME#{normalized}#STUDENT#{student_id}"
         values.update(normalizedName=normalized, GSI1SK=name_key, GSI2SK=name_key)
+    email_changed = "studentEmail" in changed
+    if email_changed:
+        values["normalizedEmail"] = target["studentEmail"]
     names = {f"#f{i}": name for i, name in enumerate(values)}
     expressions = {f":v{i}": value for i, value in enumerate(values.values())}
     names.update({"#version": "version", "#pk": "PK", "#sk": "SK"})
@@ -105,7 +110,6 @@ def build_update_transaction(
             }
         }
     ]
-    email_changed = "studentEmail" in changed
     if email_changed:
         items.extend(
             [
@@ -184,13 +188,15 @@ def build_update_transaction(
                     "Key": serialize({"id": context.idempotency_id}),
                     "UpdateExpression": "SET #status = :completed, #data = :data",
                     "ConditionExpression": (
-                        "attribute_exists(#id) AND #status = :pending AND #validation = :hash"
+                        "attribute_exists(#id) AND #status = :pending AND #validation = :hash "
+                        "AND #lease = :lease"
                     ),
                     "ExpressionAttributeNames": {
                         "#id": "id",
                         "#status": "status",
                         "#data": "data",
                         "#validation": "validation",
+                        "#lease": "in_progress_expiration",
                     },
                     "ExpressionAttributeValues": serialize(
                         {
@@ -198,6 +204,7 @@ def build_update_transaction(
                             ":pending": "INPROGRESS",
                             ":data": json.dumps(response, sort_keys=True, separators=(",", ":")),
                             ":hash": context.request_hash,
+                            ":lease": context.in_progress_expiration,
                         }
                     ),
                 }
