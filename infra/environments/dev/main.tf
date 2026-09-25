@@ -417,6 +417,7 @@ data "aws_iam_policy_document" "users_api" {
     effect = "Allow"
 
     actions = [
+      "dynamodb:DeleteItem",
       "dynamodb:GetItem",
       "dynamodb:PutItem",
       "dynamodb:UpdateItem",
