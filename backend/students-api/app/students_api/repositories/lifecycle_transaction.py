@@ -31,6 +31,7 @@ class LifecycleIdempotencyCompletion:
     idempotency_id: str
     request_hash: str
     client_request_token: str
+    in_progress_expiration: int
 
 
 @dataclass(frozen=True)
@@ -136,13 +137,15 @@ def build_lifecycle_transaction(
                 "Key": serialize({"id": idempotency.idempotency_id}),
                 "UpdateExpression": "SET #status = :completed, #data = :data",
                 "ConditionExpression": (
-                    "attribute_exists(#id) AND #status = :pending AND #validation = :hash"
+                    "attribute_exists(#id) AND #status = :pending AND #validation = :hash "
+                    "AND #lease = :lease"
                 ),
                 "ExpressionAttributeNames": {
                     "#id": "id",
                     "#status": "status",
                     "#data": "data",
                     "#validation": "validation",
+                    "#lease": "in_progress_expiration",
                 },
                 "ExpressionAttributeValues": serialize(
                     {
@@ -152,6 +155,7 @@ def build_lifecycle_transaction(
                             transition.public_response, sort_keys=True, separators=(",", ":")
                         ),
                         ":hash": idempotency.request_hash,
+                        ":lease": idempotency.in_progress_expiration,
                     }
                 ),
             }
@@ -233,6 +237,7 @@ def _validate_transition(
             )
         )
         or not 1 <= len(idempotency.client_request_token) <= 36
+        or type(idempotency.in_progress_expiration) is not int
     )
     reason_invalid = (
         pair == ("ACTIVE", "INACTIVE")

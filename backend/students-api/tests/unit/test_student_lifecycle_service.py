@@ -11,7 +11,7 @@ from students_api.errors import (
     StudentNotFoundError,
     StudentVersionConflictError,
 )
-from students_api.idempotency import LifecycleIdempotencyRecord
+from students_api.idempotency import LifecycleIdempotencyRecord, LifecycleOperation
 from students_api.services.student_lifecycle_service import StudentLifecycleService
 from students_api.validation import DeactivateStudentInput, ReactivateStudentInput
 
@@ -29,9 +29,23 @@ CURRENT: dict[str, object] = {
     "updatedAt": "2025-01-01T00:00:00.000Z",
     "updatedBy": "previous",
 }
-DEACTIVATE_RECORD = LifecycleIdempotencyRecord(
-    "deactivate-student", "deactivate-student#scoped", "request-hash"
-)
+LEASE = 1_000_000
+
+
+def lifecycle_record(
+    operation: LifecycleOperation = "deactivate-student",
+    idempotency_id: str = "deactivate-student#scoped",
+    request_hash: str = "request-hash",
+    response: dict[str, object] | None = None,
+    *,
+    lease: int = LEASE,
+) -> LifecycleIdempotencyRecord:
+    record = LifecycleIdempotencyRecord(operation, idempotency_id, request_hash, response)
+    object.__setattr__(record, "in_progress_expiration", lease)
+    return record
+
+
+DEACTIVATE_RECORD = lifecycle_record()
 
 
 class Authorization:
@@ -146,9 +160,7 @@ def test_effective_transition_builds_gate2_input(operation: str) -> None:
     record = (
         DEACTIVATE_RECORD
         if operation == "deactivate"
-        else LifecycleIdempotencyRecord(
-            "reactivate-student", "reactivate-student#scoped", "request-hash"
-        )
+        else lifecycle_record("reactivate-student", "reactivate-student#scoped", "request-hash")
     )
     repository = Repository(calls, [current])
     idempotency = Idempotency(calls, record)
@@ -187,9 +199,7 @@ def test_effective_transition_builds_gate2_input(operation: str) -> None:
 def test_completed_replay_precedes_student_read_and_version_check() -> None:
     calls: list[str] = []
     stored = {"studentId": "student-1", "version": 1}
-    record = LifecycleIdempotencyRecord(
-        "deactivate-student", "deactivate-student#scoped", "hash", stored
-    )
+    record = lifecycle_record("deactivate-student", "deactivate-student#scoped", "hash", stored)
     repository = Repository(calls, [{**CURRENT, "version": 99}])
 
     assert deactivate(make_service(repository, Idempotency(calls, record), calls), 1) == stored
@@ -275,7 +285,7 @@ def test_unresolved_transaction_recovers_completed_without_profile_reread() -> N
     repository = Repository(calls, error=StudentLifecycleUnresolvedError())
     idempotency = Idempotency(calls)
     stored = {"studentId": "student-1", "version": 4}
-    idempotency.recovery = LifecycleIdempotencyRecord("deactivate-student", "id", "hash", stored)
+    idempotency.recovery = lifecycle_record("deactivate-student", "id", "hash", stored)
 
     assert deactivate(make_service(repository, idempotency, calls)) == stored
     assert calls == ["authorize", "acquire", "get", "transition", "resolve"]
@@ -312,11 +322,19 @@ def test_client_token_is_stable_and_scoped_without_reason() -> None:
     assert first == second
     assert "Motivo" not in first
     other = StudentLifecycleService._client_request_token(
-        LifecycleIdempotencyRecord("deactivate-student", "other", "request-hash")
+        lifecycle_record("deactivate-student", "other", "request-hash")
     )
     other_request = StudentLifecycleService._client_request_token(
-        LifecycleIdempotencyRecord(
+        lifecycle_record(
             "deactivate-student", DEACTIVATE_RECORD.idempotency_id, "other-request-hash"
         )
     )
     assert len({first, other, other_request}) == 3
+
+
+def test_reclaimed_generation_gets_distinct_client_request_token() -> None:
+    reclaimed = lifecycle_record(lease=LEASE + 61_000)
+
+    assert StudentLifecycleService._client_request_token(
+        DEACTIVATE_RECORD
+    ) != StudentLifecycleService._client_request_token(reclaimed)
