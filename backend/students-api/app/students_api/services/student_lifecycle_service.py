@@ -199,6 +199,7 @@ class StudentLifecycleService:
                 idempotency_id=record.idempotency_id,
                 request_hash=record.request_hash,
                 client_request_token=self._client_request_token(record),
+                in_progress_expiration=self._required_lease(record),
             ),
         )
         try:
@@ -269,4 +270,11 @@ class StudentLifecycleService:
 
     @staticmethod
     def _client_request_token(record: LifecycleIdempotencyRecord) -> str:
-        return str(uuid5(UUID(int=0), f"{record.idempotency_id}#{record.request_hash}"))
+        lease = StudentLifecycleService._required_lease(record)
+        return str(uuid5(UUID(int=0), f"{record.idempotency_id}#{record.request_hash}#{lease}"))
+
+    @staticmethod
+    def _required_lease(record: LifecycleIdempotencyRecord) -> int:
+        if type(record.in_progress_expiration) is not int:
+            raise StudentLifecycleInvariantError
+        return record.in_progress_expiration

@@ -1,6 +1,7 @@
 import json
 from dataclasses import replace
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, cast
 
 import boto3  # type: ignore[import-untyped]
 import pytest
@@ -45,6 +46,7 @@ class Table:
 
 
 REASON = "Motivo sintético de teste"
+LEASE = 1_000_000
 AUDIT_EVENT = LifecycleAuditEvent(
     actor_id="actor",
     correlation_id="correlation",
@@ -53,11 +55,26 @@ AUDIT_EVENT = LifecycleAuditEvent(
     audit_expires_at=1900000000,
     reason=REASON,
 )
-IDEMPOTENCY = LifecycleIdempotencyCompletion(
-    idempotency_id="deactivate-student#scoped-id",
-    request_hash="request-hash",
-    client_request_token="stable-lifecycle-token",
-)
+
+
+def idempotency_completion(
+    *,
+    idempotency_id: str = "deactivate-student#scoped-id",
+    client_request_token: str = "stable-lifecycle-token",
+    lease: int = LEASE,
+) -> LifecycleIdempotencyCompletion:
+    return cast(
+        LifecycleIdempotencyCompletion,
+        SimpleNamespace(
+            idempotency_id=idempotency_id,
+            request_hash="request-hash",
+            client_request_token=client_request_token,
+            in_progress_expiration=lease,
+        ),
+    )
+
+
+IDEMPOTENCY = idempotency_completion()
 
 
 def response(*, status: str, version: int) -> dict[str, object]:
@@ -83,7 +100,7 @@ def transition(*, deactivate: bool = True) -> LifecycleTransition:
     idempotency = (
         IDEMPOTENCY
         if deactivate
-        else replace(IDEMPOTENCY, idempotency_id="reactivate-student#scoped-id")
+        else idempotency_completion(idempotency_id="reactivate-student#scoped-id")
     )
     return LifecycleTransition(
         student_id="student-1",
@@ -96,11 +113,16 @@ def transition(*, deactivate: bool = True) -> LifecycleTransition:
     )
 
 
-def run(client: Any, *, deactivate: bool = True) -> None:
+def run(
+    client: Any,
+    *,
+    deactivate: bool = True,
+    value: LifecycleTransition | None = None,
+) -> None:
     StudentRepository(
         Table(), client=client, students_table_name="students", audit_table_name="audit"
     ).transition_student_lifecycle(
-        transition=transition(deactivate=deactivate),
+        transition=value or transition(deactivate=deactivate),
         idempotency_table_name="idempotency",
     )
 
@@ -178,6 +200,9 @@ def test_effective_transition_is_one_valid_three_item_transaction(
     assert idempotency_values[":hash"] == IDEMPOTENCY.request_hash
     assert "#status = :pending" in idempotency["ConditionExpression"]
     assert "#validation = :hash" in idempotency["ConditionExpression"]
+    assert idempotency["ExpressionAttributeNames"]["#lease"] == "in_progress_expiration"
+    assert "#lease = :lease" in idempotency["ConditionExpression"]
+    assert idempotency_values[":lease"] == LEASE
     replay = json.loads(idempotency_values[":data"])
     assert replay == response(status=target, version=4)
     assert REASON not in idempotency_values[":data"]
@@ -205,6 +230,47 @@ def test_effective_transition_is_one_valid_three_item_transaction(
         stub.add_response("transact_write_items", {}, call)
         run(sdk, deactivate=deactivate)
         stub.assert_no_pending_responses()
+
+
+@pytest.mark.parametrize("deactivate", [True, False])
+def test_stale_generation_cannot_complete_effective_transition(deactivate: bool) -> None:
+    class OwnershipClient(Client):
+        def __init__(self) -> None:
+            super().__init__()
+            self.domain_completed = False
+
+        def transact_write_items(self, **kwargs: Any) -> dict[str, Any]:
+            self.calls.append(kwargs)
+            completion = kwargs["TransactItems"][-1]["Update"]
+            names = completion["ExpressionAttributeNames"]
+            values = decode(completion["ExpressionAttributeValues"])
+            condition = completion["ConditionExpression"]
+            if (
+                names.get("#lease") == "in_progress_expiration"
+                and "#lease = :lease" in condition
+                and values.get(":lease") != LEASE + 61_000
+            ):
+                raise transaction_error(
+                    [{"Code": "None"}, {"Code": "None"}, {"Code": "ConditionalCheckFailed"}]
+                )
+            self.domain_completed = True
+            return {}
+
+    client = OwnershipClient()
+    stale_transition = replace(
+        transition(deactivate=deactivate),
+        idempotency=idempotency_completion(
+            idempotency_id=(
+                "deactivate-student#scoped-id" if deactivate else "reactivate-student#scoped-id"
+            ),
+            lease=LEASE,
+        ),
+    )
+
+    with pytest.raises(StudentLifecycleInvariantError):
+        run(client, value=stale_transition)
+
+    assert client.domain_completed is False
 
 
 def transaction_error(reasons: object) -> ClientError:
@@ -261,8 +327,11 @@ def test_incomplete_or_uncertain_result_is_unresolved(error: Exception) -> None:
         replace(transition(), public_response=response(status="INACTIVE", version=3)),
         replace(transition(), audit_event=replace(AUDIT_EVENT, reason=None)),
         replace(transition(deactivate=False), audit_event=AUDIT_EVENT),
-        replace(transition(), idempotency=replace(IDEMPOTENCY, client_request_token="")),
-        replace(transition(), idempotency=replace(IDEMPOTENCY, client_request_token="x" * 37)),
+        replace(transition(), idempotency=idempotency_completion(client_request_token="")),
+        replace(
+            transition(),
+            idempotency=idempotency_completion(client_request_token="x" * 37),
+        ),
     ],
 )
 def test_invalid_transition_is_rejected_before_write(value: LifecycleTransition) -> None:
