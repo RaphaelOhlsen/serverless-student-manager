@@ -685,9 +685,9 @@ def test_activation_legacy_version_condition_materializes_version_two() -> None:
     assert isinstance(items, list)
     profile = items[0]["Update"]
 
-    assert "(attribute_not_exists(#version) OR #version = :version)" in profile[
-        "ConditionExpression"
-    ]
+    assert (
+        "(attribute_not_exists(#version) OR #version = :version)" in profile["ConditionExpression"]
+    )
     values = deserialized(profile["ExpressionAttributeValues"])
     assert values[":version"] == 1
     assert values[":next_version"] == 2

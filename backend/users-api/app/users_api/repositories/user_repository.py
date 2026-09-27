@@ -599,9 +599,7 @@ class UserRepository:
                     "Key": self._serialize_item(
                         {"PK": f"COGNITO#{cognito_sub}", "SK": "AUTHORIZATION"}
                     ),
-                    "UpdateExpression": (
-                        "SET #status = :active, authVersion = :next_auth_version"
-                    ),
+                    "UpdateExpression": ("SET #status = :active, authVersion = :next_auth_version"),
                     "ConditionExpression": (
                         "attribute_exists(PK) AND attribute_exists(SK) "
                         "AND #status = :invited AND #role = :role "
