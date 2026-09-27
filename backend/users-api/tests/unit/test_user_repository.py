@@ -353,12 +353,20 @@ def test_reactivation_transaction_cancellation_remains_a_post_side_effect_signal
     assert raised.value.response["CancellationReasons"][0]["Code"] == ("ConditionalCheckFailed")
 
 
-def activate(repository: UserRepository, client: FakeClient, role: str) -> dict[str, object]:
+def activate(
+    repository: UserRepository,
+    client: FakeClient,
+    role: str,
+    *,
+    version: int = 3,
+    auth_version: int = 4,
+) -> dict[str, object]:
     repository.activate(
         user_id="user-1",
         cognito_sub="sub-1",
         role=role,
-        auth_version=1,
+        version=version,
+        auth_version=auth_version,
         occurred_at="2026-09-02T12:00:00.000Z",
         event_id="event-1",
         correlation_id="request-1",
@@ -590,6 +598,101 @@ def test_operator_transaction_has_no_admin_counter() -> None:
         item.get("Update", {}).get("UpdateExpression") != "ADD activeAdminCount :one"
         for item in items
     )
+
+
+@pytest.mark.parametrize(("role", "expected_items"), [("ADMIN", 4), ("OPERATOR", 3)])
+def test_activation_updates_both_versions_and_fences_observed_state(
+    role: str,
+    expected_items: int,
+) -> None:
+    client = FakeClient()
+    transaction = activate(
+        UserRepository(client, "users", "audit"),
+        client,
+        role,
+        version=3,
+        auth_version=4,
+    )
+    items = transaction["TransactItems"]
+    assert isinstance(items, list) and len(items) == expected_items
+    profile = items[0]["Update"]
+    authorization = items[1]["Update"]
+
+    assert "#status = :active" in profile["UpdateExpression"]
+    assert "#version = :next_version" in profile["UpdateExpression"]
+    assert "authVersion = :next_auth_version" in profile["UpdateExpression"]
+    assert "#status = :active" in authorization["UpdateExpression"]
+    assert "authVersion = :next_auth_version" in authorization["UpdateExpression"]
+    assert profile["ExpressionAttributeNames"]["#version"] == "version"
+    assert "#version" not in authorization["ExpressionAttributeNames"]
+
+    profile_condition = profile["ConditionExpression"]
+    for predicate in (
+        "attribute_exists(PK)",
+        "attribute_exists(SK)",
+        "#status = :invited",
+        "#role = :role",
+        "userId = :user_id",
+        "cognitoSub = :sub",
+        "authVersion = :auth_version",
+        "#version = :version",
+    ):
+        assert predicate in profile_condition
+
+    authorization_condition = authorization["ConditionExpression"]
+    for predicate in (
+        "attribute_exists(PK)",
+        "attribute_exists(SK)",
+        "#status = :invited",
+        "#role = :role",
+        "userId = :user_id",
+        "authVersion = :auth_version",
+    ):
+        assert predicate in authorization_condition
+
+    profile_values = deserialized(profile["ExpressionAttributeValues"])
+    authorization_values = deserialized(authorization["ExpressionAttributeValues"])
+    assert profile_values[":version"] == 3
+    assert profile_values[":next_version"] == 4
+    assert profile_values[":auth_version"] == 4
+    assert profile_values[":next_auth_version"] == 5
+    assert authorization_values[":auth_version"] == 4
+    assert authorization_values[":next_auth_version"] == 5
+
+    audit_items = [item for item in items if item.get("Put", {}).get("TableName") == "audit"]
+    assert len(audit_items) == 1
+    assert TypeDeserializer().deserialize(audit_items[0]["Put"]["Item"]["eventType"]) == (
+        "USER_ACTIVATED"
+    )
+    counter_items = [
+        item
+        for item in items
+        if item.get("Update", {}).get("UpdateExpression") == "ADD activeAdminCount :one"
+    ]
+    assert len(counter_items) == (1 if role == "ADMIN" else 0)
+
+
+def test_activation_legacy_version_condition_materializes_version_two() -> None:
+    client = FakeClient()
+    transaction = activate(
+        UserRepository(client, "users", "audit"),
+        client,
+        "OPERATOR",
+        version=1,
+        auth_version=7,
+    )
+    items = transaction["TransactItems"]
+    assert isinstance(items, list)
+    profile = items[0]["Update"]
+
+    assert "(attribute_not_exists(#version) OR #version = :version)" in profile[
+        "ConditionExpression"
+    ]
+    values = deserialized(profile["ExpressionAttributeValues"])
+    assert values[":version"] == 1
+    assert values[":next_version"] == 2
+    assert values[":auth_version"] == 7
+    assert values[":next_auth_version"] == 8
 
 
 def test_transaction_error_logging_is_structured_and_sanitized(

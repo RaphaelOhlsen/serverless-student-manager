@@ -548,6 +548,7 @@ class UserRepository:
         user_id: str,
         cognito_sub: str,
         role: str,
+        version: int,
         auth_version: int,
         occurred_at: str,
         event_id: str,
@@ -555,7 +556,9 @@ class UserRepository:
         expires_at: int,
         client_request_token: str,
     ) -> None:
-        names = {"#status": "status", "#role": "role"}
+        names = {"#status": "status", "#role": "role", "#version": "version"}
+        next_version = version + 1
+        next_auth_version = auth_version + 1
         profile_values = self._serialize_values(
             {
                 ":invited": "INVITED",
@@ -563,7 +566,10 @@ class UserRepository:
                 ":user_id": user_id,
                 ":sub": cognito_sub,
                 ":role": role,
+                ":version": version,
+                ":next_version": next_version,
                 ":auth_version": auth_version,
+                ":next_auth_version": next_auth_version,
                 ":occurred_at": occurred_at,
             }
         )
@@ -573,13 +579,15 @@ class UserRepository:
                     "TableName": self._users_table,
                     "Key": self._serialize_item({"PK": f"USER#{user_id}", "SK": "PROFILE"}),
                     "UpdateExpression": (
-                        "SET #status = :active, updatedAt = :occurred_at, updatedBy = :user_id"
+                        "SET #status = :active, #version = :next_version, "
+                        "authVersion = :next_auth_version, updatedAt = :occurred_at, "
+                        "updatedBy = :user_id"
                     ),
                     "ConditionExpression": (
                         "attribute_exists(PK) AND attribute_exists(SK) "
                         "AND #status = :invited AND #role = :role "
                         "AND authVersion = :auth_version AND cognitoSub = :sub "
-                        "AND userId = :user_id"
+                        "AND userId = :user_id AND " + self._version_condition(version)
                     ),
                     "ExpressionAttributeNames": names,
                     "ExpressionAttributeValues": profile_values,
@@ -591,13 +599,15 @@ class UserRepository:
                     "Key": self._serialize_item(
                         {"PK": f"COGNITO#{cognito_sub}", "SK": "AUTHORIZATION"}
                     ),
-                    "UpdateExpression": "SET #status = :active",
+                    "UpdateExpression": (
+                        "SET #status = :active, authVersion = :next_auth_version"
+                    ),
                     "ConditionExpression": (
                         "attribute_exists(PK) AND attribute_exists(SK) "
                         "AND #status = :invited AND #role = :role "
                         "AND authVersion = :auth_version AND userId = :user_id"
                     ),
-                    "ExpressionAttributeNames": names,
+                    "ExpressionAttributeNames": {"#status": "status", "#role": "role"},
                     "ExpressionAttributeValues": self._serialize_values(
                         {
                             ":invited": "INVITED",
@@ -605,6 +615,7 @@ class UserRepository:
                             ":user_id": user_id,
                             ":role": role,
                             ":auth_version": auth_version,
+                            ":next_auth_version": next_auth_version,
                         }
                     ),
                 }
