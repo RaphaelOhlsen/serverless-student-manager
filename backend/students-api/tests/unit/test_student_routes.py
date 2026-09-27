@@ -18,12 +18,27 @@ from students_api.routes.students import register_student_routes
 
 
 class FakeStudentService:
-    def __init__(self, student: dict[str, Any] | None) -> None:
+    def __init__(
+        self,
+        student: dict[str, Any] | None,
+        error: Exception | None = None,
+    ) -> None:
         self.student = student
-        self.requested_student_id: str | None = None
+        self.error = error
+        self.get_call: dict[str, str | None] | None = None
 
-    def get_student(self, student_id: str) -> dict[str, Any]:
-        self.requested_student_id = student_id
+    def get_student(
+        self,
+        *,
+        cognito_sub: str | None,
+        student_id: str,
+    ) -> dict[str, Any]:
+        self.get_call = {"cognito_sub": cognito_sub, "student_id": student_id}
+
+        if not cognito_sub:
+            raise ForbiddenError
+        if self.error is not None:
+            raise self.error
 
         if self.student is None:
             raise StudentNotFoundError
@@ -74,6 +89,7 @@ def make_event(student_id: str) -> dict[str, Any]:
             "requestId": "unit-test-request",
             "routeKey": "GET /students/{studentId}",
             "stage": "$default",
+            "authorizer": {"jwt": {"claims": {"sub": "subject-1", "token_use": "access"}}},
         },
         "isBase64Encoded": False,
     }
@@ -183,7 +199,7 @@ def test_get_student_returns_exact_public_model_with_numeric_version() -> None:
     body = json.loads(response["body"])
 
     assert response["statusCode"] == 200
-    assert service.requested_student_id == "student-123"
+    assert service.get_call == {"cognito_sub": "subject-1", "student_id": "student-123"}
     assert body == {
         "studentId": "student-123",
         "registrationNumber": "20260001",
@@ -211,6 +227,46 @@ def test_get_student_returns_404_when_student_does_not_exist() -> None:
     assert body == {
         "error": "STUDENT_NOT_FOUND",
         "message": "Student not found",
+    }
+
+
+@pytest.mark.parametrize(
+    "claims",
+    [
+        {},
+        {"token_use": "access"},
+        {"sub": "subject-1", "token_use": "id"},
+    ],
+)
+def test_get_student_rejects_missing_or_invalid_access_subject(
+    claims: dict[str, str],
+) -> None:
+    service = FakeStudentService({"studentId": "student-123"})
+    app = APIGatewayHttpResolver()
+    register_student_routes(app, service)
+    event = make_event("student-123")
+    event["requestContext"]["authorizer"] = {"jwt": {"claims": claims}}
+
+    response = app.resolve(event, TEST_CONTEXT)
+
+    assert response["statusCode"] == 403
+    assert json.loads(response["body"]) == {
+        "error": "FORBIDDEN",
+        "message": "Forbidden",
+    }
+
+
+def test_get_student_maps_functional_authorization_failure_to_403() -> None:
+    service = FakeStudentService(None, ForbiddenError())
+    app = APIGatewayHttpResolver()
+    register_student_routes(app, service)
+
+    response = app.resolve(make_event("student-123"), TEST_CONTEXT)
+
+    assert response["statusCode"] == 403
+    assert json.loads(response["body"]) == {
+        "error": "FORBIDDEN",
+        "message": "Forbidden",
     }
 
 

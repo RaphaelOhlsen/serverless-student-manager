@@ -23,6 +23,14 @@
     "requestId": "local-get-student-request",
     "routeKey": "GET /students/{studentId}",
     "stage": "$default",
+    "authorizer": {
+      "jwt": {
+        "claims": {
+          "sub": "subject-1",
+          "token_use": "access"
+        }
+      }
+    },
     "time": "13/Aug/2026:16:55:00 -0300",
     "timeEpoch": 1786650900000
   },

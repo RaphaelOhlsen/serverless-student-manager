@@ -44,7 +44,12 @@ from students_api.validation import (
 
 
 class StudentServiceProtocol(Protocol):
-    def get_student(self, student_id: str) -> dict[str, Any]: ...
+    def get_student(
+        self,
+        *,
+        cognito_sub: str | None,
+        student_id: str,
+    ) -> dict[str, Any]: ...
 
     def list_students(
         self,
@@ -368,7 +373,12 @@ def register_student_routes(
         active_service = service if service is not None else get_student_service()
 
         try:
-            student = active_service.get_student(student_id)
+            student = active_service.get_student(
+                cognito_sub=_authenticated_access_sub(app.current_event.raw_event),
+                student_id=student_id,
+            )
+        except ForbiddenError:
+            return _error_response(403, "FORBIDDEN", "Forbidden")
         except StudentNotFoundError:
             return Response(
                 status_code=404,
