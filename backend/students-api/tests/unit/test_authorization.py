@@ -35,6 +35,8 @@ def test_active_allowed_roles_are_authorized(role: str) -> None:
         (None, None),
         ("subject-123", None),
         ("subject-123", {"status": "INACTIVE", "role": "ADMIN"}),
+        ("subject-123", {"status": "INACTIVE", "role": "OPERATOR"}),
+        ("subject-123", {"status": "INVITED", "role": "ADMIN"}),
         ("subject-123", {"status": "ACTIVE", "role": "VIEWER"}),
     ],
 )

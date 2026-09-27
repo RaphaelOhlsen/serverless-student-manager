@@ -31,7 +31,16 @@ class StudentService:
         self._repository = repository
         self._authorization = authorization
 
-    def get_student(self, student_id: str) -> dict[str, Any]:
+    def get_student(
+        self,
+        *,
+        cognito_sub: str | None,
+        student_id: str,
+    ) -> dict[str, Any]:
+        if self._authorization is None:
+            raise RuntimeError("Authorization service is required")
+        self._authorization.authorize_list_students(cognito_sub)
+
         student = self._repository.get_by_id(student_id)
 
         if student is None:

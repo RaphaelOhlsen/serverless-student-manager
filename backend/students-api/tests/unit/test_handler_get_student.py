@@ -27,8 +27,15 @@ class FakeLambdaContext:
 class FakeStudentService:
     def __init__(self, student: dict[str, Any] | None) -> None:
         self.student = student
+        self.get_call: dict[str, str | None] | None = None
 
-    def get_student(self, student_id: str) -> dict[str, Any]:
+    def get_student(
+        self,
+        *,
+        cognito_sub: str | None,
+        student_id: str,
+    ) -> dict[str, Any]:
+        self.get_call = {"cognito_sub": cognito_sub, "student_id": student_id}
         if self.student is None:
             raise StudentNotFoundError
 
@@ -82,6 +89,7 @@ def test_lambda_handler_get_student_returns_200(
     )
 
     assert response["statusCode"] == 200
+    assert service.get_call == {"cognito_sub": "subject-1", "student_id": "student-123"}
 
     body = json.loads(cast(str, response["body"]))
 
@@ -121,6 +129,7 @@ def test_lambda_handler_get_student_returns_404(
     )
 
     assert response["statusCode"] == 404
+    assert service.get_call == {"cognito_sub": "subject-1", "student_id": "missing-student"}
 
     body = json.loads(cast(str, response["body"]))
 
