@@ -1,6 +1,7 @@
-from typing import Any
+from typing import Any, cast
 
-from boto3.dynamodb.types import TypeDeserializer  # type: ignore[import-untyped]
+import pytest
+from boto3.dynamodb.types import TypeDeserializer, TypeSerializer  # type: ignore[import-untyped]
 from students_api.repositories.student_repository import StudentRepository
 
 
@@ -36,6 +37,25 @@ class FakeDynamoDBClient:
         key = {name: deserializer.deserialize(value) for name, value in kwargs["Key"].items()}
         item = self.items.get((kwargs["TableName"], key["PK"], key["SK"]))
         return {"Item": item} if item is not None else {}
+
+
+def put_client_item(
+    client: FakeDynamoDBClient,
+    table_name: str,
+    item: dict[str, object],
+) -> None:
+    serializer = TypeSerializer()
+    client.items[(table_name, str(item["PK"]), str(item["SK"]))] = {
+        name: serializer.serialize(value) for name, value in item.items()
+    }
+
+
+def get_by_registration(
+    repository: StudentRepository, registration_number: str
+) -> dict[str, object] | None:
+    lookup = getattr(repository, "get_by_registration", None)
+    assert callable(lookup), "repository registration lookup API is missing"
+    return cast(dict[str, object] | None, lookup(registration_number))
 
 
 def test_get_by_id_uses_student_profile_key() -> None:
@@ -195,3 +215,131 @@ def test_reconciliation_reads_are_consistent_and_use_exact_tables() -> None:
         "Audit",
     ]
     assert all(call["ConsistentRead"] is True for call in client.get_calls)
+
+
+def test_get_by_registration_resolves_coherent_profile_with_two_consistent_reads() -> None:
+    client = FakeDynamoDBClient()
+    put_client_item(
+        client,
+        "Students",
+        {
+            "PK": "UNIQUE#REGISTRATION#AB-1234",
+            "SK": "UNIQUE",
+            "studentId": "student-123",
+        },
+    )
+    profile: dict[str, object] = {
+        "PK": "STUDENT#student-123",
+        "SK": "PROFILE",
+        "studentId": "student-123",
+        "registrationNumber": "AB-1234",
+        "status": "ACTIVE",
+    }
+    put_client_item(client, "Students", profile)
+    repository = StudentRepository(
+        FakeDynamoDBTable({}),
+        client=client,
+        students_table_name="Students",
+        audit_table_name="Audit",
+    )
+
+    assert get_by_registration(repository, "AB-1234") == profile
+
+    deserializer = TypeDeserializer()
+    keys = [
+        {name: deserializer.deserialize(value) for name, value in call["Key"].items()}
+        for call in client.get_calls
+    ]
+    assert keys == [
+        {"PK": "UNIQUE#REGISTRATION#AB-1234", "SK": "UNIQUE"},
+        {"PK": "STUDENT#student-123", "SK": "PROFILE"},
+    ]
+    assert [call["TableName"] for call in client.get_calls] == ["Students", "Students"]
+    assert all(call["ConsistentRead"] is True for call in client.get_calls)
+    assert client.transaction is None
+
+
+def test_get_by_registration_returns_none_when_reservation_does_not_exist() -> None:
+    client = FakeDynamoDBClient()
+    repository = StudentRepository(
+        FakeDynamoDBTable({}),
+        client=client,
+        students_table_name="Students",
+        audit_table_name="Audit",
+    )
+
+    assert get_by_registration(repository, "AB-1234") is None
+    assert len(client.get_calls) == 1
+
+
+def test_get_by_registration_rejects_reservation_without_student_id() -> None:
+    client = FakeDynamoDBClient()
+    put_client_item(
+        client,
+        "Students",
+        {"PK": "UNIQUE#REGISTRATION#AB-1234", "SK": "UNIQUE"},
+    )
+    repository = StudentRepository(
+        FakeDynamoDBTable({}),
+        client=client,
+        students_table_name="Students",
+        audit_table_name="Audit",
+    )
+
+    with pytest.raises(RuntimeError):
+        get_by_registration(repository, "AB-1234")
+
+
+def test_get_by_registration_rejects_orphaned_reservation() -> None:
+    client = FakeDynamoDBClient()
+    put_client_item(
+        client,
+        "Students",
+        {
+            "PK": "UNIQUE#REGISTRATION#AB-1234",
+            "SK": "UNIQUE",
+            "studentId": "student-123",
+        },
+    )
+    repository = StudentRepository(
+        FakeDynamoDBTable({}),
+        client=client,
+        students_table_name="Students",
+        audit_table_name="Audit",
+    )
+
+    with pytest.raises(RuntimeError):
+        get_by_registration(repository, "AB-1234")
+
+
+def test_get_by_registration_rejects_profile_incompatible_with_reservation() -> None:
+    client = FakeDynamoDBClient()
+    put_client_item(
+        client,
+        "Students",
+        {
+            "PK": "UNIQUE#REGISTRATION#AB-1234",
+            "SK": "UNIQUE",
+            "studentId": "student-123",
+        },
+    )
+    put_client_item(
+        client,
+        "Students",
+        {
+            "PK": "STUDENT#student-123",
+            "SK": "PROFILE",
+            "studentId": "different-student",
+            "registrationNumber": "AB-1234",
+            "status": "INACTIVE",
+        },
+    )
+    repository = StudentRepository(
+        FakeDynamoDBTable({}),
+        client=client,
+        students_table_name="Students",
+        audit_table_name="Audit",
+    )
+
+    with pytest.raises(RuntimeError):
+        get_by_registration(repository, "AB-1234")

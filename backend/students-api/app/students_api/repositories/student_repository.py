@@ -212,6 +212,33 @@ class StudentRepository:
             {"PK": f"UNIQUE#REGISTRATION#{registration_number}", "SK": "UNIQUE"},
         )
 
+    def get_by_registration(self, registration_number: str) -> dict[str, object] | None:
+        reservation_key = f"UNIQUE#REGISTRATION#{registration_number}"
+        reservation = self.get_registration_reservation(registration_number)
+        if reservation is None:
+            return None
+
+        student_id = reservation.get("studentId")
+        if (
+            reservation.get("PK") != reservation_key
+            or reservation.get("SK") != "UNIQUE"
+            or not isinstance(student_id, str)
+            or not student_id
+        ):
+            raise RuntimeError("Invalid registration reservation")
+
+        profile = self.get_profile_consistent(student_id)
+        if profile is None:
+            raise RuntimeError("Registration reservation references a missing profile")
+        if (
+            profile.get("PK") != f"STUDENT#{student_id}"
+            or profile.get("SK") != "PROFILE"
+            or profile.get("studentId") != student_id
+            or profile.get("registrationNumber") != registration_number
+        ):
+            raise RuntimeError("Registration reservation and profile are inconsistent")
+        return profile
+
     def get_email_reservation(self, normalized_email: str) -> dict[str, object] | None:
         return self._get_consistent(
             self._required_students_table(),
@@ -233,7 +260,9 @@ class StudentRepository:
         table_name: str,
         key: dict[str, object],
     ) -> dict[str, object] | None:
-        client, _, _ = self._write_dependencies()
+        if self._client is None:
+            raise RuntimeError("DynamoDB client is required")
+        client = self._client
         response = client.get_item(
             TableName=table_name,
             Key=self._serialize_item(key),

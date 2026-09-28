@@ -698,6 +698,22 @@ run "plans_students_list_api_access" {
   assert {
     condition = toset(one([
       for statement in data.aws_iam_policy_document.students_api.statement : statement.actions
+      if statement.sid == "ReadStudentProfiles"
+    ])) == toset(["dynamodb:GetItem"])
+    error_message = "Student profile and registration lookup must use only GetItem."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.students_api.statement : statement.resources
+      if statement.sid == "ReadStudentProfiles"
+    ])) == toset([module.student_store.table_arn])
+    error_message = "Student profile and registration lookup must target only the students table."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.students_api.statement : statement.actions
       if statement.sid == "ReadUserAuthorization"
     ])) == toset(["dynamodb:GetItem"])
     error_message = "The students API users statement must contain only GetItem."

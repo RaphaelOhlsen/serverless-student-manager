@@ -51,6 +51,13 @@ class StudentServiceProtocol(Protocol):
         student_id: str,
     ) -> dict[str, Any]: ...
 
+    def get_student_by_registration(
+        self,
+        *,
+        cognito_sub: str | None,
+        registration_number: str,
+    ) -> dict[str, Any]: ...
+
     def list_students(
         self,
         *,
@@ -365,6 +372,35 @@ def register_student_routes(
             return _error_response(400, "INVALID_REQUEST", "Invalid list request")
         except ForbiddenError:
             return _error_response(403, "FORBIDDEN", "Forbidden")
+
+    @app.get("/students/by-registration/<registration_number>")
+    def get_student_by_registration(
+        registration_number: str,
+    ) -> dict[str, Any] | Response[dict[str, object]]:
+        event = app.current_event.raw_event
+        correlation_id = _request_id(event)
+        active_service = service if service is not None else get_student_service()
+
+        try:
+            student = active_service.get_student_by_registration(
+                cognito_sub=_authenticated_access_sub(event),
+                registration_number=registration_number,
+            )
+            return _public_student_response(student)
+        except ValueError:
+            return _canonical_error_response(
+                400, "INVALID_REQUEST", "Invalid registration number", correlation_id
+            )
+        except ForbiddenError:
+            return _canonical_error_response(403, "FORBIDDEN", "Forbidden", correlation_id)
+        except StudentNotFoundError:
+            return _canonical_error_response(
+                404, "STUDENT_NOT_FOUND", "Student not found", correlation_id
+            )
+        except Exception:
+            return _canonical_error_response(
+                500, "INTERNAL_ERROR", "Unexpected internal error", correlation_id
+            )
 
     @app.get("/students/<student_id>")
     def get_student(

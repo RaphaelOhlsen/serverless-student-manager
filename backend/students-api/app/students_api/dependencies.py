@@ -27,11 +27,16 @@ from students_api.services.update_student_service import UpdateStudentService
 
 @lru_cache
 def get_student_service() -> StudentService:
+    dynamodb_client = boto3.client("dynamodb")
     dynamodb = boto3.resource("dynamodb")
     students_table: Any = dynamodb.Table(get_students_table_name())
     users_table: Any = dynamodb.Table(get_users_table_name())
 
-    repository = StudentRepository(students_table)
+    repository = StudentRepository(
+        students_table,
+        client=dynamodb_client,
+        students_table_name=get_students_table_name(),
+    )
     authorization = AuthorizationService(users_table)
 
     return StudentService(repository, authorization)

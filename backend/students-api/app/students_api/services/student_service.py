@@ -1,8 +1,9 @@
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from students_api.cursor import CursorPosition, decode_cursor, encode_cursor, normalize_name
 from students_api.errors import InvalidListRequestError, StudentNotFoundError
 from students_api.repositories.student_repository import StudentPage
+from students_api.validation import normalize_registration_number
 
 
 class StudentRepositoryProtocol(Protocol):
@@ -16,6 +17,10 @@ class StudentRepositoryProtocol(Protocol):
         limit: int,
         position: CursorPosition | None,
     ) -> StudentPage: ...
+
+
+class RegistrationStudentRepositoryProtocol(Protocol):
+    def get_by_registration(self, registration_number: str) -> dict[str, Any] | None: ...
 
 
 class AuthorizationProtocol(Protocol):
@@ -46,6 +51,23 @@ class StudentService:
         if student is None:
             raise StudentNotFoundError
 
+        return student
+
+    def get_student_by_registration(
+        self,
+        *,
+        cognito_sub: str | None,
+        registration_number: str,
+    ) -> dict[str, Any]:
+        if self._authorization is None:
+            raise RuntimeError("Authorization service is required")
+        self._authorization.authorize_list_students(cognito_sub)
+
+        normalized_registration = normalize_registration_number(registration_number)
+        registration_repository = cast(RegistrationStudentRepositoryProtocol, self._repository)
+        student = registration_repository.get_by_registration(normalized_registration)
+        if student is None:
+            raise StudentNotFoundError
         return student
 
     def list_students(
