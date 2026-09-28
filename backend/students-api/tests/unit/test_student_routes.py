@@ -26,6 +26,7 @@ class FakeStudentService:
         self.student = student
         self.error = error
         self.get_call: dict[str, str | None] | None = None
+        self.registration_call: dict[str, str | None] | None = None
 
     def get_student(
         self,
@@ -43,6 +44,26 @@ class FakeStudentService:
         if self.student is None:
             raise StudentNotFoundError
 
+        return self.student
+
+    def get_student_by_registration(
+        self,
+        *,
+        cognito_sub: str | None,
+        registration_number: str,
+    ) -> dict[str, Any]:
+        self.registration_call = {
+            "cognito_sub": cognito_sub,
+            "registration_number": registration_number,
+        }
+        if "_" in registration_number:
+            raise ValueError("invalid registration")
+        if not cognito_sub:
+            raise ForbiddenError
+        if self.error is not None:
+            raise self.error
+        if self.student is None:
+            raise StudentNotFoundError
         return self.student
 
     def list_students(self, **kwargs: Any) -> dict[str, Any]:
@@ -133,6 +154,21 @@ def make_create_event() -> dict[str, Any]:
         "jwt": {"claims": {"sub": "subject-1", "token_use": "access"}}
     }
     return event
+
+
+def make_registration_event(registration_number: str) -> dict[str, Any]:
+    event = make_event("")
+    route = "GET /students/by-registration/{registrationNumber}"
+    path = f"/students/by-registration/{registration_number}"
+    event["routeKey"] = route
+    event["rawPath"] = path
+    event["requestContext"]["routeKey"] = route
+    event["requestContext"]["http"]["path"] = path
+    return event
+
+
+def semantic_error_code(body: dict[str, Any]) -> object:
+    return body.get("code", body.get("error"))
 
 
 def test_list_students_parses_defaults_and_authenticated_subject() -> None:
@@ -268,6 +304,85 @@ def test_get_student_maps_functional_authorization_failure_to_403() -> None:
         "error": "FORBIDDEN",
         "message": "Forbidden",
     }
+
+
+def test_get_student_by_registration_returns_public_detail_without_route_collision() -> None:
+    service = FakeStudentService(
+        {
+            "PK": "STUDENT#student-123",
+            "SK": "PROFILE",
+            "studentId": "student-123",
+            "registrationNumber": "AB-1234",
+            "fullName": "Maria Silva",
+            "studentEmail": "maria@example.com",
+            "phone": "+5527999999999",
+            "birthDate": "2000-05-10",
+            "status": "INACTIVE",
+            "version": Decimal("2"),
+            "createdAt": "2026-09-10T12:07:54.388Z",
+            "updatedAt": "2026-09-11T16:36:38.541Z",
+        }
+    )
+    app = APIGatewayHttpResolver()
+    register_student_routes(app, service)
+
+    response = app.resolve(make_registration_event("ab-1234"), TEST_CONTEXT)
+    body = json.loads(response["body"])
+
+    assert response["statusCode"] == 200
+    assert service.registration_call == {
+        "cognito_sub": "subject-1",
+        "registration_number": "ab-1234",
+    }
+    assert service.get_call is None
+    assert body == {
+        "studentId": "student-123",
+        "registrationNumber": "AB-1234",
+        "fullName": "Maria Silva",
+        "studentEmail": "maria@example.com",
+        "phone": "+5527999999999",
+        "birthDate": "2000-05-10",
+        "status": "INACTIVE",
+        "version": 2,
+        "createdAt": "2026-09-10T12:07:54.388Z",
+        "updatedAt": "2026-09-11T16:36:38.541Z",
+    }
+
+
+@pytest.mark.parametrize(
+    ("registration_number", "service", "status", "code"),
+    [
+        ("AB_1234", FakeStudentService({"studentId": "unused"}), 400, "INVALID_REQUEST"),
+        ("AB-1234", FakeStudentService(None), 404, "STUDENT_NOT_FOUND"),
+        (
+            "AB-1234",
+            FakeStudentService(None, ForbiddenError()),
+            403,
+            "FORBIDDEN",
+        ),
+        (
+            "AB-1234",
+            FakeStudentService(None, RuntimeError("private invariant detail")),
+            500,
+            "INTERNAL_ERROR",
+        ),
+    ],
+)
+def test_get_student_by_registration_maps_contract_errors(
+    registration_number: str,
+    service: FakeStudentService,
+    status: int,
+    code: str,
+) -> None:
+    app = APIGatewayHttpResolver()
+    register_student_routes(app, service)
+
+    response = app.resolve(make_registration_event(registration_number), TEST_CONTEXT)
+    body = json.loads(response["body"])
+
+    assert response["statusCode"] == status
+    assert semantic_error_code(body) == code
+    assert "private invariant detail" not in response["body"]
 
 
 def test_create_student_returns_exact_201_contract() -> None:

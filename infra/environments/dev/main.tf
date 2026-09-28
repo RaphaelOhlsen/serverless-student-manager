@@ -530,6 +530,12 @@ module "http_api" {
       authorization_type = "JWT"
     }
 
+    get_student_by_registration = {
+      route_key          = "GET /students/by-registration/{registrationNumber}"
+      integration_key    = "students"
+      authorization_type = "JWT"
+    }
+
     list_students = {
       route_key          = "GET /students"
       integration_key    = "students"

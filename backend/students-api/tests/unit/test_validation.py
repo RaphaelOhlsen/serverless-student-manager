@@ -1,6 +1,7 @@
 from datetime import date
 
 import pytest
+from students_api import validation
 from students_api.errors import InvalidCreateStudentRequestError
 from students_api.validation import parse_create_student_body
 
@@ -69,3 +70,32 @@ def test_rejects_invalid_full_name(value: str) -> None:
 def test_rejects_invalid_or_future_birth_date(value: str) -> None:
     with pytest.raises(InvalidCreateStudentRequestError):
         parse_create_student_body(VALID.replace("2010-05-21", value), today=TODAY)
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (" ab-1234 ", "AB-1234"),
+        ("AB-1234", "AB-1234"),
+        ("ab-1234", "AB-1234"),
+        ("AB12", "AB12"),
+        ("ABCDEFGHIJKLMNOPQRST", "ABCDEFGHIJKLMNOPQRST"),
+    ],
+)
+def test_shared_registration_normalizer_accepts_canonical_values(value: str, expected: str) -> None:
+    normalizer = getattr(validation, "normalize_registration_number", None)
+
+    assert callable(normalizer), "shared registration normalization API is missing"
+    assert normalizer(value) == expected
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["ABC", "ABCDEFGHIJKLMNOPQRSTU", "AB 12", "AB_12", "AB.12", "", "   "],
+)
+def test_shared_registration_normalizer_rejects_invalid_values(value: str) -> None:
+    normalizer = getattr(validation, "normalize_registration_number", None)
+
+    assert callable(normalizer), "shared registration normalization API is missing"
+    with pytest.raises(ValueError):
+        normalizer(value)

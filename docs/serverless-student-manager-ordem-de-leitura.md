@@ -62,6 +62,9 @@ Para a política de exclusão física de Student, consultar também a
 Para Users / Admin CRUD, consultar também a
 [ADR-035 — Gerenciamento administrativo de usuários](decisions/adr/adr-035-administrative-user-management.md) — Proposed.
 
+Para consulta exata de Student por matrícula, consultar também a
+[ADR-036 — Contrato de consulta de aluno por matrícula](decisions/adr/adr-036-student-registration-lookup-contract.md) — Approved.
+
 ## 4. Arquitetura consolidada
 
 38. `architecture/architecture-overview.md`

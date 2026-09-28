@@ -54,6 +54,12 @@ variables {
       authorization_type = "JWT"
     }
 
+    get_student_by_registration = {
+      route_key          = "GET /students/by-registration/{registrationNumber}"
+      integration_key    = "students"
+      authorization_type = "JWT"
+    }
+
     list_students = {
       route_key          = "GET /students"
       integration_key    = "students"
@@ -327,6 +333,21 @@ run "plans_http_api" {
   }
 
   assert {
+    condition = (
+      aws_apigatewayv2_route.this["get_student_by_registration"].route_key
+      == "GET /students/by-registration/{registrationNumber}"
+    )
+    error_message = "The registration lookup route key is incorrect."
+  }
+
+  assert {
+    condition = (
+      aws_apigatewayv2_route.this["get_student_by_registration"].authorization_type == "JWT"
+    )
+    error_message = "The registration lookup route must require JWT authorization."
+  }
+
+  assert {
     condition     = aws_apigatewayv2_route.this["list_students"].route_key == "GET /students"
     error_message = "The list-students route key is incorrect."
   }
@@ -591,6 +612,26 @@ run "wires_computed_references" {
     error_message = "The get-student route must use the configured JWT authorizer."
   }
 
+  assert {
+    condition = (
+      aws_apigatewayv2_route.this["get_student_by_registration"].authorizer_id
+      == aws_apigatewayv2_authorizer.jwt.id
+    )
+    error_message = "The registration lookup route must use the configured JWT authorizer."
+  }
+
+  assert {
+    condition = (
+      aws_apigatewayv2_route.this["get_student_by_registration"].target
+      == "integrations/${aws_apigatewayv2_integration.lambda["students"].id}"
+    )
+    error_message = "The registration lookup route must reuse the students integration."
+  }
+
+  assert {
+    condition     = length(aws_apigatewayv2_integration.lambda) == 2
+    error_message = "The registration lookup route must not create another integration."
+  }
 
   assert {
     condition = (

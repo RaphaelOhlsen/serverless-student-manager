@@ -1,0 +1,38 @@
+{
+  "version": "2.0",
+  "routeKey": "GET /students/by-registration/{registrationNumber}",
+  "rawPath": "/students/by-registration/ab-1234",
+  "rawQueryString": "",
+  "headers": {
+    "accept": "application/json",
+    "host": "localhost",
+    "user-agent": "pytest"
+  },
+  "requestContext": {
+    "accountId": "123456789012",
+    "apiId": "local",
+    "domainName": "localhost",
+    "domainPrefix": "localhost",
+    "http": {
+      "method": "GET",
+      "path": "/students/by-registration/ab-1234",
+      "protocol": "HTTP/1.1",
+      "sourceIp": "127.0.0.1",
+      "userAgent": "pytest"
+    },
+    "requestId": "local-get-student-by-registration-request",
+    "routeKey": "GET /students/by-registration/{registrationNumber}",
+    "stage": "$default",
+    "authorizer": {
+      "jwt": {
+        "claims": {
+          "sub": "subject-1",
+          "token_use": "access"
+        }
+      }
+    },
+    "time": "28/Sep/2026:12:00:00 -0300",
+    "timeEpoch": 1790607600000
+  },
+  "isBase64Encoded": false
+}

@@ -277,8 +277,9 @@ do conjunto já autorizado.
 `GET /students` não aceita matrícula como parâmetro.
 
 O requisito de consulta exata por matrícula permanece válido, mas será atendido
-por operação e contrato separados. Esta ADR não define rota, parâmetros ou
-implementação para essa consulta.
+por operação e contrato separados. A ADR-036 define esse contrato como
+`GET /students/by-registration/{registrationNumber}`; esta ADR continua sem
+incorporar matrícula aos parâmetros de `GET /students`.
 
 ## Semântica HTTP
 

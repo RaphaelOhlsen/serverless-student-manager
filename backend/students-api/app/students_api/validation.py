@@ -17,6 +17,13 @@ _REGISTRATION_PATTERN = re.compile(r"[A-Z0-9-]{4,20}\Z")
 _PHONE_PATTERN = re.compile(r"\+[1-9][0-9]{7,14}\Z")
 
 
+def normalize_registration_number(value: str) -> str:
+    normalized = value.strip().upper()
+    if _REGISTRATION_PATTERN.fullmatch(normalized) is None:
+        raise ValueError("Invalid registration number")
+    return normalized
+
+
 @dataclass(frozen=True)
 class CreateStudentInput:
     full_name: str
@@ -51,9 +58,10 @@ def parse_create_student_body(
         raise InvalidCreateStudentRequestError
 
     full_name = _normalize_full_name(value["fullName"])
-    registration_number = value["registrationNumber"].strip().upper()
-    if _REGISTRATION_PATTERN.fullmatch(registration_number) is None:
-        raise InvalidCreateStudentRequestError
+    try:
+        registration_number = normalize_registration_number(value["registrationNumber"])
+    except ValueError:
+        raise InvalidCreateStudentRequestError from None
     student_email = _normalize_email(value["studentEmail"])
     phone = _validate_phone(value["phone"])
     birth_date = _validate_birth_date(value["birthDate"], today=today)
