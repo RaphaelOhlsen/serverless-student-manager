@@ -3,7 +3,7 @@
 **Projeto:** Serverless Student Manager
 **Versão:** 2.9
 **Data:** 2026-09-04
-**Arquivos listados:** 63
+**Arquivos listados:** 64
 
 O próprio `MANIFEST.md` não é listado para evitar hash autorreferencial.
 
@@ -49,12 +49,12 @@ O próprio `MANIFEST.md` não é listado para evitar hash autorreferencial.
 | `docs/decisions/adr/adr-023-users-physical-modeling.md` | `da25a5288557267c4f18760d4519aa72d5c52fe295083c127c1b14e6d1ff9717` |
 | `docs/decisions/adr/adr-024-first-admin-bootstrap-execution-protocol.md` | `f165561261adbf0501450e45140f81382bc73376c6687e233ccac9cf5a7eb39e` |
 | `docs/decisions/adr/adr-025-first-admin-email-verification.md` | `6b2ac96d0b24bf103504e73e28f17b81e19d6d5a8725c428ee67679816d768a4` |
-| `docs/decisions/adr/adr-026-students-list-contract-and-physical-modeling.md` | `ec51197743072479a22948c16ca8c79c2e24d06302abb2cf691d6067c338ba3d` |
+| `docs/decisions/adr/adr-026-students-list-contract-and-physical-modeling.md` | `3dbe8ab825c20a4e005e011ac3f1633b458411f70619d5832a7f7e139757e3fa` |
 | `docs/decisions/adr/adr-027-user-activation-after-first-sign-in.md` | `19096d119afc6d4258aab6941ea1b14c7dece26a55c18428480eadb99973d4f5` |
 | `docs/decisions/adr/adr-028-lambda-application-release-via-github-actions.md` | `dec580a6979c144ee660af14e33a182e75431f386931dea5682a12a5cabd0924` |
 | `docs/decisions/adr/adr-029-self-profile-resolution.md` | `a265176f4c28d21541b326d6dc9904856082206bddf4030ff520c43ab373769f` |
 | `docs/decisions/adr/adr-030-student-creation.md` | `a8038803c0baf6b56f4e01eb0e7592fb4907af0b53916aaa057f375bfad56891` |
-| `docs/decisions/decision-register.md` | `224686b5f583fbd2afe16ec0bffd9f13f15caf79ca30a7df186e80ac24e73026` |
+| `docs/decisions/decision-register.md` | `7617050217e371e6147c63d71927abf1dd1ab6c4c417ee8357aac9effa26f0dc` |
 | `docs/decisions/pending-decisions.md` | `3877f4dcdb6bfd6d367696e0b3b473bbf10c78bf9c81ee357c35b05375e5daea` |
 | `docs/operations/cognito-dynamodb-compensation.md` | `d2914292047679b7858e6b130f4baf04440913f9fb0809b243df22323d448807` |
 | `docs/operations/agentic-development-harness-local.md` | `df1133a245b9a06023d70bf029f366e11b767dd521e1c612d4ef296e93c6772b` |
@@ -65,8 +65,8 @@ O próprio `MANIFEST.md` não é listado para evitar hash autorreferencial.
 | `docs/operations/sole-admin-mfa-recovery.md` | `30dce5d37c002be252e16509fd43afa0e26f38ad2e05453eb0656cee0ff24797` |
 | `docs/overview.md` | `99c0311d0a7f4993b3bf5e715e3da7e455b20959dc33d0e1d8f6968ca7e29e97` |
 | `docs/references.md` | `f86b0ea29df69ea0ba5e6bad78e6dc661cad6ee24dc45bcc63222fd6735ff236` |
-| `docs/requirements/srs.md` | `5e59adc5a75fddf224f469ce01ed3782d6fc0b60083c33df4e65398d1b69367b` |
-| `docs/serverless-student-manager-ordem-de-leitura.md` | `29291eb773a6aa986a7c596048ac3bbc165d30f92f9ec785a2ee0840d114d6f0` |
+| `docs/requirements/srs.md` | `94370c905cfa74c2a765ab36f50c1f44be3b764516c951d1251aad7eb7965525` |
+| `docs/serverless-student-manager-ordem-de-leitura.md` | `3fdb6b60316bd0a32bd50b1a9c2dfe2be72be267da1e0310bfd5aeb06c2f0907` |
 | `docs/serverless-student-manager-ordem-de-leitura.png` | `0243000a218ca8860a10c45b0eeb21a02195664f9c4da1eacb1f8abf9ceed611` |
 | `docs/decisions/adr/adr-031-agentic-development-harness.md` | `6d0215e41b58547365c7ceb7dd0c9724f1c28f71a9ac43ded7ecb0cbec7e0e5a` |
 | `docs/operations/agentic-development-harness-v1.md` | `34aad1c59d448d5070ae2d9bbe1941bee110bec340e53d790e69f5c1323ece98` |
@@ -74,3 +74,4 @@ O próprio `MANIFEST.md` não é listado para evitar hash autorreferencial.
 | `docs/decisions/adr/adr-033-student-lifecycle.md` | `05388a5d59a66996468b049b3acecfc3596885c776e9d42672d2d20dc454ab0d` |
 | `docs/decisions/adr/adr-034-student-physical-deletion-policy.md` | `5158870d552c0a1d87cd59dfc33d7daf1c861c2e881777a1b2d105a031cb2c02` |
 | `docs/decisions/adr/adr-035-administrative-user-management.md` | `04f467c41c3c242d7ef8f29bedd62c8b663752158f60bf81e635f78c18ecee49` |
+| `docs/decisions/adr/adr-036-student-registration-lookup-contract.md` | `0ebb2f77667768d9d26c383870924ed74a6dcf681f70d5a77aac36e95f22945a` |

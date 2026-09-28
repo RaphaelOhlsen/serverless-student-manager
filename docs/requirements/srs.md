@@ -327,7 +327,22 @@ Administrators and Operators shall be able to consult a student by internal iden
 
 ### RF-ALU-003 — Consult student by registration number
 
-The system shall support exact lookup by normalized registration number.
+The system shall support exact lookup by normalized registration number through:
+
+```http
+GET /students/by-registration/{registrationNumber}
+```
+
+- The caller shall be an authenticated `ADMIN` or `OPERATOR` with application
+  status `ACTIVE`.
+- `registrationNumber` shall use the same trim, uppercase and
+  `[A-Z0-9-]{4,20}` normalization and validation rules used by student creation.
+- A successful lookup returns HTTP `200` with the same public Student
+  representation returned by lookup by internal identifier.
+- Active and inactive students can be consulted.
+- A syntactically invalid registration number returns HTTP `400 Bad Request`.
+- A valid normalized registration number without a corresponding student
+  returns HTTP `404 Not Found` with semantic error `STUDENT_NOT_FOUND`.
 
 ### RF-ALU-004 — List students
 
