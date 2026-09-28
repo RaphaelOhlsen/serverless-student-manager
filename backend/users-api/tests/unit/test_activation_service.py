@@ -24,20 +24,29 @@ def client_error(code: str, operation: str = "PutItem") -> ClientError:
 
 
 class FakeUsers:
-    def __init__(self, *, role: str = "ADMIN", status: str = "INVITED") -> None:
+    def __init__(
+        self,
+        *,
+        role: str = "ADMIN",
+        status: str = "INVITED",
+        version: int | None = 3,
+        auth_version: int = 1,
+    ) -> None:
         self.authorization: dict[str, object] | None = {
             "userId": USER_ID,
             "role": role,
             "status": status,
-            "authVersion": 1,
+            "authVersion": auth_version,
         }
         self.profile: dict[str, object] | None = {
             "userId": USER_ID,
             "cognitoSub": SUB,
             "role": role,
             "status": status,
-            "authVersion": 1,
+            "authVersion": auth_version,
         }
+        if version is not None:
+            self.profile["version"] = version
         self.activations: list[dict[str, object]] = []
         self.activation_error: ClientError | None = None
 
@@ -51,17 +60,20 @@ class FakeUsers:
 
     def activate(self, **kwargs: object) -> None:
         self.activations.append(kwargs)
+        if self.authorization is not None and self.profile is not None:
+            current_version = self.profile.get("version", 1)
+            current_auth_version = self.profile["authVersion"]
+            assert isinstance(current_version, int)
+            assert isinstance(current_auth_version, int)
+            self.authorization.update(status="ACTIVE", authVersion=current_auth_version + 1)
+            self.profile.update(
+                status="ACTIVE",
+                version=current_version + 1,
+                authVersion=current_auth_version + 1,
+            )
         if self.activation_error is not None:
             error = self.activation_error
-            if self.authorization is not None:
-                self.authorization["status"] = "ACTIVE"
-            if self.profile is not None:
-                self.profile["status"] = "ACTIVE"
             raise error
-        if self.authorization is not None:
-            self.authorization["status"] = "ACTIVE"
-        if self.profile is not None:
-            self.profile["status"] = "ACTIVE"
 
 
 class FakeCognito:
@@ -174,7 +186,12 @@ def test_uses_shared_user_state_reconciliation(monkeypatch: pytest.MonkeyPatch) 
     assert reconciled_subjects == [SUB]
 
 
-def started_record(service: ActivationService) -> dict[str, object]:
+def started_record(
+    service: ActivationService,
+    *,
+    profile_version: int = 3,
+    auth_version: int = 1,
+) -> dict[str, object]:
     record_id = f"HTTP#dev#{USER_ID}#activate-current-user#{KEY}"
     return {
         "id": record_id,
@@ -185,6 +202,17 @@ def started_record(service: ActivationService) -> dict[str, object]:
         "idempotencyKey": KEY,
         "payloadHash": service._payload_hash(USER_ID),
         "state": "STARTED",
+        "sourceStatus": "INVITED",
+        "profileVersion": profile_version,
+        "authVersion": auth_version,
+        "nextProfileVersion": profile_version + 1,
+        "nextAuthVersion": auth_version + 1,
+        "response": {
+            "userId": USER_ID,
+            "role": "ADMIN",
+            "status": "ACTIVE",
+            "authVersion": auth_version + 1,
+        },
         "eventId": "44444444-4444-4444-8444-444444444444",
         "correlationId": "original-request",
         "occurredAt": "2026-09-01T10:30:00.000Z",
@@ -202,18 +230,50 @@ def test_invited_user_is_activated_for_allowed_roles(role: str) -> None:
         "userId": USER_ID,
         "role": role,
         "status": "ACTIVE",
-        "authVersion": 1,
+        "authVersion": 2,
     }
     assert len(users.activations) == 1
     assert users.activations[0]["role"] == role
+    assert users.activations[0]["version"] == 3
+    assert users.activations[0]["auth_version"] == 1
     assert users.activations[0]["expires_at"] == 1796126400
     assert next(iter(idempotency.records.values()))["state"] == "COMPLETED"
 
 
+def test_effective_activation_passes_logical_version_and_current_auth_version() -> None:
+    service, users, _, _ = make_service(FakeUsers(version=6, auth_version=4))
+
+    activate(service)
+
+    assert users.activations[0]["version"] == 6
+    assert users.activations[0]["auth_version"] == 4
+
+
+def test_historical_profile_without_version_uses_logical_version_one() -> None:
+    service, users, _, _ = make_service(FakeUsers(version=None))
+
+    response = activate(service)
+
+    assert users.activations[0]["version"] == 1
+    assert users.activations[0]["auth_version"] == 1
+    assert response["authVersion"] == 2
+
+
 def test_already_active_uses_no_activation_transaction() -> None:
-    service, users, _, _ = make_service(FakeUsers(status="ACTIVE"))
-    assert activate(service)["status"] == "ACTIVE"
+    users = FakeUsers(status="ACTIVE", version=7, auth_version=5)
+    original_authorization = dict(users.authorization or {})
+    original_profile = dict(users.profile or {})
+    service, users, _, _ = make_service(users)
+
+    assert activate(service) == {
+        "userId": USER_ID,
+        "role": "ADMIN",
+        "status": "ACTIVE",
+        "authVersion": 5,
+    }
     assert users.activations == []
+    assert users.authorization == original_authorization
+    assert users.profile == original_profile
 
 
 def test_concurrent_idempotency_completion_returns_preserved_response() -> None:
@@ -229,6 +289,23 @@ def test_completed_replay_returns_preserved_response() -> None:
     second = activate(service)
     assert second == first
     assert len(users.activations) == 1
+
+
+def test_completed_replay_returns_exact_stored_response_without_activation() -> None:
+    idempotency = FakeIdempotency()
+    service, users, _, _ = make_service(FakeUsers(status="ACTIVE"), idempotency=idempotency)
+    record = started_record(service)
+    preserved = {
+        "userId": USER_ID,
+        "role": "ADMIN",
+        "status": "ACTIVE",
+        "authVersion": 17,
+    }
+    record.update(state="COMPLETED", response=preserved)
+    idempotency.records[str(record["id"])] = record
+
+    assert activate(service) == preserved
+    assert users.activations == []
 
 
 def test_completed_replay_normalizes_persisted_response_without_changing_context() -> None:
@@ -318,13 +395,49 @@ def test_started_invited_replay_resumes_with_preserved_context() -> None:
 
 
 def test_started_active_replay_completes_without_duplicate_effects() -> None:
-    service, users, _, idempotency = make_service(FakeUsers(status="ACTIVE"))
+    service, users, _, idempotency = make_service(
+        FakeUsers(status="ACTIVE", version=4, auth_version=2)
+    )
     record = started_record(service)
     idempotency.records[str(record["id"])] = record
 
-    assert activate(service)["status"] == "ACTIVE"
+    assert activate(service) == record["response"]
     assert users.activations == []
     assert record["state"] == "COMPLETED"
+
+
+@pytest.mark.parametrize(
+    ("version", "auth_version"),
+    [(5, 2), (4, 3)],
+)
+def test_started_active_replay_rejects_incompatible_post_state(
+    version: int,
+    auth_version: int,
+) -> None:
+    service, users, _, idempotency = make_service(
+        FakeUsers(status="ACTIVE", version=version, auth_version=auth_version)
+    )
+    record = started_record(service)
+    idempotency.records[str(record["id"])] = record
+
+    with pytest.raises(ActivationConflictError):
+        activate(service)
+
+    assert users.activations == []
+    assert record["state"] == "STARTED"
+
+
+def test_started_replay_without_transition_metadata_fails_closed() -> None:
+    service, users, _, idempotency = make_service()
+    record = started_record(service)
+    del record["nextProfileVersion"]
+    idempotency.records[str(record["id"])] = record
+
+    with pytest.raises(ActivationConflictError):
+        activate(service)
+
+    assert users.activations == []
+    assert record["state"] == "STARTED"
 
 
 @pytest.mark.parametrize(

@@ -22,6 +22,7 @@ class UserRepositoryProtocol(UserStateRepositoryProtocol, Protocol):
         user_id: str,
         cognito_sub: str,
         role: str,
+        version: int,
         auth_version: int,
         occurred_at: str,
         event_id: str,
@@ -77,6 +78,7 @@ class ActivationService:
         role = self._required_string(authorization, "role")
         status = self._required_string(authorization, "status")
         auth_version = self._required_int(authorization, "authVersion")
+        version = self._logical_profile_version(profile)
 
         self._validate_cognito(user_id, cognito_sub)
 
@@ -97,7 +99,9 @@ class ActivationService:
         occurred_at = now.isoformat(timespec="milliseconds").replace("+00:00", "Z")
         correlation_id = request_id or str(self._identifier_factory())
         event_id = str(self._identifier_factory())
-        response = self._response(user_id, role, auth_version)
+        next_version = version + 1 if status == "INVITED" else version
+        next_auth_version = auth_version + 1 if status == "INVITED" else auth_version
+        response = self._response(user_id, role, next_auth_version)
         record = {
             "id": record_id,
             "environment": self._environment,
@@ -107,6 +111,12 @@ class ActivationService:
             "idempotencyKey": idempotency_key,
             "payloadHash": payload_hash,
             "state": "STARTED",
+            "sourceStatus": status,
+            "profileVersion": version,
+            "authVersion": auth_version,
+            "nextProfileVersion": next_version,
+            "nextAuthVersion": next_auth_version,
+            "response": response,
             "eventId": event_id,
             "correlationId": correlation_id,
             "occurredAt": occurred_at,
@@ -141,6 +151,7 @@ class ActivationService:
             cognito_sub=cognito_sub,
             user_id=user_id,
             role=role,
+            version=version,
             auth_version=auth_version,
             occurred_at=occurred_at,
             event_id=event_id,
@@ -180,10 +191,59 @@ class ActivationService:
         authorization, profile = self._load_and_reconcile(cognito_sub)
         user_id = self._required_string(authorization, "userId")
         role = self._required_string(authorization, "role")
+        status = self._required_string(authorization, "status")
         auth_version = self._required_int(authorization, "authVersion")
-        response = self._response(user_id, role, auth_version)
+        version = self._logical_profile_version(profile)
+        source_status = self._started_string(existing, "sourceStatus")
+        expected_version = self._started_int(existing, "profileVersion")
+        expected_auth_version = self._started_int(existing, "authVersion")
+        next_version = self._started_int(existing, "nextProfileVersion")
+        next_auth_version = self._started_int(existing, "nextAuthVersion")
+        response = existing.get("response")
+        if not isinstance(response, dict):
+            raise ActivationConflictError
+        if source_status == "INVITED":
+            if (
+                next_version != expected_version + 1
+                or next_auth_version != expected_auth_version + 1
+                or response != self._response(user_id, role, next_auth_version)
+            ):
+                raise ActivationConflictError
+        elif source_status == "ACTIVE":
+            if (
+                next_version != expected_version
+                or next_auth_version != expected_auth_version
+                or response != self._response(user_id, role, expected_auth_version)
+            ):
+                raise ActivationConflictError
+        else:
+            raise ActivationConflictError
+
         occurred_at = self._required_string(existing, "occurredAt")
-        if self._both_active(authorization, profile):
+        if self._matches_state(
+            status=status,
+            version=version,
+            auth_version=auth_version,
+            expected_status="ACTIVE",
+            expected_version=next_version,
+            expected_auth_version=next_auth_version,
+        ):
+            return self._complete_idempotency(
+                record_id=record_id,
+                response=response,
+                updated_at=occurred_at,
+            )
+
+        if not self._matches_state(
+            status=status,
+            version=version,
+            auth_version=auth_version,
+            expected_status=source_status,
+            expected_version=expected_version,
+            expected_auth_version=expected_auth_version,
+        ):
+            raise ActivationConflictError
+        if source_status == "ACTIVE":
             return self._complete_idempotency(
                 record_id=record_id,
                 response=response,
@@ -195,7 +255,8 @@ class ActivationService:
             cognito_sub=cognito_sub,
             user_id=user_id,
             role=role,
-            auth_version=auth_version,
+            version=expected_version,
+            auth_version=expected_auth_version,
             occurred_at=occurred_at,
             event_id=self._required_string(existing, "eventId"),
             correlation_id=self._required_string(existing, "correlationId"),
@@ -210,6 +271,7 @@ class ActivationService:
         cognito_sub: str,
         user_id: str,
         role: str,
+        version: int,
         auth_version: int,
         occurred_at: str,
         event_id: str,
@@ -222,6 +284,7 @@ class ActivationService:
                 user_id=user_id,
                 cognito_sub=cognito_sub,
                 role=role,
+                version=version,
                 auth_version=auth_version,
                 occurred_at=occurred_at,
                 event_id=event_id,
@@ -236,7 +299,16 @@ class ActivationService:
             }:
                 raise
             current_authorization, current_profile = self._load_and_reconcile(cognito_sub)
-            if not self._both_active(current_authorization, current_profile):
+            current_version = self._logical_profile_version(current_profile)
+            current_auth_version = self._required_int(current_authorization, "authVersion")
+            if not self._matches_state(
+                status=self._required_string(current_authorization, "status"),
+                version=current_version,
+                auth_version=current_auth_version,
+                expected_status="ACTIVE",
+                expected_version=version + 1,
+                expected_auth_version=auth_version + 1,
+            ):
                 raise ActivationConflictError from None
 
         return self._complete_idempotency(
@@ -368,8 +440,40 @@ class ActivationService:
         return value
 
     @staticmethod
-    def _both_active(authorization: dict[str, object], profile: dict[str, object]) -> bool:
-        return authorization.get("status") == "ACTIVE" and profile.get("status") == "ACTIVE"
+    def _logical_profile_version(profile: dict[str, object]) -> int:
+        if "version" not in profile:
+            return 1
+        return ActivationService._required_int(profile, "version")
+
+    @staticmethod
+    def _started_string(record: dict[str, object], name: str) -> str:
+        value = record.get(name)
+        if not isinstance(value, str) or not value:
+            raise ActivationConflictError
+        return value
+
+    @staticmethod
+    def _started_int(record: dict[str, object], name: str) -> int:
+        value = record.get(name)
+        if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+            raise ActivationConflictError
+        return value
+
+    @staticmethod
+    def _matches_state(
+        *,
+        status: str,
+        version: int,
+        auth_version: int,
+        expected_status: str,
+        expected_version: int,
+        expected_auth_version: int,
+    ) -> bool:
+        return (
+            status == expected_status
+            and version == expected_version
+            and auth_version == expected_auth_version
+        )
 
     def _record_id(self, user_id: str, key: str) -> str:
         return f"HTTP#{self._environment}#{user_id}#activate-current-user#{key}"
