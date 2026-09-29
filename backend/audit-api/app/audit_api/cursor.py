@@ -1,12 +1,20 @@
 import base64
 import binascii
+import hashlib
+import hmac
 import json
 import re
 from dataclasses import dataclass
 from typing import Any
 
 from audit_api.errors import InvalidAuditCursorError, InvalidAuditQueryRequestError
-from audit_api.query import AccessPath, AuditQuery, normalize_rfc3339_utc, valid_exact_value
+from audit_api.query import (
+    MAX_CURSOR_BYTES,
+    AccessPath,
+    AuditQuery,
+    normalize_rfc3339_utc,
+    valid_exact_value,
+)
 
 _TOP_LEVEL_FIELDS = {"v", "query", "continuation"}
 _QUERY_FIELDS = {
@@ -24,6 +32,8 @@ _QUERY_FIELDS = {
 _CONTINUATION_FIELDS = {"bucket", "position"}
 _POSITION_FIELDS = {"occurredAt", "eventId", "resourceType", "resourceId"}
 _MONTH_PATTERN = re.compile(r"\d{4}-(?:0[1-9]|1[0-2])\Z")
+_QUERY_FINGERPRINT_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
+_CURRENT_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -46,19 +56,27 @@ def encode_cursor(query: AuditQuery, continuation: CursorContinuation) -> str:
     except InvalidAuditCursorError:
         raise RuntimeError("Cannot encode invalid audit cursor continuation") from None
     payload = {
-        "v": 1,
-        "query": query.cursor_binding(),
+        "v": _CURRENT_VERSION,
+        "query": _query_fingerprint(query),
         "continuation": {
             "bucket": continuation.bucket,
             "position": _position_payload(continuation.position),
         },
     }
     raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
-    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+    encoded = base64.urlsafe_b64encode(raw).decode().rstrip("=")
+    if len(encoded.encode()) > MAX_CURSOR_BYTES:
+        raise RuntimeError("Encoded audit cursor exceeds its safety limit")
+    return encoded
 
 
 def decode_cursor(value: str, query: AuditQuery) -> CursorContinuation:
-    if not value or "=" in value or re.fullmatch(r"[A-Za-z0-9_-]+", value) is None:
+    if (
+        not value
+        or len(value.encode("utf-8")) > MAX_CURSOR_BYTES
+        or "=" in value
+        or re.fullmatch(r"[A-Za-z0-9_-]+", value) is None
+    ):
         raise InvalidAuditCursorError
     try:
         raw = base64.b64decode(value + "=" * (-len(value) % 4), altchars=b"-_", validate=True)
@@ -70,15 +88,11 @@ def decode_cursor(value: str, query: AuditQuery) -> CursorContinuation:
 
     if not isinstance(payload, dict) or set(payload) != _TOP_LEVEL_FIELDS:
         raise InvalidAuditCursorError
-    if type(payload["v"]) is not int or payload["v"] != 1:
+    version = payload["v"]
+    if type(version) is not int or version not in {1, _CURRENT_VERSION}:
         raise InvalidAuditCursorError
     binding = payload["query"]
-    if (
-        not isinstance(binding, dict)
-        or set(binding) != _QUERY_FIELDS
-        or not _valid_binding_types(binding)
-        or binding != query.cursor_binding()
-    ):
+    if not _binding_matches(version, binding, query):
         raise InvalidAuditCursorError
 
     raw_continuation = payload["continuation"]
@@ -152,6 +166,31 @@ def _valid_binding_types(binding: dict[str, object]) -> bool:
         )
         and type(binding["limit"]) is int
     )
+
+
+def _binding_matches(version: int, binding: object, query: AuditQuery) -> bool:
+    if version == 1:
+        return (
+            isinstance(binding, dict)
+            and set(binding) == _QUERY_FIELDS
+            and _valid_binding_types(binding)
+            and binding == query.cursor_binding()
+        )
+    return (
+        isinstance(binding, str)
+        and _QUERY_FINGERPRINT_PATTERN.fullmatch(binding) is not None
+        and hmac.compare_digest(binding, _query_fingerprint(query))
+    )
+
+
+def _query_fingerprint(query: AuditQuery) -> str:
+    canonical = json.dumps(
+        query.cursor_binding(),
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode()
+    return hashlib.sha256(canonical).hexdigest()
 
 
 def _position_payload(position: EventPosition | None) -> dict[str, str] | None:

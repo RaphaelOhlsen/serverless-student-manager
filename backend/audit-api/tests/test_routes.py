@@ -6,7 +6,7 @@ from typing import Any, cast
 import pytest
 from audit_api.authorization import AdminAuthorizationService
 from audit_api.errors import InvalidAuditCursorError
-from audit_api.query import AccessPath, AuditQuery
+from audit_api.query import MAX_CURSOR_BYTES, AccessPath, AuditQuery
 from audit_api.query_engine import AuditPage, AuditQueryEngine
 from audit_api.repository import AuditEventRepository
 from audit_api.routes.audit_events import register_audit_event_routes
@@ -224,6 +224,19 @@ def test_invalid_cursor_is_400_with_sanitized_error() -> None:
     body = error_body(response)
     assert body["code"] == "INVALID_CURSOR"
     assert "physical" not in response["body"]
+
+
+def test_oversized_cursor_is_400_invalid_cursor_before_service_execution() -> None:
+    service = FakeService()
+    raw_query = "from=2026-09-01T00%3A00%3A00Z&to=2026-09-30T00%3A00%3A00Z&cursor=" + "a" * (
+        MAX_CURSOR_BYTES + 1
+    )
+
+    response = resolve(service, event(raw_query))
+
+    assert response["statusCode"] == 400
+    assert error_body(response)["code"] == "INVALID_CURSOR"
+    assert service.calls == []
 
 
 @pytest.mark.parametrize(

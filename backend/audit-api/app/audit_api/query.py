@@ -7,7 +7,7 @@ from enum import StrEnum
 from typing import TypeGuard
 from urllib.parse import parse_qsl
 
-from audit_api.errors import InvalidAuditQueryRequestError
+from audit_api.errors import InvalidAuditCursorError, InvalidAuditQueryRequestError
 
 _ALLOWED_PARAMETERS = {
     "from",
@@ -22,7 +22,8 @@ _ALLOWED_PARAMETERS = {
     "cursor",
 }
 _RFC3339_UTC_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z\Z")
-_MAX_VALUE_BYTES = 512
+_MAX_EXACT_VALUE_BYTES = 512
+MAX_CURSOR_BYTES = 4096
 
 
 class AccessPath(StrEnum):
@@ -107,7 +108,7 @@ def parse_audit_query(event: Mapping[str, object]) -> AuditQuery:
         raise InvalidAuditQueryRequestError
 
     limit = _parse_limit(parameters.get("limit"))
-    cursor = _optional_exact(parameters, "cursor")
+    cursor = _optional_cursor(parameters)
     access_path = select_access_path(
         correlation_id=correlation_id,
         resource_type=resource_type,
@@ -160,7 +161,7 @@ def valid_exact_value(value: object) -> TypeGuard[str]:
         isinstance(value, str)
         and bool(value)
         and value == value.strip()
-        and len(value.encode("utf-8")) <= _MAX_VALUE_BYTES
+        and len(value.encode("utf-8")) <= _MAX_EXACT_VALUE_BYTES
         and not any(unicodedata.category(character).startswith("C") for character in value)
     )
 
@@ -169,6 +170,13 @@ def _optional_exact(parameters: Mapping[str, str], name: str) -> str | None:
     value = parameters.get(name)
     if value is not None and not valid_exact_value(value):
         raise InvalidAuditQueryRequestError
+    return value
+
+
+def _optional_cursor(parameters: Mapping[str, str]) -> str | None:
+    value = parameters.get("cursor")
+    if value is not None and (not value or len(value.encode("utf-8")) > MAX_CURSOR_BYTES):
+        raise InvalidAuditCursorError
     return value
 
 
