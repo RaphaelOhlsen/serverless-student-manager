@@ -9,7 +9,8 @@ TERRAFORM_DIR := infra/bootstrap
 
 PYTHON_DIRS := backend tools
 HARNESS_SCRIPTS := scripts/agentic-preflight.sh scripts/agentic-scope-check.sh \
-	scripts/agentic-staging-check.sh scripts/lib/agentic-common.sh
+	scripts/agentic-staging-check.sh scripts/agentic-pr-history-guard.sh \
+	scripts/lib/agentic-common.sh
 
 .PHONY: agentic-preflight harness-test harness-shellcheck harness-check setup format format-check lint typecheck test coverage security check \
 	terraform-init terraform-format terraform-format-check terraform-validate \

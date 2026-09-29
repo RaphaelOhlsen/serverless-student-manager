@@ -57,7 +57,7 @@ O próprio `MANIFEST.md` não é listado para evitar hash autorreferencial.
 | `docs/decisions/decision-register.md` | `398bcc07ea1dd8b8b9fc46145d47369ab0520725af5e988009c129b141ab1ad8` |
 | `docs/decisions/pending-decisions.md` | `3877f4dcdb6bfd6d367696e0b3b473bbf10c78bf9c81ee357c35b05375e5daea` |
 | `docs/operations/cognito-dynamodb-compensation.md` | `d2914292047679b7858e6b130f4baf04440913f9fb0809b243df22323d448807` |
-| `docs/operations/agentic-development-harness-local.md` | `df1133a245b9a06023d70bf029f366e11b767dd521e1c612d4ef296e93c6772b` |
+| `docs/operations/agentic-development-harness-local.md` | `6c26a2e1710da851062d3f84a4897cbdbdebebecec0d36f89e3e9c2a286cb746` |
 | `docs/operations/first-admin-email-verification.md` | `f067eb2b1bbea6d453d542b67fbf6d9d8a86504c2c293f5e035786518480150d` |
 | `docs/operations/first-admin-invitation-resume.md` | `33213a038e5f7400b09cb88cba7f19c75be248ac860b1bccd6af762153f6679a` |
 | `docs/operations/non-http-idempotency.md` | `3734ceb6968b2c6ee998bcfbb690bb3899c5dd86551a309b05b21b72bb4d6a96` |
@@ -69,7 +69,7 @@ O próprio `MANIFEST.md` não é listado para evitar hash autorreferencial.
 | `docs/serverless-student-manager-ordem-de-leitura.md` | `cbcac0a480275d5e82e42743b1223a0982373690d0638febb8ebc3b23d77bd71` |
 | `docs/serverless-student-manager-ordem-de-leitura.png` | `0243000a218ca8860a10c45b0eeb21a02195664f9c4da1eacb1f8abf9ceed611` |
 | `docs/decisions/adr/adr-031-agentic-development-harness.md` | `6d0215e41b58547365c7ceb7dd0c9724f1c28f71a9ac43ded7ecb0cbec7e0e5a` |
-| `docs/operations/agentic-development-harness-v1.md` | `34aad1c59d448d5070ae2d9bbe1941bee110bec340e53d790e69f5c1323ece98` |
+| `docs/operations/agentic-development-harness-v1.md` | `49b1cb38fd2a6f954e79c3003dc254e383969688082e9881d63e1bc994e3b565` |
 | `docs/decisions/adr/adr-032-student-update.md` | `f07e204c9bcd405493b24bfe54fba5415eefe877fbbcdc9034c7a2d340c6ae99` |
 | `docs/decisions/adr/adr-033-student-lifecycle.md` | `05388a5d59a66996468b049b3acecfc3596885c776e9d42672d2d20dc454ab0d` |
 | `docs/decisions/adr/adr-034-student-physical-deletion-policy.md` | `5158870d552c0a1d87cd59dfc33d7daf1c861c2e881777a1b2d105a031cb2c02` |

@@ -8,6 +8,7 @@ on:
       - ".github/workflows/harness-ci.yml"
       - "Makefile"
       - "scripts/agentic-*.sh"
+      - "scripts/agentic-*.py"
       - "scripts/lib/agentic-common.sh"
       - "scripts/tests/**"
       - "AGENTS.md"
@@ -41,4 +42,5 @@ jobs:
             scripts/agentic-preflight.sh \
             scripts/agentic-scope-check.sh \
             scripts/agentic-staging-check.sh \
+            scripts/agentic-pr-history-guard.sh \
             scripts/lib/agentic-common.sh
