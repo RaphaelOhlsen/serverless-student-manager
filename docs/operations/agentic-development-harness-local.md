@@ -115,6 +115,47 @@ feitas diretamente em `main`.
    transformar ausência de evidência em sucesso e confirme separadamente a
    autorização para commit, push, PR, merge ou cloud.
 
+## Antes de push ou criação de PR
+
+Compare a árvore que será publicada com o escopo three-dot que a plataforma de PR
+apresentará:
+
+```bash
+./scripts/agentic-pr-history-guard.sh \
+  --base origin/main \
+  --head HEAD \
+  --format text
+```
+
+O guard resolve os commits e merge-base, registra ahead/behind e compara os
+conjuntos normalizados de caminhos de `git diff <base> <head>` e
+`git diff <base>...<head>`. `FAIL` bloqueia push/PR porque o escopo apresentado
+pelo PR difere da alteração direta entre as árvores. `SQUASH_HISTORY_DIVERGENCE`
+recomenda criar, sob autorização própria, uma branch nova a partir da base; o
+guard nunca faz rebase, reset, cherry-pick ou mudança de branch.
+
+## Antes de merge
+
+Classifique os efeitos automáticos do push resultante para a branch alvo:
+
+```bash
+./scripts/agentic-merge-side-effect-guard.py \
+  --base origin/main \
+  --head HEAD \
+  --target-branch main \
+  --event push \
+  --format text
+```
+
+O guard lê os workflows do objeto Git do `head`, não do working tree, e avalia o
+subconjunto suportado de `on.push.branches`, `paths` e `paths-ignore`. Casos
+malformados, não suportados ou potencialmente mutantes sem classificação segura
+falham fechados. Um resultado `BLOCKED` com
+`MERGE_IS_RELEASE_BOUNDARY=YES` é uma decisão de política: o merge somente pode
+prosseguir após autorização humana que aceite explicitamente o release, deploy ou
+mutação externa reportada. Frases genéricas como “merge quando verde” não suprem
+essa autorização. O guard não executa workflow nem concede autorização.
+
 Os checks de artefatos e secrets são heurísticos e não substituem secret
 scanning dedicado nem revisão humana. Eles não revelam o valor encontrado e não
 inspecionam o conteúdo de binários. Arquivos ignorados pelo Git também não fazem
@@ -132,7 +173,7 @@ make harness-check
 ```
 
 `harness-test` usa repositórios Git temporários e isolados. `harness-shellcheck`
-analisa os quatro scripts shell, seguindo a biblioteca compartilhada, e
+analisa os scripts shell, seguindo a biblioteca compartilhada, e
 `harness-check` combina ambas as validações. O workflow `Harness CI` executa os
 mesmos checks em pull requests que alterem arquivos relevantes do Harness, sem
 credenciais AWS, OIDC ou mutações externas.

@@ -35,7 +35,8 @@ A aprovação da ADR não concede autorização de execução.
 4. **Revisão:** comparar diff/artefatos com a proposta; registrar evidências e
    resultados, inclusive limitações. Nenhum gate se abre pela revisão do agente.
 5. **Publicação/Operação:** verificar separadamente cada autorização necessária,
-   seu alvo e artefato imediatamente antes de agir; conferir o resultado.
+   seu alvo e artefato imediatamente antes de agir; classificar a ação direta e
+   seus efeitos colaterais determinísticos conhecidos; conferir o resultado.
 6. **Checkpoint:** quando autorizado, registrar estado mínimo para retomada,
    pendências e próxima ação. Não converter checkpoint em permissão de execução.
 
@@ -75,6 +76,13 @@ conhecidos de workflows existentes, inclusive deploy, devem ser identificados an
 da autorização, apresentados como consequências do merge e explicitamente aceitos
 junto com sua autorização.
 
+Operações são classificadas tanto pela ação direta quanto por seus efeitos
+colaterais determinísticos conhecidos. Um merge ou push para branch protegida que
+acione release, deploy ou outra mutação externa cruza também essa fronteira
+operacional. Autorização para commit, push de feature branch, abertura de PR ou CI
+não autoriza implicitamente esses efeitos. Quando o efeito não puder ser
+classificado com segurança, a operação deve falhar fechada.
+
 MERGE_ALLOWED não autoriza o agente a executar posteriormente ou separadamente
 terraform apply, deploy manual, comandos de mutação AWS, alterações cloud ou qualquer
 outra operação coberta por CLOUD_MUTATION_ALLOWED. Toda mutação cloud executada
@@ -82,6 +90,17 @@ diretamente pelo agente exige CLOUD_MUTATION_ALLOWED próprio, explícito e esco
 mesmo depois de um merge autorizado. CLOUD_MUTATION_ALLOWED não implica MERGE_ALLOWED.
 Os gates permanecem independentes e não transitivos; READY indica somente prontidão,
 nunca autorização. O Harness não altera nem dispara autonomamente pipelines existentes.
+
+Antes de publicar uma branch, o `PR_HISTORY_GUARD` compara o diff direto entre as
+árvores da base e do head com o diff three-dot usado por PRs. Divergência entre os
+conjuntos reais de arquivos bloqueia a publicação até revisão humana; o guard pode
+recomendar uma branch nova a partir da base, mas nunca reescreve histórico.
+
+Antes de merge, o `MERGE_SIDE_EFFECT_GUARD` inspeciona estaticamente os workflows
+do objeto Git proposto e seus gatilhos conhecidos. `MERGE_IS_RELEASE_BOUNDARY=YES`
+exige autorização humana que mencione explicitamente a consequência de release ou
+mutação externa identificada. Ambos os guards produzem evidência read-only e
+mantêm `AUTHORIZATION_GRANTED=no`, inclusive quando o resultado técnico é `PASS`.
 
 ## Evidências e resultados
 
