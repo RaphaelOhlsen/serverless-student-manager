@@ -83,6 +83,36 @@ output "students_api_alias_arn" {
   value       = module.students_api.alias_arn
 }
 
+output "audit_api_function_name" {
+  description = "Name of the audit-api Lambda function."
+  value       = module.audit_api.function_name
+}
+
+output "audit_api_function_arn" {
+  description = "ARN of the audit-api Lambda function."
+  value       = module.audit_api.function_arn
+}
+
+output "audit_api_execution_role_arn" {
+  description = "ARN of the audit-api Lambda execution role."
+  value       = module.audit_api.execution_role_arn
+}
+
+output "audit_api_log_group_name" {
+  description = "CloudWatch Log Group used by the audit-api Lambda function."
+  value       = module.audit_api.log_group_name
+}
+
+output "audit_api_alias_name" {
+  description = "Stable alias of the audit-api Lambda function."
+  value       = module.audit_api.alias_name
+}
+
+output "audit_api_alias_arn" {
+  description = "ARN of the stable audit-api Lambda alias."
+  value       = module.audit_api.alias_arn
+}
+
 output "http_api_id" {
   description = "ID of the API Gateway HTTP API."
   value       = module.http_api.api_id

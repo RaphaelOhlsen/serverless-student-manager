@@ -33,6 +33,16 @@ variable "users_api_bootstrap_package_filename" {
   }
 }
 
+variable "audit_api_bootstrap_package_filename" {
+  description = "Path to the ZIP package used to bootstrap the audit-api Lambda function."
+  type        = string
+
+  validation {
+    condition     = length(trimspace(var.audit_api_bootstrap_package_filename)) > 0
+    error_message = "audit_api_bootstrap_package_filename must not be empty."
+  }
+}
+
 variable "github_repository" {
   description = "GitHub repository allowed to assume operational roles, in owner/repository format."
   type        = string

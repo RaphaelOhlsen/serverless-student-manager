@@ -6,6 +6,7 @@ variables {
 
   students_api_bootstrap_package_filename = "bootstrap.zip"
   users_api_bootstrap_package_filename    = "users-bootstrap.zip"
+  audit_api_bootstrap_package_filename    = "audit-bootstrap.zip"
 
   github_repository    = "example/serverless-student-manager"
   github_owner_id      = "12345678"
@@ -64,6 +65,19 @@ override_module {
     alias_name         = "live"
     alias_arn          = "arn:aws:lambda:us-east-1:123456789012:function:serverless-student-manager-dev-users-api:live"
     alias_invoke_arn   = "arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/users-example/invocations"
+  }
+}
+
+override_module {
+  target = module.audit_api
+  outputs = {
+    function_name      = "serverless-student-manager-dev-audit-api"
+    function_arn       = "arn:aws:lambda:us-east-1:123456789012:function:serverless-student-manager-dev-audit-api"
+    execution_role_arn = "arn:aws:iam::123456789012:role/serverless-student-manager-dev-audit-api-execution"
+    log_group_name     = "/aws/lambda/serverless-student-manager-dev-audit-api"
+    alias_name         = "live"
+    alias_arn          = "arn:aws:lambda:us-east-1:123456789012:function:serverless-student-manager-dev-audit-api:live"
+    alias_invoke_arn   = "arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/audit-example/invocations"
   }
 }
 
@@ -1304,5 +1318,99 @@ run "plans_users_api_access" {
       ]
     ]))
     error_message = "The users-api policy must not contain wildcard resources."
+  }
+}
+
+run "plans_audit_api_read_only_access" {
+  command = plan
+
+  assert {
+    condition     = output.audit_api_function_name == "serverless-student-manager-dev-audit-api"
+    error_message = "The dedicated audit-api Lambda function must be wired."
+  }
+
+  assert {
+    condition     = length(data.aws_iam_policy_document.audit_api.statement) == 2
+    error_message = "The audit-api policy must contain exactly two read-only statements."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.audit_api.statement : statement.actions
+      if statement.sid == "ReadUserAuthorization"
+    ])) == toset(["dynamodb:GetItem"])
+    error_message = "The audit-api users permission must allow only GetItem."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.audit_api.statement : statement.resources
+      if statement.sid == "ReadUserAuthorization"
+    ])) == toset([module.user_store.table_arn])
+    error_message = "The audit-api users permission must target only the users table."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.audit_api.statement : statement.actions
+      if statement.sid == "QueryAuditEvents"
+    ])) == toset(["dynamodb:Query"])
+    error_message = "The audit-api audit permission must allow only Query."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.audit_api.statement : statement.resources
+      if statement.sid == "QueryAuditEvents"
+      ])) == toset([
+      module.audit_store.table_arn,
+      "${module.audit_store.table_arn}/index/gsi-actor-time",
+      "${module.audit_store.table_arn}/index/gsi-correlation-time",
+      "${module.audit_store.table_arn}/index/gsi-period-time",
+    ])
+    error_message = "The audit-api Query permission must target only the audit table and approved GSIs."
+  }
+
+  assert {
+    condition = alltrue(flatten([
+      for statement in data.aws_iam_policy_document.audit_api.statement : [
+        for action in statement.actions : !contains([
+          "dynamodb:Scan",
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem",
+          "dynamodb:BatchWriteItem",
+          "dynamodb:TransactWriteItems",
+        ], action)
+      ]
+    ]))
+    error_message = "The audit-api policy must not allow Scan or DynamoDB writes."
+  }
+
+  assert {
+    condition = alltrue([
+      for statement in data.aws_iam_policy_document.audit_api.statement :
+      !contains(statement.actions, "dynamodb:GetItem") ||
+      !contains(statement.resources, module.audit_store.table_arn)
+    ])
+    error_message = "The audit-api policy must not allow GetItem on the audit table."
+  }
+
+  assert {
+    condition = alltrue(flatten([
+      for statement in data.aws_iam_policy_document.audit_api.statement : [
+        for action in statement.actions : !strcontains(action, "cognito-idp:") && !strcontains(action, "*")
+      ]
+    ]))
+    error_message = "The audit-api policy must not allow Cognito or wildcard actions."
+  }
+
+  assert {
+    condition = alltrue(flatten([
+      for statement in data.aws_iam_policy_document.audit_api.statement : [
+        for resource in statement.resources : resource != "*"
+      ]
+    ]))
+    error_message = "The audit-api policy must not allow wildcard resources."
   }
 }

@@ -477,6 +477,69 @@ module "users_api" {
   additional_iam_policy_json = data.aws_iam_policy_document.users_api.json
 }
 
+data "aws_iam_policy_document" "audit_api" {
+  statement {
+    sid    = "ReadUserAuthorization"
+    effect = "Allow"
+
+    actions = [
+      "dynamodb:GetItem",
+    ]
+
+    resources = [
+      module.user_store.table_arn,
+    ]
+  }
+
+  statement {
+    sid    = "QueryAuditEvents"
+    effect = "Allow"
+
+    actions = [
+      "dynamodb:Query",
+    ]
+
+    resources = [
+      module.audit_store.table_arn,
+      "${module.audit_store.table_arn}/index/${module.audit_store.gsi_actor_time}",
+      "${module.audit_store.table_arn}/index/${module.audit_store.gsi_correlation_time}",
+      "${module.audit_store.table_arn}/index/${module.audit_store.gsi_period_time}",
+    ]
+  }
+}
+
+module "audit_api" {
+  source = "../../modules/lambda_service"
+
+  function_name = "serverless-student-manager-dev-audit-api"
+  description   = "Audit Query API Lambda function."
+
+  runtime       = "python3.13"
+  handler       = "audit_api.app.lambda_handler"
+  architectures = ["x86_64"]
+
+  memory_size = 512
+  timeout     = 10
+
+  bootstrap_package_filename = var.audit_api_bootstrap_package_filename
+
+  log_retention_in_days = 14
+
+  component           = "audit-api"
+  data_classification = "confidential"
+
+  environment_variables = {
+    AUDIT_TABLE_NAME             = module.audit_store.table_name
+    ENVIRONMENT                  = local.environment
+    POWERTOOLS_LOG_LEVEL         = "DEBUG"
+    POWERTOOLS_METRICS_NAMESPACE = "ServerlessStudentManager"
+    POWERTOOLS_SERVICE_NAME      = "audit-api"
+    USERS_TABLE_NAME             = module.user_store.table_name
+  }
+
+  additional_iam_policy_json = data.aws_iam_policy_document.audit_api.json
+}
+
 module "http_api" {
   source = "../../modules/http_api"
 
@@ -505,6 +568,11 @@ module "http_api" {
   ]
 
   integrations = {
+    audit = {
+      invoke_arn    = module.audit_api.alias_invoke_arn
+      function_name = module.audit_api.function_name
+      alias_name    = module.audit_api.alias_name
+    }
     students = {
       invoke_arn    = module.students_api.alias_invoke_arn
       function_name = module.students_api.function_name
@@ -518,6 +586,12 @@ module "http_api" {
   }
 
   routes = {
+    get_audit_events = {
+      route_key          = "GET /audit-events"
+      integration_key    = "audit"
+      authorization_type = "JWT"
+    }
+
     health = {
       route_key          = "GET /health"
       integration_key    = "students"
