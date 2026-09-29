@@ -142,13 +142,16 @@ def test_single_partition_cursor_has_no_duplicates_or_omissions() -> None:
     second = service.execute(replace(query, cursor=first.next_cursor))
     third = service.execute(replace(query, cursor=second.next_cursor))
 
-    assert [entry["eventId"] for entry in first.items + second.items + third.items] == [
+    combined = first.items + second.items + third.items
+    expected_ids = [
         "event-5",
         "event-4",
         "event-3",
         "event-2",
         "event-1",
     ]
+    assert [entry["eventId"] for entry in combined] == expected_ids
+    assert len({entry["eventId"] for entry in combined}) == len(expected_ids)
     assert first.next_cursor is not None
     assert second.next_cursor is not None
     assert third.next_cursor is None
@@ -192,6 +195,9 @@ def test_period_page_crosses_month_boundary_and_continues_without_gaps() -> None
     assert continuation.position is not None
     assert [entry["eventId"] for entry in second.items] == ["aug-1"]
     assert second.next_cursor is None
+    combined = first.items + second.items
+    assert [entry["eventId"] for entry in combined] == ["sep-2", "aug-2", "aug-1"]
+    assert len({entry["eventId"] for entry in combined}) == 3
     assert [call["ExpressionAttributeValues"][":pk"] for call in table.calls] == [
         "PERIOD#2026-09",
         "PERIOD#2026-08",

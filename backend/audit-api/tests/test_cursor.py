@@ -1,10 +1,11 @@
 import base64
 import json
+from urllib.parse import urlencode
 
 import pytest
 from audit_api.cursor import CursorContinuation, EventPosition, decode_cursor, encode_cursor
 from audit_api.errors import InvalidAuditCursorError
-from audit_api.query import AuditQuery, parse_audit_query
+from audit_api.query import MAX_CURSOR_BYTES, AuditQuery, parse_audit_query
 
 
 def query(*, limit: int = 50, actor_id: str = "admin-1") -> AuditQuery:
@@ -20,6 +21,25 @@ def query(*, limit: int = 50, actor_id: str = "admin-1") -> AuditQuery:
 
 def raw_cursor(payload: str) -> str:
     return base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
+
+
+def legacy_cursor(query_value: AuditQuery, continuation: CursorContinuation) -> str:
+    payload = {
+        "v": 1,
+        "query": query_value.cursor_binding(),
+        "continuation": {
+            "bucket": continuation.bucket,
+            "position": {
+                "occurredAt": continuation.position.occurred_at,
+                "eventId": continuation.position.event_id,
+                "resourceType": continuation.position.resource_type,
+                "resourceId": continuation.position.resource_id,
+            }
+            if continuation.position is not None
+            else None,
+        },
+    }
+    return raw_cursor(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
 
 
 def position(month: str = "2026-09") -> EventPosition:
@@ -40,6 +60,99 @@ def test_cursor_round_trip_is_url_safe_unpadded_and_query_bound() -> None:
     assert decode_cursor(cursor, original_query) == continuation
 
 
+def test_v2_cursor_is_compact_and_self_accepted_by_request_parser() -> None:
+    original_query = query(limit=1)
+    continuation = CursorContinuation(bucket=None, position=position())
+    cursor = encode_cursor(original_query, continuation)
+    payload = json.loads(base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)))
+
+    resumed_query = parse_audit_query(
+        {
+            "rawQueryString": urlencode(
+                {
+                    "from": "2026-09-01T00:00:00Z",
+                    "to": "2026-09-28T00:00:00Z",
+                    "actorId": "admin-1",
+                    "limit": "1",
+                    "cursor": cursor,
+                }
+            )
+        }
+    )
+
+    assert payload["v"] == 2
+    assert isinstance(payload["query"], str)
+    assert len(payload["query"]) == 64
+    assert len(cursor.encode()) <= MAX_CURSOR_BYTES
+    assert decode_cursor(resumed_query.cursor or "", resumed_query) == continuation
+
+
+def test_maximum_valid_v2_cursor_remains_within_safety_limit() -> None:
+    maximum_value = '"' * 512
+    original_query = parse_audit_query(
+        {
+            "rawQueryString": urlencode(
+                {
+                    "from": "2026-08-01T00:00:00Z",
+                    "to": "2026-09-30T23:59:59.999Z",
+                    "resourceType": "STUDENT",
+                    "resourceId": maximum_value,
+                    "eventType": maximum_value,
+                    "actorId": maximum_value,
+                    "result": "SUCCESS",
+                    "correlationId": maximum_value,
+                    "limit": "100",
+                }
+            )
+        }
+    )
+    continuation = CursorContinuation(
+        bucket=None,
+        position=EventPosition(
+            occurred_at="2026-09-20T00:00:00.000Z",
+            event_id=maximum_value,
+            resource_type="STUDENT",
+            resource_id=maximum_value,
+        ),
+    )
+
+    cursor = encode_cursor(original_query, continuation)
+
+    assert len(cursor.encode()) == 3024
+    assert len(cursor.encode()) <= MAX_CURSOR_BYTES
+    assert decode_cursor(cursor, original_query) == continuation
+
+
+def test_decodes_legacy_v1_cursor_within_safety_limit() -> None:
+    original_query = query()
+    continuation = CursorContinuation(bucket=None, position=position())
+    cursor = legacy_cursor(original_query, continuation)
+    resumed_query = parse_audit_query(
+        {
+            "rawQueryString": urlencode(
+                {
+                    "from": "2026-09-01T00:00:00Z",
+                    "to": "2026-09-28T00:00:00Z",
+                    "actorId": "admin-1",
+                    "limit": "50",
+                    "cursor": cursor,
+                }
+            )
+        }
+    )
+
+    assert len(cursor.encode()) <= MAX_CURSOR_BYTES
+    assert decode_cursor(resumed_query.cursor or "", resumed_query) == continuation
+
+
+def test_legacy_v1_cursor_remains_query_bound() -> None:
+    original_query = query()
+    cursor = legacy_cursor(original_query, CursorContinuation(None, position()))
+
+    with pytest.raises(InvalidAuditCursorError):
+        decode_cursor(cursor, query(actor_id="admin-2"))
+
+
 @pytest.mark.parametrize("value", ["***", "YWJj=", "AB"])
 def test_rejects_malformed_or_noncanonical_encoding(value: str) -> None:
     with pytest.raises(InvalidAuditCursorError):
@@ -52,7 +165,7 @@ def test_rejects_unsupported_version() -> None:
             encode_cursor(query(), CursorContinuation(None, position())) + "=="
         )
     )
-    valid["v"] = 2
+    valid["v"] = 3
 
     with pytest.raises(InvalidAuditCursorError):
         decode_cursor(raw_cursor(json.dumps(valid, separators=(",", ":"))), query())
@@ -74,6 +187,16 @@ def test_rejects_unknown_fields() -> None:
 
     with pytest.raises(InvalidAuditCursorError):
         decode_cursor(raw_cursor(json.dumps(payload, separators=(",", ":"))), query())
+
+
+def test_rejects_tampered_query_fingerprint() -> None:
+    original_query = query()
+    cursor = encode_cursor(original_query, CursorContinuation(None, position()))
+    payload = json.loads(base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)))
+    payload["query"] = "0" * 64
+
+    with pytest.raises(InvalidAuditCursorError):
+        decode_cursor(raw_cursor(json.dumps(payload, separators=(",", ":"))), original_query)
 
 
 @pytest.mark.parametrize(

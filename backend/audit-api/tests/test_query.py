@@ -1,8 +1,8 @@
 from urllib.parse import urlencode
 
 import pytest
-from audit_api.errors import InvalidAuditQueryRequestError
-from audit_api.query import AccessPath, parse_audit_query, select_access_path
+from audit_api.errors import InvalidAuditCursorError, InvalidAuditQueryRequestError
+from audit_api.query import MAX_CURSOR_BYTES, AccessPath, parse_audit_query, select_access_path
 
 
 def event(*pairs: tuple[str, str]) -> dict[str, str]:
@@ -121,6 +121,17 @@ def test_rejects_repeated_parameter_from_raw_query_string() -> None:
 
     with pytest.raises(InvalidAuditQueryRequestError):
         parse_audit_query(raw_event)
+
+
+def test_rejects_cursor_above_safety_limit_as_invalid_cursor() -> None:
+    with pytest.raises(InvalidAuditCursorError):
+        parse_audit_query(
+            event(
+                ("from", "2026-09-01T00:00:00Z"),
+                ("to", "2026-09-02T00:00:00Z"),
+                ("cursor", "a" * (MAX_CURSOR_BYTES + 1)),
+            )
+        )
 
 
 @pytest.mark.parametrize("malformed", ["%", "%GG", "%FF"])
