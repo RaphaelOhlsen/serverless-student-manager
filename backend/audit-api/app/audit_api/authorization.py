@@ -35,7 +35,6 @@ class AdminAuthorizationService:
         if (
             authorization.get("PK") != f"COGNITO#{cognito_sub}"
             or authorization.get("SK") != "AUTHORIZATION"
-            or authorization.get("cognitoSub") != cognito_sub
             or role != "ADMIN"
             or status != "ACTIVE"
         ):
