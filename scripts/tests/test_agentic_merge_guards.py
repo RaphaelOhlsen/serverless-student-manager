@@ -131,6 +131,22 @@ class PrHistoryGuardTests(RepositoryTestCase):
         base = self.repo.commit_all("squashed milestone")
         return base, feature_head
 
+    def make_base_advance(
+        self,
+        *,
+        pr_changes: dict[str, str],
+        base_changes: dict[str, str],
+    ) -> tuple[str, str]:
+        self.repo.git("switch", "-c", "feature/base-advance", self.repo.initial)
+        for path, content in pr_changes.items():
+            self.repo.write(path, content)
+        feature_head = self.repo.commit_all("feature change")
+        self.repo.git("switch", "main")
+        for path, content in base_changes.items():
+            self.repo.write(path, content)
+        base = self.repo.commit_all("base advance")
+        return base, feature_head
+
     def test_squash_history_divergence_is_detected(self) -> None:
         base, head = self.make_squash_divergence()
 
@@ -155,19 +171,83 @@ class PrHistoryGuardTests(RepositoryTestCase):
         )
         self.assertFalse(payload["fileSetsEqual"])
 
-    def test_scope_divergence_without_ahead_behind_is_classified(self) -> None:
-        self.repo.git("switch", "-c", "feature/diverged")
-        self.repo.write("feature.txt", "feature\n")
-        head = self.repo.commit_all("feature")
-        self.repo.git("switch", "main")
-        self.repo.write("main.txt", "main\n")
-        base = self.repo.commit_all("main")
+    def test_independent_base_advance_is_safe(self) -> None:
+        base, head = self.make_base_advance(
+            pr_changes={"feature.txt": "feature\n"},
+            base_changes={"main.txt": "main\n"},
+        )
+
+        result = self.run_guard(base, head)
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("AHEAD=1", result.stdout)
+        self.assertIn("BEHIND=1", result.stdout)
+        self.assertIn("DIRECT_ONLY_FILE=main.txt", result.stdout)
+        self.assertIn("BASE_ADVANCED_FILE=main.txt", result.stdout)
+        self.assertIn("BASE_HEAD_CHANGE_OVERLAP=NO", result.stdout)
+        self.assertIn("FILE_SETS_EQUAL=NO", result.stdout)
+        self.assertIn("REASON=BASE_ADVANCED_DISJOINT", result.stdout)
+        self.assertIn("PR_HISTORY_GUARD=PASS", result.stdout)
+
+    def test_multiple_independent_base_files_are_safe(self) -> None:
+        base, head = self.make_base_advance(
+            pr_changes={"feature.txt": "feature\n"},
+            base_changes={"main-a.txt": "a\n", "main-b.txt": "b\n"},
+        )
+
+        payload = json.loads(self.run_guard(base, head, "json").stdout)
+
+        self.assertEqual(payload["result"], "PASS")
+        self.assertEqual(payload["reason"], "BASE_ADVANCED_DISJOINT")
+        self.assertEqual(payload["baseAdvancedFiles"], ["main-a.txt", "main-b.txt"])
+        self.assertEqual(payload["baseHeadChangeOverlapFiles"], [])
+        self.assertTrue(payload["baseAdvanced"])
+        self.assertFalse(payload["baseHeadChangeOverlap"])
+        self.assertFalse(payload["fileSetsEqual"])
+
+    def test_same_path_base_advance_is_blocked(self) -> None:
+        base, head = self.make_base_advance(
+            pr_changes={"shared.txt": "feature\n"},
+            base_changes={"shared.txt": "main\n"},
+        )
+
+        result = self.run_guard(base, head)
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("BASE_HEAD_CHANGE_OVERLAP_FILE=shared.txt", result.stdout)
+        self.assertIn("BASE_HEAD_CHANGE_OVERLAP=YES", result.stdout)
+        self.assertIn("REASON=BASE_ADVANCED_WITH_OVERLAP", result.stdout)
+
+    def test_partial_overlap_is_blocked_and_extra_is_not_treated_as_disjoint(self) -> None:
+        base, head = self.make_base_advance(
+            pr_changes={"shared.txt": "feature\n", "feature.txt": "feature\n"},
+            base_changes={"shared.txt": "main\n", "main.txt": "main\n"},
+        )
 
         result = self.run_guard(base, head)
 
         self.assertEqual(result.returncode, 1)
         self.assertIn("DIRECT_ONLY_FILE=main.txt", result.stdout)
-        self.assertIn("REASON=PR_SCOPE_DIVERGENCE", result.stdout)
+        self.assertIn("BASE_ADVANCED_FILE=shared.txt", result.stdout)
+        self.assertIn("BASE_HEAD_CHANGE_OVERLAP_FILE=shared.txt", result.stdout)
+        self.assertIn("REASON=BASE_ADVANCED_WITH_OVERLAP", result.stdout)
+        self.assertNotIn("REASON=BASE_ADVANCED_DISJOINT", result.stdout)
+
+    def test_pr_history_text_and_json_outputs_are_deterministic(self) -> None:
+        base, head = self.make_base_advance(
+            pr_changes={"feature.txt": "feature\n"},
+            base_changes={"main.txt": "main\n"},
+        )
+
+        text_first = self.run_guard(base, head)
+        text_second = self.run_guard(base, head)
+        json_first = self.run_guard(base, head, "json")
+        json_second = self.run_guard(base, head, "json")
+
+        self.assertEqual(text_first.stdout, text_second.stdout)
+        self.assertEqual(json_first.stdout, json_second.stdout)
+        payload = json.loads(json_first.stdout)
+        self.assertFalse(payload["authorizationGranted"])
 
     def test_no_changes_is_safe_and_explicit(self) -> None:
         result = self.run_guard(self.repo.initial, self.repo.initial)

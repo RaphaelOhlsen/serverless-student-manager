@@ -129,10 +129,16 @@ apresentará:
 
 O guard resolve os commits e merge-base, registra ahead/behind e compara os
 conjuntos normalizados de caminhos de `git diff <base> <head>` e
-`git diff <base>...<head>`. `FAIL` bloqueia push/PR porque o escopo apresentado
-pelo PR difere da alteração direta entre as árvores. `SQUASH_HISTORY_DIVERGENCE`
-recomenda criar, sob autorização própria, uma branch nova a partir da base; o
-guard nunca faz rebase, reset, cherry-pick ou mudança de branch.
+`git diff <base>...<head>`. Ele também calcula os arquivos alterados entre o
+merge-base e a base e sua interseção com o escopo do PR. Uma diferença entre os
+dois primeiros conjuntos pode receber `PASS` com `BASE_ADVANCED_DISJOINT` somente
+quando for integralmente explicada por mudanças independentes da base e não houver
+overlap. `FILE_SETS_EQUAL=NO`, portanto, não implica isoladamente falha. Overlap,
+divergência por squash, evidência inconclusiva ou arquivo não explicado continuam
+bloqueados. `SQUASH_HISTORY_DIVERGENCE` recomenda criar, sob autorização própria,
+uma branch nova a partir da base; o guard nunca faz rebase, reset, cherry-pick ou
+mudança de branch. Um `PASS` técnico mantém `AUTHORIZATION_GRANTED=no` e não abre
+gate de push, PR ou merge.
 
 ## Antes de merge
 

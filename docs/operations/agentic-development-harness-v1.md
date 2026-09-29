@@ -93,8 +93,13 @@ nunca autorização. O Harness não altera nem dispara autonomamente pipelines e
 
 Antes de publicar uma branch, o `PR_HISTORY_GUARD` compara o diff direto entre as
 árvores da base e do head com o diff three-dot usado por PRs. Divergência entre os
-conjuntos reais de arquivos bloqueia a publicação até revisão humana; o guard pode
-recomendar uma branch nova a partir da base, mas nunca reescreve histórico.
+conjuntos reais de arquivos bloqueia a publicação até revisão humana, exceto quando
+toda a diferença é comprovadamente explicada por arquivos alterados somente pelo
+avanço independente da base desde o merge-base. Nesse caso,
+`BASE_ADVANCED_DISJOINT` pode ser `PASS` mesmo com `FILE_SETS_EQUAL=NO`. Qualquer
+overlap entre mudanças da base e do PR continua bloqueado, assim como divergência
+por squash ou arquivo não explicado. O guard pode recomendar uma branch nova a
+partir da base, mas nunca reescreve histórico.
 
 Antes de merge, o `MERGE_SIDE_EFFECT_GUARD` inspeciona estaticamente os workflows
 do objeto Git proposto e seus gatilhos conhecidos. `MERGE_IS_RELEASE_BOUNDARY=YES`
