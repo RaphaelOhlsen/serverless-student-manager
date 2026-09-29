@@ -447,6 +447,10 @@ implementation and validation in `dev`.
 
 Only Administrators shall be able to consult student audit history.
 
+Student history is provided by `GET /audit-events` with `resourceType=STUDENT`,
+`resourceId`, `from` and `to`, according to
+[ADR-037](../decisions/adr/adr-037-audit-query-api-contract.md).
+
 ### RF-ALU-011 — Validate student data
 
 The backend shall validate types, required fields, limits, formats and unknown fields.
@@ -774,6 +778,12 @@ Administrators shall filter audit events by:
 - Responsible user.
 - Result.
 - Correlation identifier.
+
+The normative HTTP contract, strict parameter combinations, access-path
+priority, deterministic descending order, bounded opaque pagination and public
+summary representation are defined by
+[ADR-037](../decisions/adr/adr-037-audit-query-api-contract.md). Successful audit
+queries do not themselves generate audit events in this milestone.
 
 ### RF-ERR-001 — Standardized error response
 

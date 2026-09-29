@@ -256,6 +256,7 @@ resource "aws_iam_role_policy" "lambda_application_release_dev" {
         "lambda:UpdateFunctionCode",
       ]
       Resource = [
+        "arn:${data.aws_partition.current.partition}:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:serverless-student-manager-dev-audit-api",
         "arn:${data.aws_partition.current.partition}:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:serverless-student-manager-dev-students-api",
         "arn:${data.aws_partition.current.partition}:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:serverless-student-manager-dev-users-api",
       ]

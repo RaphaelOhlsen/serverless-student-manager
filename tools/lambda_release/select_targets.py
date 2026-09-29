@@ -9,7 +9,9 @@ def select_targets(paths: Iterable[str]) -> list[str]:
     selected: set[str] = set()
     for path in paths:
         normalized = path.strip()
-        if normalized.startswith("backend/students-api/"):
+        if normalized.startswith("backend/audit-api/"):
+            selected.add("audit-api")
+        elif normalized.startswith("backend/students-api/"):
             selected.add("students-api")
         elif normalized.startswith("backend/users-api/"):
             selected.add("users-api")

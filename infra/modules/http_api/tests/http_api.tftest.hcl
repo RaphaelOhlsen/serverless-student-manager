@@ -29,6 +29,11 @@ variables {
   ]
 
   integrations = {
+    audit = {
+      invoke_arn    = "arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/arn:aws:lambda:us-east-1:123456789012:function:audit-api:live/invocations"
+      function_name = "audit-api"
+      alias_name    = "live"
+    }
     students = {
       invoke_arn    = "arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/arn:aws:lambda:us-east-1:123456789012:function:students-api:live/invocations"
       function_name = "students-api"
@@ -42,6 +47,12 @@ variables {
   }
 
   routes = {
+    get_audit_events = {
+      route_key          = "GET /audit-events"
+      integration_key    = "audit"
+      authorization_type = "JWT"
+    }
+
     health = {
       route_key          = "GET /health"
       integration_key    = "students"
@@ -313,6 +324,29 @@ run "plans_http_api" {
   }
 
   assert {
+    condition     = aws_apigatewayv2_integration.lambda["audit"].integration_type == "AWS_PROXY"
+    error_message = "The audit integration must use AWS_PROXY."
+  }
+
+  assert {
+    condition = (
+      aws_apigatewayv2_integration.lambda["audit"].integration_uri
+      == "arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/arn:aws:lambda:us-east-1:123456789012:function:audit-api:live/invocations"
+    )
+    error_message = "The audit integration must invoke the live Lambda alias."
+  }
+
+  assert {
+    condition     = aws_apigatewayv2_route.this["get_audit_events"].route_key == "GET /audit-events"
+    error_message = "The audit query route key is incorrect."
+  }
+
+  assert {
+    condition     = aws_apigatewayv2_route.this["get_audit_events"].authorization_type == "JWT"
+    error_message = "The audit query route must require JWT authorization."
+  }
+
+  assert {
     condition     = aws_apigatewayv2_route.this["health"].route_key == "GET /health"
     error_message = "The public health route is incorrect."
   }
@@ -497,6 +531,16 @@ run "plans_http_api" {
   }
 
   assert {
+    condition = (
+      aws_lambda_permission.api_gateway["audit"].principal == "apigateway.amazonaws.com" &&
+      aws_lambda_permission.api_gateway["audit"].action == "lambda:InvokeFunction" &&
+      aws_lambda_permission.api_gateway["audit"].function_name == "audit-api" &&
+      aws_lambda_permission.api_gateway["audit"].qualifier == "live"
+    )
+    error_message = "The audit Lambda permission must allow API Gateway to invoke the live alias."
+  }
+
+  assert {
     condition     = aws_lambda_permission.api_gateway["students"].action == "lambda:InvokeFunction"
     error_message = "API Gateway must be allowed to invoke the Lambda function."
   }
@@ -534,6 +578,22 @@ run "plans_http_api" {
 
 run "wires_computed_references" {
   command = apply
+
+  assert {
+    condition = (
+      aws_apigatewayv2_route.this["get_audit_events"].authorizer_id
+      == aws_apigatewayv2_authorizer.jwt.id
+    )
+    error_message = "The audit query route must use the configured JWT authorizer."
+  }
+
+  assert {
+    condition = (
+      aws_apigatewayv2_route.this["get_audit_events"].target
+      == "integrations/${aws_apigatewayv2_integration.lambda["audit"].id}"
+    )
+    error_message = "The audit query route must use the audit integration."
+  }
 
   assert {
     condition = (
@@ -600,7 +660,7 @@ run "wires_computed_references" {
   }
 
   assert {
-    condition     = length(aws_apigatewayv2_integration.lambda) == 2
+    condition     = length(aws_apigatewayv2_integration.lambda) == 3
     error_message = "Lifecycle routes must reuse the existing students integration."
   }
 
@@ -629,7 +689,7 @@ run "wires_computed_references" {
   }
 
   assert {
-    condition     = length(aws_apigatewayv2_integration.lambda) == 2
+    condition     = length(aws_apigatewayv2_integration.lambda) == 3
     error_message = "The registration lookup route must not create another integration."
   }
 
@@ -674,7 +734,7 @@ run "wires_computed_references" {
   }
 
   assert {
-    condition     = length(aws_apigatewayv2_integration.lambda) == 2
+    condition     = length(aws_apigatewayv2_integration.lambda) == 3
     error_message = "Administrative user read routes must not create another integration."
   }
 
@@ -718,7 +778,7 @@ run "wires_computed_references" {
   }
 
   assert {
-    condition     = length(aws_lambda_permission.api_gateway) == 2
+    condition     = length(aws_lambda_permission.api_gateway) == 3
     error_message = "Administrative user write routes must reuse the existing Lambda permission."
   }
 

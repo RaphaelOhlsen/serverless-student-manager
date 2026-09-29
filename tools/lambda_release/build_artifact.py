@@ -9,7 +9,7 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-SUPPORTED_APIS = {"students-api", "users-api"}
+SUPPORTED_APIS = {"audit-api", "students-api", "users-api"}
 FIXED_ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 EXCLUDED_PARTS = {"__pycache__", "tests", ".pytest_cache", ".mypy_cache", ".ruff_cache"}
 

@@ -65,6 +65,9 @@ Para Users / Admin CRUD, consultar também a
 Para consulta exata de Student por matrícula, consultar também a
 [ADR-036 — Contrato de consulta de aluno por matrícula](decisions/adr/adr-036-student-registration-lookup-contract.md) — Approved.
 
+Para a Audit Query API, consultar também a
+[ADR-037 — Contrato da Audit Query API](decisions/adr/adr-037-audit-query-api-contract.md) — Approved.
+
 ## 4. Arquitetura consolidada
 
 38. `architecture/architecture-overview.md`

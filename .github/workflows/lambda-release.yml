@@ -5,6 +5,7 @@ on:
     branches:
       - main
     paths:
+      - "backend/audit-api/**"
       - "backend/students-api/**"
       - "backend/users-api/**"
 
@@ -15,6 +16,7 @@ on:
         required: true
         type: choice
         options:
+          - audit-api
           - students-api
           - users-api
       commit_sha:
@@ -70,7 +72,7 @@ jobs:
               echo "commit_sha does not belong to main history." >&2
               exit 1
             }
-            [[ "${INPUT_API}" == "students-api" || "${INPUT_API}" == "users-api" ]]
+            [[ "${INPUT_API}" == "audit-api" || "${INPUT_API}" == "students-api" || "${INPUT_API}" == "users-api" ]]
             printf 'apis={"api":["%s"]}\n' "${INPUT_API}" >> "${GITHUB_OUTPUT}"
             printf 'commit_sha=%s\n' "${INPUT_COMMIT_SHA}" >> "${GITHUB_OUTPUT}"
             exit 0
@@ -124,6 +126,9 @@ jobs:
         run: |
           set -euo pipefail
           case "${API}" in
+            audit-api)
+              function_name="serverless-student-manager-dev-audit-api"
+              ;;
             students-api)
               function_name="serverless-student-manager-dev-students-api"
               ;;
