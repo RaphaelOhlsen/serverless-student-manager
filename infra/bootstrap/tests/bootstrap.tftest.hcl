@@ -161,15 +161,15 @@ run "secure_bootstrap_configuration" {
 
   assert {
     condition = (
-      length(jsondecode(aws_iam_role_policy.lambda_application_release_dev.policy).Statement[0].Resource) == 2 &&
+      length(jsondecode(aws_iam_role_policy.lambda_application_release_dev.policy).Statement[0].Resource) == 3 &&
       alltrue([
         for resource in jsondecode(aws_iam_role_policy.lambda_application_release_dev.policy).Statement[0].Resource :
         startswith(resource, "arn:aws:lambda:us-east-1:") &&
         strcontains(resource, ":function:serverless-student-manager-dev-") &&
-        (endswith(resource, "students-api") || endswith(resource, "users-api"))
+        (endswith(resource, "audit-api") || endswith(resource, "students-api") || endswith(resource, "users-api"))
       ])
     )
-    error_message = "The dev release policy must be restricted to the Students and Users Lambda functions."
+    error_message = "The dev release policy must be restricted to the Audit, Students and Users Lambda functions."
   }
 
   assert {

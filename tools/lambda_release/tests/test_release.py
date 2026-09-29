@@ -9,6 +9,8 @@ import pytest
 from tools.lambda_release.release import UPDATE_MAX_ATTEMPTS, ReleaseError, release
 
 FUNCTION = "serverless-student-manager-dev-users-api"
+AUDIT_FUNCTION = "serverless-student-manager-dev-audit-api"
+STUDENTS_FUNCTION = "serverless-student-manager-dev-students-api"
 
 
 class FakeAws:
@@ -18,6 +20,7 @@ class FakeAws:
         previous: str = "4",
         update_statuses: Sequence[str] = ("Successful",),
         successful_revision: str | None = "function-after-update",
+        function_name: str = FUNCTION,
     ) -> None:
         self.calls: list[list[str]] = []
         self.version = previous
@@ -29,6 +32,7 @@ class FakeAws:
         self.update_statuses = list(update_statuses)
         self.update_status_index = 0
         self.successful_revision = successful_revision
+        self.function_name = function_name
 
     def __call__(self, arguments: Sequence[str]) -> dict[str, Any]:
         call = list(arguments)
@@ -44,7 +48,7 @@ class FakeAws:
                 if status == "Successful" and self.successful_revision is not None:
                     self.function_revision = self.successful_revision
             configuration = {
-                "FunctionName": FUNCTION,
+                "FunctionName": self.function_name,
                 "Version": qualifier,
                 "RevisionId": self.function_revision,
                 "CodeSha256": self.hash,
@@ -67,7 +71,7 @@ class FakeAws:
             self.publishes += 1
             self.function_revision = f"function-after-publish-{self.publishes}"
             return {
-                "FunctionName": FUNCTION,
+                "FunctionName": self.function_name,
                 "Version": str(4 + self.publishes),
                 "CodeSha256": self.hash,
                 "LastUpdateStatus": "Successful",
@@ -111,6 +115,27 @@ def test_release_sequence_and_users_smoke(tmp_path: Path) -> None:
     assert smoke_calls == [("POST", "https://example.test/users/me/activation")]
 
 
+def test_students_release_smoke_is_unchanged(tmp_path: Path) -> None:
+    package = artifact(tmp_path)
+    aws = FakeAws(package, function_name=STUDENTS_FUNCTION)
+    smoke_calls: list[tuple[str, str]] = []
+
+    def smoke(method: str, url: str) -> int:
+        smoke_calls.append((method, url))
+        return 401
+
+    release(
+        api="students-api",
+        function_name=STUDENTS_FUNCTION,
+        artifact=package,
+        api_base_url="https://example.test",
+        run=aws,
+        smoke=smoke,
+    )
+
+    assert smoke_calls == [("GET", "https://example.test/students")]
+
+
 def test_initial_latest_is_frozen_before_update(tmp_path: Path) -> None:
     package = artifact(tmp_path)
     aws = FakeAws(package, "$LATEST")
@@ -134,6 +159,37 @@ def test_initial_latest_is_frozen_before_update(tmp_path: Path) -> None:
     assert update[update.index("--revision-id") + 1] == "function-after-publish-1"
     assert "function-before" not in update
     assert result["previous_version"] == "5"
+
+
+def test_audit_release_freezes_latest_publishes_promotes_and_smokes(tmp_path: Path) -> None:
+    package = artifact(tmp_path)
+    aws = FakeAws(package, "$LATEST", function_name=AUDIT_FUNCTION)
+    smoke_calls: list[tuple[str, str]] = []
+
+    def smoke(method: str, url: str) -> int:
+        smoke_calls.append((method, url))
+        return 401
+
+    result = release(
+        api="audit-api",
+        function_name=AUDIT_FUNCTION,
+        artifact=package,
+        api_base_url="https://example.test",
+        run=aws,
+        smoke=smoke,
+    )
+
+    assert [call[1] for call in aws.calls][:6] == [
+        "get-alias",
+        "get-function-configuration",
+        "publish-version",
+        "update-alias",
+        "get-function-configuration",
+        "update-function-code",
+    ]
+    assert result == {"previous_version": "5", "published_version": "6", "alias_version": "6"}
+    assert aws.version == "6"
+    assert smoke_calls == [("GET", "https://example.test/audit-events")]
 
 
 def test_numeric_live_uses_current_revision_without_new_baseline(tmp_path: Path) -> None:
@@ -366,6 +422,25 @@ def test_failed_smoke_rolls_back(tmp_path: Path) -> None:
     assert updates[-1][updates[-1].index("--function-version") + 1] == "4"
 
 
+def test_failed_audit_smoke_rolls_back(tmp_path: Path) -> None:
+    package = artifact(tmp_path)
+    aws = FakeAws(package, function_name=AUDIT_FUNCTION)
+    smoke_results = iter((500, 500, 500, 401))
+
+    with pytest.raises(ReleaseError, match="rollback completed"):
+        release(
+            api="audit-api",
+            function_name=AUDIT_FUNCTION,
+            artifact=package,
+            api_base_url="https://example.test",
+            run=aws,
+            smoke=lambda _method, _url: next(smoke_results),
+        )
+
+    updates = [call for call in aws.calls if call[1] == "update-alias"]
+    assert updates[-1][updates[-1].index("--function-version") + 1] == "4"
+
+
 def test_failed_post_rollback_smoke_reports_rollback_failure(tmp_path: Path) -> None:
     package = artifact(tmp_path)
     aws = FakeAws(package)
@@ -391,4 +466,20 @@ def test_rejects_wrong_function_before_aws_call(tmp_path: Path) -> None:
             api_base_url="https://example.test",
             run=aws,
         )
+    assert aws.calls == []
+
+
+def test_audit_rejects_wrong_function_before_aws_call(tmp_path: Path) -> None:
+    package = artifact(tmp_path)
+    aws = FakeAws(package, function_name=AUDIT_FUNCTION)
+
+    with pytest.raises(ReleaseError):
+        release(
+            api="audit-api",
+            function_name="serverless-student-manager-dev-users-api",
+            artifact=package,
+            api_base_url="https://example.test",
+            run=aws,
+        )
+
     assert aws.calls == []

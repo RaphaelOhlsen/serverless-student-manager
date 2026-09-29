@@ -12,8 +12,9 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
-SUPPORTED_APIS = {"students-api", "users-api"}
+SUPPORTED_APIS = {"audit-api", "students-api", "users-api"}
 SMOKE_TARGETS = {
+    "audit-api": ("GET", "/audit-events"),
     "students-api": ("GET", "/students"),
     "users-api": ("POST", "/users/me/activation"),
 }

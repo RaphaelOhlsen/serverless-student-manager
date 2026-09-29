@@ -45,6 +45,47 @@ jobs:
       - name: Unit tests
         run: python -m pytest tools/lambda_release/tests -v
 
+  audit-api:
+    name: Audit API
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            requirements-dev.txt
+            backend/audit-api/app/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+          python -m pip install -r backend/audit-api/app/requirements.txt
+
+      - name: Ruff lint
+        run: python -m ruff check backend/audit-api
+
+      - name: Ruff format
+        run: python -m ruff format --check backend/audit-api
+
+      - name: Mypy
+        run: python -m mypy backend/audit-api
+
+      - name: Tests with coverage
+        run: |
+          python -m pytest \
+            backend/audit-api/tests \
+            -v \
+            --cov=backend/audit-api/app/audit_api \
+            --cov-report=term-missing \
+            --cov-fail-under=80
+
   students-api:
     name: Students API
     runs-on: ubuntu-latest
