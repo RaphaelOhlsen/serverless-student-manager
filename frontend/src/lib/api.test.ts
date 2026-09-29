@@ -18,6 +18,7 @@ import {
   authenticatedPost,
   fetchCurrentUserProfile,
   fetchStudents,
+  fetchUsers,
   reactivateStudent,
 } from '@/lib/api'
 
@@ -121,6 +122,114 @@ describe('authenticated API requests', () => {
       },
     )
     expect(fetchMock.mock.calls[0]?.[1]).not.toHaveProperty('body')
+  })
+})
+
+describe('users directory contract', () => {
+  const user = {
+    userId: '00000000-0000-4000-8000-000000000001',
+    fullName: 'Admin Exemplo',
+    email: 'admin@example.test',
+    role: 'ADMIN',
+    status: 'ACTIVE',
+    version: 3,
+    createdAt: '2026-09-01T10:00:00.000Z',
+    updatedAt: '2026-09-02T10:00:00.000Z',
+  }
+  const page = { items: [user], nextCursor: 'opaque+/=cursor' }
+
+  beforeEach(() => authMocks.fetchAuthSession.mockResolvedValue({
+    tokens: { accessToken: { toString: () => 'fake-access-token' } },
+  }))
+  afterEach(() => { vi.restoreAllMocks(); vi.clearAllMocks() })
+
+  it('gets users without filters using the access token', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(page), { status: 200 }),
+    )
+    await expect(fetchUsers()).resolves.toEqual(page)
+    expect(fetchMock).toHaveBeenCalledWith('https://api.example.test/users', {
+      method: 'GET', headers: { Authorization: 'Bearer fake-access-token' },
+    })
+  })
+
+  it.each([
+    [{ namePrefix: 'Ana Maria' }, 'namePrefix=Ana+Maria'],
+    [{ email: 'admin+qa@example.test' }, 'email=admin%2Bqa%40example.test'],
+    [{ role: 'ADMIN' }, 'role=ADMIN'],
+    [{ status: 'INVITED' }, 'status=INVITED'],
+    [{ limit: 100 }, 'limit=100'],
+  ] as const)('serializes %o as %s', async (query, expected) => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(page), { status: 200 }),
+    )
+    await fetchUsers(query)
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(`https://api.example.test/users?${expected}`)
+  })
+
+  it('serializes valid combinations and omits ALL filters', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(page), { status: 200 }),
+    )
+    await fetchUsers({ limit: 20, namePrefix: 'Ana', role: 'ALL', status: 'INACTIVE' })
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      'https://api.example.test/users?limit=20&namePrefix=Ana&status=INACTIVE',
+    )
+  })
+
+  it('preserves an opaque cursor byte-for-byte through URL encoding', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(page), { status: 200 }),
+    )
+    await fetchUsers({ cursor: 'opaque+/=cursor' })
+    const url = new URL(String(fetchMock.mock.calls[0]?.[0]))
+    expect(url.searchParams.get('cursor')).toBe('opaque+/=cursor')
+  })
+
+  it.each([
+    { limit: 0 }, { limit: 101 }, { limit: 1.5 }, { cursor: '' },
+    { namePrefix: 'Ana', email: 'ana@example.test' },
+  ])('rejects an invalid local query without an HTTP request: %o', async (query) => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+    await expect(fetchUsers(query)).rejects.toBeInstanceOf(TypeError)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    { userId: '' }, { role: 'OWNER' }, { status: 'DISABLED' }, { version: '3' },
+    { createdAt: 'invalid' }, { updatedAt: '2026-08-01T10:00:00.000Z' },
+  ])('rejects a malformed user: %o', async (change) => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      ...page, items: [{ ...user, ...change }],
+    }), { status: 200 }))
+    await expect(fetchUsers()).rejects.toBeInstanceOf(ApiResponseError)
+  })
+
+  it.each(['PK', 'SK', 'authVersion', 'cognitoSub'])('rejects internal user field %s', async (field) => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      ...page, items: [{ ...user, [field]: 'internal' }],
+    }), { status: 200 }))
+    await expect(fetchUsers()).rejects.toBeInstanceOf(ApiResponseError)
+  })
+
+  it.each([
+    { items: 'invalid', nextCursor: null },
+    { items: [], nextCursor: 42 },
+    { items: [], nextCursor: null, internal: true },
+  ])('rejects a malformed page: %o', async (malformed) => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(malformed), { status: 200 }),
+    )
+    await expect(fetchUsers()).rejects.toBeInstanceOf(ApiResponseError)
+  })
+
+  it('sanitizes an API error to status and code', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      code: 'INVALID_REQUEST', message: 'sensitive backend detail',
+    }), { status: 400 }))
+    await expect(fetchUsers()).rejects.toMatchObject({
+      status: 400, code: 'INVALID_REQUEST', message: 'API request failed with status 400',
+    })
   })
 })
 

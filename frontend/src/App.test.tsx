@@ -17,6 +17,7 @@ const apiMocks = vi.hoisted(() => ({
   fetchCurrentUserProfile: vi.fn(),
   fetchStudent: vi.fn(),
   fetchStudents: vi.fn(),
+  fetchUsers: vi.fn(),
   reactivateStudent: vi.fn(),
   updateStudent: vi.fn(),
 }))
@@ -44,6 +45,7 @@ vi.mock('@/lib/api', () => ({
   fetchCurrentUserProfile: apiMocks.fetchCurrentUserProfile,
   fetchStudent: apiMocks.fetchStudent,
   fetchStudents: apiMocks.fetchStudents,
+  fetchUsers: apiMocks.fetchUsers,
   reactivateStudent: apiMocks.reactivateStudent,
   updateStudent: apiMocks.updateStudent,
   AuthSessionUnavailableError: class AuthSessionUnavailableError extends Error {},
@@ -87,6 +89,19 @@ const studentDetail = {
   createdAt: '2026-09-06T10:28:53.080Z',
   updatedAt: '2026-09-07T10:28:53.080Z',
 }
+const usersPage = {
+  items: [{
+    userId: '00000000-0000-4000-8000-000000000002',
+    fullName: 'Admin Diretório',
+    email: 'directory@example.test',
+    role: 'ADMIN',
+    status: 'ACTIVE',
+    version: 1,
+    createdAt: '2026-09-01T10:00:00.000Z',
+    updatedAt: '2026-09-01T10:00:00.000Z',
+  }],
+  nextCursor: null,
+}
 
 function response(status: number, body?: object): Response {
   return new Response(body === undefined ? null : JSON.stringify(body), { status })
@@ -109,6 +124,7 @@ describe('post-login operational flow', () => {
     authMocks.getCurrentUser.mockResolvedValue({ username: 'fake-user' })
     authMocks.signOut.mockResolvedValue(undefined)
     apiMocks.fetchStudents.mockResolvedValue({ items: [], nextCursor: null, hasMore: false })
+    apiMocks.fetchUsers.mockResolvedValue(usersPage)
   })
 
   afterEach(() => {
@@ -195,6 +211,70 @@ describe('post-login operational flow', () => {
     await waitFor(() => expect(authMocks.signOut).toHaveBeenCalledOnce())
     expect(await screen.findByRole('button', { name: 'Entrar' })).toBeTruthy()
     expect(apiMocks.fetchStudents).not.toHaveBeenCalled()
+  })
+})
+
+describe('operational navigation', () => {
+  beforeEach(() => {
+    authMocks.getCurrentUser.mockResolvedValue({ username: 'fake-user' })
+    authMocks.signOut.mockResolvedValue(undefined)
+    apiMocks.fetchCurrentUserProfile.mockResolvedValue(activeProfile)
+    apiMocks.fetchStudents.mockResolvedValue(studentsPage)
+    apiMocks.fetchUsers.mockResolvedValue(usersPage)
+  })
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.clearAllMocks() })
+
+  it('shows Students and Users navigation to ADMIN and loads users on demand', async () => {
+    render(<App />)
+    expect(await screen.findByRole('button', { name: 'Alunos' })).toBeTruthy()
+    const users = screen.getByRole('button', { name: 'Usuários' })
+    expect(users).toBeTruthy()
+    expect(apiMocks.fetchUsers).not.toHaveBeenCalled()
+    fireEvent.click(users)
+    expect(await screen.findByText('Admin Diretório')).toBeTruthy()
+    expect(apiMocks.fetchUsers).toHaveBeenCalledOnce()
+  })
+
+  it('does not expose Users or request it for OPERATOR', async () => {
+    apiMocks.fetchCurrentUserProfile.mockResolvedValue({ ...activeProfile, role: 'OPERATOR' })
+    render(<App />)
+    expect(await screen.findByRole('button', { name: 'Alunos' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Usuários' })).toBeNull()
+    expect(apiMocks.fetchUsers).not.toHaveBeenCalled()
+  })
+
+  it('returns to Students and reloads its current filter', async () => {
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Usuários' }))
+    await screen.findByText('Admin Diretório')
+    fireEvent.click(screen.getByRole('button', { name: 'Alunos' }))
+    expect(await screen.findByText('Aluno Exemplo')).toBeTruthy()
+    expect(apiMocks.fetchStudents).toHaveBeenCalledTimes(2)
+    expect(apiMocks.fetchStudents).toHaveBeenLastCalledWith('ACTIVE')
+  })
+
+  it('ignores a Users response after navigating back to Students', async () => {
+    let resolveUsers!: (value: typeof usersPage) => void
+    apiMocks.fetchUsers.mockReturnValueOnce(new Promise((resolve) => { resolveUsers = resolve }))
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Usuários' }))
+    expect(await screen.findByText('Carregando usuários…')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Alunos' }))
+    await act(async () => resolveUsers(usersPage))
+    expect(screen.queryByText('Admin Diretório')).toBeNull()
+    expect(await screen.findByText('Aluno Exemplo')).toBeTruthy()
+  })
+
+  it('ignores a Users response after logout', async () => {
+    let resolveUsers!: (value: typeof usersPage) => void
+    apiMocks.fetchUsers.mockReturnValueOnce(new Promise((resolve) => { resolveUsers = resolve }))
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Usuários' }))
+    await screen.findByText('Carregando usuários…')
+    fireEvent.click(screen.getByRole('button', { name: 'Sair' }))
+    expect(await screen.findByRole('heading', { name: 'Acesse sua conta' })).toBeTruthy()
+    await act(async () => resolveUsers(usersPage))
+    expect(screen.queryByText('Admin Diretório')).toBeNull()
   })
 })
 
