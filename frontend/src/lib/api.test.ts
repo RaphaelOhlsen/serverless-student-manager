@@ -21,6 +21,7 @@ import {
   fetchStudents,
   fetchUsers,
   reactivateStudent,
+  resendUserInvitation,
 } from '@/lib/api'
 
 const profile = {
@@ -309,6 +310,57 @@ describe('create user contract', () => {
       new Response(JSON.stringify(created), { status: 200 }),
     )
     await expect(createUser(body, 'key')).rejects.toMatchObject({ status: 200 })
+  })
+})
+
+describe('resend user invitation contract', () => {
+  const userId = '00000000-0000-4000-8000-000000000010'
+  const body = { expectedVersion: 3 }
+  const key = '00000000-0000-4000-8000-000000000011'
+
+  beforeEach(() => authMocks.fetchAuthSession.mockResolvedValue({
+    tokens: { accessToken: { toString: () => 'fake-access-token' } },
+  }))
+  afterEach(() => { vi.restoreAllMocks(); vi.clearAllMocks() })
+
+  it('posts the expected version with authentication and idempotency and requires 204', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(null, { status: 204 }),
+    )
+
+    await expect(resendUserInvitation(userId, body, key)).resolves.toBeUndefined()
+    expect(fetchMock).toHaveBeenCalledWith(
+      `https://api.example.test/users/${userId}/invitation/resend`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer fake-access-token',
+          'Content-Type': 'application/json',
+          'Idempotency-Key': key,
+        },
+        body: JSON.stringify(body),
+      },
+    )
+  })
+
+  it('rejects a non-204 success response', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 200 }))
+    await expect(resendUserInvitation(userId, body, key)).rejects.toMatchObject({
+      status: 200,
+      message: 'API request failed with status 200',
+    })
+  })
+
+  it.each([
+    ['error', 'INVITATION_DELIVERY_FAILED'],
+    ['code', 'INVITATION_DELIVERY_UNCERTAIN'],
+  ] as const)('accepts public error code from %s without exposing message', async (field, code) => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      [field]: code, message: 'sensitive backend detail',
+    }), { status: 503 }))
+    await expect(resendUserInvitation(userId, body, key)).rejects.toMatchObject({
+      status: 503, code, message: 'API request failed with status 503',
+    })
   })
 })
 

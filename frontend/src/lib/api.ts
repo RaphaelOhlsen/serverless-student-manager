@@ -52,6 +52,10 @@ export type CreateUserRequest = {
   role: AdminUser['role']
 }
 
+export type ResendInvitationRequest = {
+  expectedVersion: number
+}
+
 export type CreatedAdminUser = Omit<AdminUser, 'status' | 'version'> & {
   status: 'INVITED'
   version: 1
@@ -237,6 +241,27 @@ export async function createUser(
     )
   }
   return value
+}
+
+export async function resendUserInvitation(
+  userId: string,
+  body: ResendInvitationRequest,
+  idempotencyKey: string,
+): Promise<void> {
+  const response = await authenticatedPost(
+    `/users/${encodeURIComponent(userId)}/invitation/resend`,
+    idempotencyKey,
+    body,
+  )
+  if (response.status === 204) return
+
+  let value: unknown
+  try {
+    value = await response.json()
+  } catch {
+    value = undefined
+  }
+  throw new ApiResponseError(response.status, publicErrorCode(value))
 }
 
 function isUserProfile(value: unknown): value is UserProfile {

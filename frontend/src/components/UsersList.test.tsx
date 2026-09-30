@@ -5,11 +5,16 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const apiMocks = vi.hoisted(() => ({ createUser: vi.fn(), fetchUsers: vi.fn() }))
+const apiMocks = vi.hoisted(() => ({
+  createUser: vi.fn(),
+  fetchUsers: vi.fn(),
+  resendUserInvitation: vi.fn(),
+}))
 
 vi.mock('@/lib/api', () => ({
   createUser: apiMocks.createUser,
   fetchUsers: apiMocks.fetchUsers,
+  resendUserInvitation: apiMocks.resendUserInvitation,
   ApiResponseError: class ApiResponseError extends Error {
     status: number
     code?: string
@@ -58,12 +63,22 @@ function fillCreateUser() {
   fireEvent.change(screen.getByLabelText('Perfil'), { target: { value: invited.role } })
 }
 
+async function openResendConfirmation() {
+  fireEvent.click(await screen.findByRole('button', { name: 'Reenviar convite' }))
+}
+
+function confirmResend() {
+  fireEvent.click(screen.getByRole('button', { name: 'Confirmar reenvio' }))
+}
+
 describe('UsersList', () => {
   beforeEach(() => {
     apiMocks.createUser.mockReset()
     apiMocks.createUser.mockResolvedValue(invited)
     apiMocks.fetchUsers.mockReset()
     apiMocks.fetchUsers.mockResolvedValue({ items: [], nextCursor: null })
+    apiMocks.resendUserInvitation.mockReset()
+    apiMocks.resendUserInvitation.mockResolvedValue(undefined)
   })
   afterEach(() => { cleanup(); vi.clearAllMocks() })
 
@@ -120,6 +135,162 @@ describe('UsersList', () => {
     expect(apiMocks.fetchUsers.mock.calls.at(-1)?.[0]).not.toHaveProperty('cursor')
     expect(screen.queryByRole('button', { name: 'Carregar mais' })).toBeNull()
     expect(screen.queryByRole('form', { name: 'Novo usuário' })).toBeNull()
+  })
+
+  it('offers resend only for INVITED users and cancels before creating a key', async () => {
+    apiMocks.fetchUsers.mockResolvedValueOnce({ items: [admin, invited], nextCursor: null })
+    const uuid = vi.spyOn(crypto, 'randomUUID')
+    render(<UsersList />)
+
+    expect(await screen.findAllByRole('button', { name: 'Reenviar convite' })).toHaveLength(1)
+    await openResendConfirmation()
+    expect(screen.getByText(`Confirmar reenvio do convite para ${invited.fullName}?`)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }))
+
+    expect(uuid).not.toHaveBeenCalled()
+    expect(apiMocks.resendUserInvitation).not.toHaveBeenCalled()
+    expect(screen.queryByText(`Confirmar reenvio do convite para ${invited.fullName}?`)).toBeNull()
+  })
+
+  it('sends displayed version once and blocks double submit while pending', async () => {
+    let resolve!: () => void
+    apiMocks.fetchUsers.mockResolvedValueOnce({ items: [invited], nextCursor: null })
+    apiMocks.resendUserInvitation.mockReturnValueOnce(new Promise<void>((done) => { resolve = done }))
+    render(<UsersList />)
+    await openResendConfirmation()
+    confirmResend()
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar reenvio' }))
+
+    expect(apiMocks.resendUserInvitation).toHaveBeenCalledOnce()
+    expect(apiMocks.resendUserInvitation).toHaveBeenCalledWith(
+      invited.userId,
+      { expectedVersion: invited.version },
+      expect.stringMatching(/^[0-9a-f-]{36}$/),
+    )
+    expect((screen.getByRole('button', { name: 'Confirmar reenvio' }) as HTMLButtonElement).disabled)
+      .toBe(true)
+    await act(async () => resolve())
+  })
+
+  it.each([
+    new TypeError('network secret'),
+    new ApiResponseError(500, 'INTERNAL_ERROR'),
+    new ApiResponseError(409, 'OPERATION_IN_PROGRESS'),
+    new ApiResponseError(503, 'INVITATION_DELIVERY_FAILED'),
+  ])('retries recoverable resend failure %o with the same key', async (failure) => {
+    apiMocks.fetchUsers.mockResolvedValueOnce({ items: [invited], nextCursor: null })
+    apiMocks.resendUserInvitation.mockRejectedValueOnce(failure).mockResolvedValueOnce(undefined)
+    render(<UsersList />)
+    await openResendConfirmation()
+    confirmResend()
+    await screen.findByRole('alert')
+    fireEvent.click(screen.getByRole('button', { name: 'Tentar novamente' }))
+
+    await waitFor(() => expect(apiMocks.resendUserInvitation).toHaveBeenCalledTimes(2))
+    expect(apiMocks.resendUserInvitation.mock.calls[1][2])
+      .toBe(apiMocks.resendUserInvitation.mock.calls[0][2])
+    expect(screen.queryByText('network secret')).toBeNull()
+  })
+
+  it('locks uncertain delivery and creates a new key only after explicit new intent', async () => {
+    apiMocks.fetchUsers.mockResolvedValue({ items: [invited], nextCursor: null })
+    apiMocks.resendUserInvitation
+      .mockRejectedValueOnce(new ApiResponseError(503, 'INVITATION_DELIVERY_UNCERTAIN'))
+      .mockResolvedValueOnce(undefined)
+    render(<UsersList />)
+    await openResendConfirmation()
+    confirmResend()
+
+    expect((await screen.findByRole('alert')).textContent).toContain('pode ter sido enviado')
+    const locked = screen.getByRole('button', { name: 'Confirmar reenvio' }) as HTMLButtonElement
+    expect(locked.disabled).toBe(true)
+    fireEvent.click(locked)
+    expect(apiMocks.resendUserInvitation).toHaveBeenCalledOnce()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Atualizar lista' }))
+    await waitFor(() => expect(apiMocks.fetchUsers).toHaveBeenCalledTimes(2))
+    expect(apiMocks.resendUserInvitation).toHaveBeenCalledOnce()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Iniciar nova intenção' }))
+    confirmResend()
+    await waitFor(() => expect(apiMocks.resendUserInvitation).toHaveBeenCalledTimes(2))
+    expect(apiMocks.resendUserInvitation.mock.calls[1][2])
+      .not.toBe(apiMocks.resendUserInvitation.mock.calls[0][2])
+  })
+
+  it.each([
+    ['USER_VERSION_CONFLICT', 'O usuário foi alterado.'],
+    ['USER_STATE_CONFLICT', 'não está mais aguardando convite'],
+  ])('refreshes and ends the intent on %s', async (code, message) => {
+    apiMocks.fetchUsers.mockResolvedValue({ items: [invited], nextCursor: null })
+    apiMocks.resendUserInvitation.mockRejectedValueOnce(new ApiResponseError(409, code))
+    render(<UsersList />)
+    await openResendConfirmation()
+    confirmResend()
+
+    expect(await screen.findByText(message, { exact: false })).toBeTruthy()
+    await waitFor(() => expect(apiMocks.fetchUsers).toHaveBeenCalledTimes(2))
+    expect(screen.queryByText(`Confirmar reenvio do convite para ${invited.fullName}?`)).toBeNull()
+  })
+
+  it.each([
+    [new ApiResponseError(400, 'INVALID_REQUEST'), 'solicitação de reenvio é inválida'],
+    [new ApiResponseError(401, 'UNAUTHORIZED'), 'sessão expirou'],
+    [new ApiResponseError(403, 'FORBIDDEN'), 'não tem permissão'],
+    [new ApiResponseError(404, 'USER_NOT_FOUND'), 'não foi encontrado'],
+    [new ApiResponseError(409, 'IDEMPOTENCY_KEY_REUSED'), 'tentativa é incompatível'],
+    [new ApiResponseError(500, 'INTERNAL_ERROR'), 'Não foi possível confirmar'],
+  ])('renders a sanitized resend error for %o', async (failure, message) => {
+    apiMocks.fetchUsers.mockResolvedValue({ items: [invited], nextCursor: null })
+    apiMocks.resendUserInvitation.mockRejectedValueOnce(failure)
+    render(<UsersList />)
+    await openResendConfirmation()
+    confirmResend()
+
+    expect((await screen.findByText(message, { exact: false })).textContent).toContain(message)
+    expect(screen.queryByText('sensitive backend detail')).toBeNull()
+  })
+
+  it('refreshes the first page after resend with filters preserved and cursor removed', async () => {
+    apiMocks.fetchUsers
+      .mockResolvedValueOnce({ items: [invited], nextCursor: 'old-cursor' })
+      .mockResolvedValueOnce({ items: [invited], nextCursor: 'filtered-cursor' })
+      .mockResolvedValueOnce({ items: [invited], nextCursor: null })
+    render(<UsersList />)
+    await screen.findByRole('button', { name: 'Carregar mais' })
+    fireEvent.change(screen.getByLabelText('Role'), { target: { value: 'OPERATOR' } })
+    fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'INVITED' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Aplicar filtros' }))
+    await waitFor(() => expect(apiMocks.fetchUsers).toHaveBeenCalledTimes(2))
+
+    await openResendConfirmation()
+    confirmResend()
+
+    expect(await screen.findByText('Convite reenviado com sucesso.')).toBeTruthy()
+    await waitFor(() => expect(apiMocks.fetchUsers).toHaveBeenCalledTimes(3))
+    expect(apiMocks.fetchUsers).toHaveBeenLastCalledWith({
+      limit: 20, role: 'OPERATOR', status: 'INVITED',
+    })
+    expect(apiMocks.fetchUsers.mock.calls.at(-1)?.[0]).not.toHaveProperty('cursor')
+    expect(screen.queryByRole('button', { name: 'Carregar mais' })).toBeNull()
+  })
+
+  it('ignores a stale post-resend refresh after a newer filter request', async () => {
+    let resolveRefresh!: (value: object) => void
+    apiMocks.fetchUsers
+      .mockResolvedValueOnce({ items: [invited], nextCursor: null })
+      .mockReturnValueOnce(new Promise((done) => { resolveRefresh = done }))
+      .mockResolvedValueOnce({ items: [], nextCursor: null })
+    render(<UsersList />)
+    await openResendConfirmation()
+    confirmResend()
+    await screen.findByText('Convite reenviado com sucesso.')
+
+    fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'ACTIVE' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Aplicar filtros' }))
+    expect(await screen.findByText('Nenhum usuário encontrado.')).toBeTruthy()
+    await act(async () => resolveRefresh({ items: [invited], nextCursor: null }))
+    expect(screen.queryByText(invited.fullName)).toBeNull()
   })
 
   it.each([
