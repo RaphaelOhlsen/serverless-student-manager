@@ -19,6 +19,7 @@ import {
   authenticatedPost,
   fetchCurrentUserProfile,
   fetchStudents,
+  fetchUser,
   fetchUsers,
   reactivateStudent,
   resendUserInvitation,
@@ -231,6 +232,65 @@ describe('users directory contract', () => {
     }), { status: 400 }))
     await expect(fetchUsers()).rejects.toMatchObject({
       status: 400, code: 'INVALID_REQUEST', message: 'API request failed with status 400',
+    })
+  })
+})
+
+describe('user detail contract', () => {
+  const userId = '00000000-0000-4000-8000-000000000001'
+  const detail = {
+    userId,
+    fullName: 'Admin Exemplo',
+    email: 'admin@example.test',
+    role: 'ADMIN',
+    status: 'ACTIVE',
+    version: 3,
+    createdAt: '2026-09-01T10:00:00.000Z',
+    updatedAt: '2026-09-02T10:00:00.000Z',
+  }
+
+  beforeEach(() => authMocks.fetchAuthSession.mockResolvedValue({
+    tokens: { accessToken: { toString: () => 'fake-access-token' } },
+  }))
+  afterEach(() => { vi.restoreAllMocks(); vi.clearAllMocks() })
+
+  it('gets the encoded user id with authentication and validates the public shape', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(detail), { status: 200 }),
+    )
+
+    await expect(fetchUser(`${userId}/segment`)).resolves.toEqual(detail)
+    expect(fetchMock).toHaveBeenCalledWith(
+      `https://api.example.test/users/${encodeURIComponent(`${userId}/segment`)}`,
+      { method: 'GET', headers: { Authorization: 'Bearer fake-access-token' } },
+    )
+  })
+
+  it('returns a valid public detail', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(detail), { status: 200 }),
+    )
+    await expect(fetchUser(userId)).resolves.toEqual(detail)
+  })
+
+  it.each(['PK', 'SK', 'cognitoSub', 'authVersion', 'normalizedName'])(
+    'rejects internal detail field %s',
+    async (field) => {
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+        ...detail, [field]: 'internal',
+      }), { status: 200 }))
+      await expect(fetchUser(userId)).rejects.toBeInstanceOf(ApiResponseError)
+    },
+  )
+
+  it('preserves only public error status and code', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      error: 'USER_NOT_FOUND', message: 'sensitive backend detail',
+    }), { status: 404 }))
+    await expect(fetchUser(userId)).rejects.toMatchObject({
+      status: 404,
+      code: 'USER_NOT_FOUND',
+      message: 'API request failed with status 404',
     })
   })
 })
