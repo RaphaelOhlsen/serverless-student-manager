@@ -506,6 +506,20 @@ data "aws_iam_policy_document" "audit_api" {
       "${module.audit_store.table_arn}/index/${module.audit_store.gsi_period_time}",
     ]
   }
+
+  statement {
+    sid    = "AuthenticateAuditCursors"
+    effect = "Allow"
+
+    actions = [
+      "kms:GenerateMac",
+      "kms:VerifyMac",
+    ]
+
+    resources = [
+      module.audit_cursor_signing.key_arn,
+    ]
+  }
 }
 
 module "audit_api" {
@@ -529,6 +543,7 @@ module "audit_api" {
   data_classification = "confidential"
 
   environment_variables = {
+    AUDIT_CURSOR_KMS_KEY_ARN     = module.audit_cursor_signing.key_arn
     AUDIT_TABLE_NAME             = module.audit_store.table_name
     ENVIRONMENT                  = local.environment
     POWERTOOLS_LOG_LEVEL         = "DEBUG"
@@ -719,6 +734,14 @@ module "audit_store" {
 
   point_in_time_recovery_enabled = false
   deletion_protection_enabled    = false
+
+  tags = local.common_tags
+}
+
+module "audit_cursor_signing" {
+  source = "../../modules/audit_cursor_signing"
+
+  alias_name = "alias/serverless-student-manager-dev-audit-cursor-hmac"
 
   tags = local.common_tags
 }

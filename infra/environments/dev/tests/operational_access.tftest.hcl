@@ -113,6 +113,14 @@ override_module {
 }
 
 override_module {
+  target = module.audit_cursor_signing
+  outputs = {
+    key_arn    = "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-4000-8000-000000000001"
+    alias_name = "alias/serverless-student-manager-dev-audit-cursor-hmac"
+  }
+}
+
+override_module {
   target = module.bootstrap_admin_access
   outputs = {
     role_name   = "student-manager-github-dev-bootstrap-admin"
@@ -1330,8 +1338,8 @@ run "plans_audit_api_read_only_access" {
   }
 
   assert {
-    condition     = length(data.aws_iam_policy_document.audit_api.statement) == 2
-    error_message = "The audit-api policy must contain exactly two read-only statements."
+    condition     = length(data.aws_iam_policy_document.audit_api.statement) == 3
+    error_message = "The audit-api policy must contain exactly three least-privilege statements."
   }
 
   assert {
@@ -1369,6 +1377,33 @@ run "plans_audit_api_read_only_access" {
       "${module.audit_store.table_arn}/index/gsi-period-time",
     ])
     error_message = "The audit-api Query permission must target only the audit table and approved GSIs."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.audit_api.statement : statement.actions
+      if statement.sid == "AuthenticateAuditCursors"
+      ])) == toset([
+      "kms:GenerateMac",
+      "kms:VerifyMac",
+    ])
+    error_message = "The audit cursor permission must contain only GenerateMac and VerifyMac."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.audit_api.statement : statement.resources
+      if statement.sid == "AuthenticateAuditCursors"
+    ])) == toset([module.audit_cursor_signing.key_arn])
+    error_message = "The audit cursor permission must target only its KMS HMAC key."
+  }
+
+  assert {
+    condition = (
+      module.audit_cursor_signing.alias_name
+      == "alias/serverless-student-manager-dev-audit-cursor-hmac"
+    )
+    error_message = "The audit cursor KMS alias is incorrect."
   }
 
   assert {

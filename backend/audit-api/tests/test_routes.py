@@ -1,3 +1,4 @@
+import base64
 import json
 from dataclasses import replace
 from decimal import Decimal
@@ -24,6 +25,24 @@ PUBLIC_EVENT = {
     "result": "SUCCESS",
     "correlationId": "correlation-1",
 }
+
+
+class FakeCursorMac:
+    def generate(self, message: bytes) -> bytes:
+        return b"m" * 32
+
+    def verify(self, message: bytes, mac: bytes) -> bool:
+        return mac == b"m" * 32
+
+
+class InvalidCursorMac(FakeCursorMac):
+    def verify(self, message: bytes, mac: bytes) -> bool:
+        return False
+
+
+class FailingCursorMac(FakeCursorMac):
+    def verify(self, message: bytes, mac: bytes) -> bool:
+        raise RuntimeError("kms access denied internal detail")
 
 
 class FakeContext:
@@ -304,7 +323,7 @@ def test_route_runs_real_query_engine_without_scan_hydration_or_writes() -> None
     audit = GuardedAuditTable()
     service = AuditQueryService(
         AdminAuthorizationService(users),
-        AuditQueryEngine(AuditEventRepository(audit)),
+        AuditQueryEngine(AuditEventRepository(audit), FakeCursorMac()),
     )
 
     response = resolve(service)
@@ -323,6 +342,53 @@ def test_internal_failure_is_sanitized_500() -> None:
     body = error_body(response)
     assert body["code"] == "INTERNAL_ERROR"
     assert all(value not in response["body"] for value in ("table-name", "PK", "GSI", "secret"))
+
+
+def test_invalid_kms_mac_is_400_invalid_cursor() -> None:
+    users = GuardedUsersTable()
+    audit = GuardedAuditTable()
+    service = AuditQueryService(
+        AdminAuthorizationService(users),
+        AuditQueryEngine(AuditEventRepository(audit), InvalidCursorMac()),
+    )
+    cursor = ".".join(
+        (
+            base64.urlsafe_b64encode(b"not-json").decode().rstrip("="),
+            base64.urlsafe_b64encode(b"m" * 32).decode().rstrip("="),
+        )
+    )
+
+    response = resolve(
+        service,
+        event(f"from=2026-09-01T00%3A00%3A00Z&to=2026-09-30T00%3A00%3A00Z&cursor={cursor}"),
+    )
+
+    assert response["statusCode"] == 400
+    assert error_body(response)["code"] == "INVALID_CURSOR"
+
+
+def test_kms_operational_error_is_sanitized_500() -> None:
+    users = GuardedUsersTable()
+    audit = GuardedAuditTable()
+    service = AuditQueryService(
+        AdminAuthorizationService(users),
+        AuditQueryEngine(AuditEventRepository(audit), FailingCursorMac()),
+    )
+    cursor = ".".join(
+        (
+            base64.urlsafe_b64encode(b"not-json").decode().rstrip("="),
+            base64.urlsafe_b64encode(b"m" * 32).decode().rstrip("="),
+        )
+    )
+
+    response = resolve(
+        service,
+        event(f"from=2026-09-01T00%3A00%3A00Z&to=2026-09-30T00%3A00%3A00Z&cursor={cursor}"),
+    )
+
+    assert response["statusCode"] == 500
+    assert error_body(response)["code"] == "INTERNAL_ERROR"
+    assert all(value not in response["body"] for value in ("kms", "access denied"))
 
 
 def test_authorization_storage_failure_is_sanitized_500() -> None:

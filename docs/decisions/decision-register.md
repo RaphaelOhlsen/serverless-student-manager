@@ -71,7 +71,7 @@
 | [ADR-034](adr/adr-034-student-physical-deletion-policy.md) | Política de exclusão física de aluno | Approved |
 | [ADR-035](adr/adr-035-administrative-user-management.md) | Gerenciamento administrativo de usuários | Proposed |
 | [ADR-036](adr/adr-036-student-registration-lookup-contract.md) | Contrato de consulta de aluno por matrícula | Approved |
-| [ADR-037](adr/adr-037-audit-query-api-contract.md) | Contrato da Audit Query API | Approved |
+| [ADR-037](adr/adr-037-audit-query-api-contract.md) | Contrato da Audit Query API e cursor v3 autenticado por KMS HMAC | Approved |
 
 ## 3. Modelos de dados aprovados
 
@@ -104,8 +104,8 @@ formaliza o contrato do milestone Users / Admin CRUD. O milestone Student
 Lifecycle foi implementado, publicado, validado e encerrado. A exclusão física
 de Student está fora da v1; Deactivate Student é a remoção operacional canônica.
 O contrato separado de lookup exato por matrícula, deferido pela ADR-026, está
-resolvido pela ADR-036. O contrato público da Audit Query API está resolvido pela
-ADR-037.
+resolvido pela ADR-036. O contrato público da Audit Query API e a autenticação de
+seu cursor v3 por KMS HMAC estão resolvidos pela ADR-037.
 
 Novas decisões relevantes surgidas durante a engenharia devem ser registradas em ADR-038 ou posterior.
 

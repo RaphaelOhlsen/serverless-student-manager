@@ -12,6 +12,10 @@ def get_audit_table_name() -> str:
     return _required("AUDIT_TABLE_NAME")
 
 
+def get_audit_cursor_kms_key_arn() -> str:
+    return _required("AUDIT_CURSOR_KMS_KEY_ARN")
+
+
 def _required(name: str) -> str:
     value = os.getenv(name)
     if value is None or not value.strip():

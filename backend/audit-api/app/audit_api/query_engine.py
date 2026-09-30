@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Protocol
 
 from audit_api.cursor import CursorContinuation, EventPosition, decode_cursor, encode_cursor
+from audit_api.cursor_mac import CursorMacProtocol
 from audit_api.query import AccessPath, AuditQuery
 from audit_api.repository import RepositoryPage
 from audit_api.serializer import serialize_public_event
@@ -31,12 +32,14 @@ class AuditQueryEngine:
     def __init__(
         self,
         repository: AuditRepositoryProtocol,
+        cursor_mac: CursorMacProtocol,
         *,
         max_query_calls: int = DEFAULT_MAX_QUERY_CALLS,
     ) -> None:
         if max_query_calls < 1:
             raise ValueError("max_query_calls must be positive")
         self._repository = repository
+        self._cursor_mac = cursor_mac
         self._max_query_calls = max_query_calls
 
     def execute(self, query: AuditQuery) -> AuditPage:
@@ -74,13 +77,14 @@ class AuditQueryEngine:
             if exhausted:
                 break
 
-        next_cursor = None if exhausted else encode_cursor(query, continuation)
+        next_cursor = None if exhausted else encode_cursor(query, continuation, self._cursor_mac)
         return AuditPage(items=items, next_cursor=next_cursor)
 
-    @staticmethod
-    def _initial_continuation(query: AuditQuery, buckets: tuple[str, ...]) -> CursorContinuation:
+    def _initial_continuation(
+        self, query: AuditQuery, buckets: tuple[str, ...]
+    ) -> CursorContinuation:
         if query.cursor is not None:
-            return decode_cursor(query.cursor, query)
+            return decode_cursor(query.cursor, query, self._cursor_mac)
         if query.access_path is AccessPath.PERIOD:
             return CursorContinuation(bucket=buckets[0], position=None)
         return CursorContinuation(bucket=None, position=None)

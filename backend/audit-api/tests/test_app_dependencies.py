@@ -35,11 +35,14 @@ def test_lambda_handler_resolves_registered_route(monkeypatch: pytest.MonkeyPatc
 def test_config_requires_table_names(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("USERS_TABLE_NAME", raising=False)
     monkeypatch.delenv("AUDIT_TABLE_NAME", raising=False)
+    monkeypatch.delenv("AUDIT_CURSOR_KMS_KEY_ARN", raising=False)
 
     with pytest.raises(RuntimeError, match="USERS_TABLE_NAME"):
         config.get_users_table_name()
     with pytest.raises(RuntimeError, match="AUDIT_TABLE_NAME"):
         config.get_audit_table_name()
+    with pytest.raises(RuntimeError, match="AUDIT_CURSOR_KMS_KEY_ARN"):
+        config.get_audit_cursor_kms_key_arn()
 
 
 class FakeDynamoDB:
@@ -51,19 +54,44 @@ class FakeDynamoDB:
         return object()
 
 
+class FakeBoto3:
+    def __init__(self, dynamodb: FakeDynamoDB) -> None:
+        self.dynamodb = dynamodb
+        self.kms = object()
+
+    def resource(self, service: str) -> FakeDynamoDB:
+        assert service == "dynamodb"
+        return self.dynamodb
+
+    def client(self, service: str) -> object:
+        assert service == "kms"
+        return self.kms
+
+
 def test_dependency_wiring_uses_only_users_and_audit_tables(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     dynamodb = FakeDynamoDB()
     monkeypatch.setenv("USERS_TABLE_NAME", "users-table")
     monkeypatch.setenv("AUDIT_TABLE_NAME", "audit-table")
-    monkeypatch.setattr("audit_api.dependencies.boto3.resource", lambda service: dynamodb)
+    monkeypatch.setenv("AUDIT_CURSOR_KMS_KEY_ARN", "key-arn")
+    fake_boto3 = FakeBoto3(dynamodb)
+    captured: dict[str, object] = {}
+
+    def cursor_mac(client: object, key_id: str) -> object:
+        captured.update(client=client, key_id=key_id)
+        return object()
+
+    monkeypatch.setattr("audit_api.dependencies.boto3.resource", fake_boto3.resource)
+    monkeypatch.setattr("audit_api.dependencies.boto3.client", fake_boto3.client)
+    monkeypatch.setattr("audit_api.dependencies.KmsCursorMac", cursor_mac)
     dependencies.get_audit_query_service.cache_clear()
 
     service = dependencies.get_audit_query_service()
 
     assert service is not None
     assert dynamodb.names == ["users-table", "audit-table"]
+    assert captured == {"client": fake_boto3.kms, "key_id": "key-arn"}
     dependencies.get_audit_query_service.cache_clear()
 
 

@@ -35,6 +35,7 @@ variables {
   data_classification = "confidential"
 
   environment_variables = {
+    AUDIT_CURSOR_KMS_KEY_ARN     = "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-4000-8000-000000000001"
     AUDIT_TABLE_NAME             = "serverless-student-manager-dev-audit-events"
     ENVIRONMENT                  = "dev"
     POWERTOOLS_LOG_LEVEL         = "DEBUG"
@@ -59,6 +60,14 @@ run "plans_audit_api_lambda" {
   assert {
     condition     = aws_lambda_function.this.function_name == "serverless-student-manager-dev-audit-api"
     error_message = "The audit-api Lambda function name is incorrect."
+  }
+
+  assert {
+    condition = (
+      one(aws_lambda_function.this.environment).variables["AUDIT_CURSOR_KMS_KEY_ARN"]
+      == "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-4000-8000-000000000001"
+    )
+    error_message = "The audit-api AUDIT_CURSOR_KMS_KEY_ARN is incorrect."
   }
 
   assert {
