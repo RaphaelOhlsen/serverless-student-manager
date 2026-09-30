@@ -18,6 +18,34 @@ export type UserProfile = {
   authVersion: number
 }
 
+export type AdminUser = {
+  userId: string
+  fullName: string
+  email: string
+  role: 'ADMIN' | 'OPERATOR'
+  status: 'INVITED' | 'ACTIVE' | 'INACTIVE'
+  version: number
+  createdAt: string
+  updatedAt: string
+}
+
+export type UsersPage = {
+  items: AdminUser[]
+  nextCursor: string | null
+}
+
+export type UserRoleFilter = 'ALL' | AdminUser['role']
+export type UserStatusFilter = 'ALL' | AdminUser['status']
+
+export type UsersQuery = {
+  limit?: number
+  cursor?: string
+  namePrefix?: string
+  email?: string
+  role?: UserRoleFilter
+  status?: UserStatusFilter
+}
+
 export type StudentSummary = {
   studentId: string
   registrationNumber: string
@@ -147,6 +175,41 @@ export async function fetchStudents(
   return value
 }
 
+export async function fetchUsers(query: UsersQuery = {}): Promise<UsersPage> {
+  if (query.limit !== undefined &&
+      (!Number.isInteger(query.limit) || query.limit < 1 || query.limit > 100)) {
+    throw new TypeError('Invalid users limit')
+  }
+  if (query.namePrefix !== undefined && query.email !== undefined) {
+    throw new TypeError('User name and email searches are mutually exclusive')
+  }
+  if (query.cursor === '') throw new TypeError('Invalid users cursor')
+  const parameters = new URLSearchParams()
+  if (query.limit !== undefined) parameters.set('limit', String(query.limit))
+  if (query.cursor !== undefined) parameters.set('cursor', query.cursor)
+  if (query.namePrefix !== undefined) parameters.set('namePrefix', query.namePrefix)
+  if (query.email !== undefined) parameters.set('email', query.email)
+  if (query.role !== undefined && query.role !== 'ALL') parameters.set('role', query.role)
+  if (query.status !== undefined && query.status !== 'ALL') parameters.set('status', query.status)
+  const queryString = parameters.toString()
+  const response = await authenticatedGet(`/users${queryString ? `?${queryString}` : ''}`)
+  let value: unknown
+  try {
+    value = await response.json()
+  } catch {
+    throw new ApiResponseError(response.status)
+  }
+  if (!response.ok || !isUsersPage(value)) {
+    throw new ApiResponseError(
+      response.status,
+      !response.ok && isRecord(value) && typeof value.code === 'string'
+        ? value.code
+        : undefined,
+    )
+  }
+  return value
+}
+
 function isUserProfile(value: unknown): value is UserProfile {
   if (!isRecord(value)) {
     return false
@@ -182,6 +245,33 @@ function isStudentSummary(value: unknown): value is StudentSummary {
     isNonEmptyString(value.fullName) &&
     (value.status === 'ACTIVE' || value.status === 'INACTIVE')
   )
+}
+
+function isUsersPage(value: unknown): value is UsersPage {
+  return isExactRecord(value, ['items', 'nextCursor']) &&
+    Array.isArray(value.items) && value.items.every(isAdminUser) &&
+    (value.nextCursor === null || isNonEmptyString(value.nextCursor))
+}
+
+function isAdminUser(value: unknown): value is AdminUser {
+  const fields = [
+    'userId', 'fullName', 'email', 'role', 'status', 'version', 'createdAt', 'updatedAt',
+  ]
+  return isExactRecord(value, fields) &&
+    isNonEmptyString(value.userId) &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value.userId) &&
+    isNonEmptyString(value.fullName) &&
+    isNonEmptyString(value.email) &&
+    (value.role === 'ADMIN' || value.role === 'OPERATOR') &&
+    (value.status === 'INVITED' || value.status === 'ACTIVE' || value.status === 'INACTIVE') &&
+    typeof value.version === 'number' && Number.isInteger(value.version) && value.version >= 1 &&
+    isTimestamp(value.createdAt) && isTimestamp(value.updatedAt) &&
+    value.updatedAt >= value.createdAt
+}
+
+function isExactRecord(value: unknown, fields: string[]): value is Record<string, unknown> {
+  return isRecord(value) && Object.keys(value).length === fields.length &&
+    fields.every((field) => Object.hasOwn(value, field))
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

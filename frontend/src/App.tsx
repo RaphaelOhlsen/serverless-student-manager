@@ -13,6 +13,7 @@ import {
   StudentLifecycleDialog,
   type StudentLifecycleAction,
 } from '@/components/StudentLifecycleDialog'
+import { UsersList } from '@/components/UsersList'
 import { Button } from '@/components/ui/button'
 import {
   authenticatedPost,
@@ -40,6 +41,8 @@ type AuthView =
   | 'activation'
   | 'operational'
   | 'unsupported-step'
+
+type OperationalView = 'students' | 'users'
 
 const GENERIC_SIGN_IN_ERROR =
   'Não foi possível entrar. Verifique seus dados e tente novamente.'
@@ -129,6 +132,7 @@ function App() {
   const [lifecycleLoadingStudentId, setLifecycleLoadingStudentId] = useState<string | null>(null)
   const [lifecycleError, setLifecycleError] = useState<string | null>(null)
   const [lifecycleMessage, setLifecycleMessage] = useState<string | null>(null)
+  const [operationalView, setOperationalView] = useState<OperationalView>('students')
 
   const loadStudents = useCallback(async (
     status: StudentStatusFilter = statusFilterRef.current,
@@ -169,6 +173,7 @@ function App() {
     setLifecycleLoadingStudentId(null)
     setLifecycleError(null)
     setLifecycleMessage(null)
+    setOperationalView('students')
     const isSessionCurrent = () => isCurrent() && session === sessionGeneration.current
     setAuthView('profile-resolution')
     setProfileError(null)
@@ -425,6 +430,7 @@ function App() {
       setEditError(null)
       setUpdateMessage(null)
       setStudentsError(null)
+      setOperationalView('students')
       setActivationMessage(null)
       setIsActivationError(false)
       activationIdempotencyKey.current = null
@@ -882,15 +888,39 @@ function App() {
       setLifecycleError(null)
       void loadStudents(next)
     }
+    function changeOperationalView(next: OperationalView) {
+      if (next === operationalView || (next === 'users' && userProfile?.role !== 'ADMIN')) return
+      ++listGeneration.current
+      ++editGeneration.current
+      ++lifecycleGeneration.current
+      setShowCreate(false)
+      setEditingStudent(null)
+      setEditingStudentId(null)
+      setLifecycleStudent(null)
+      setLifecycleAction(null)
+      setLifecycleLoadingStudentId(null)
+      setCreationMessage(null)
+      setUpdateMessage(null)
+      setLifecycleMessage(null)
+      setEditError(null)
+      setLifecycleError(null)
+      setOperationalView(next)
+      if (next === 'students') void loadStudents()
+    }
     return (
       <main className="operational-page">
-        <section className="operational-card" aria-labelledby="students-title">
+        <section className="operational-card" aria-labelledby="operational-title">
           <header className="operational-header">
             <div className="auth-heading">
               <p className="auth-eyebrow">Área operacional</p>
-              <h1 id="students-title">Alunos</h1>
+              <h1 id="operational-title">
+                {operationalView === 'students' ? 'Alunos' : 'Usuários'}
+              </h1>
               <p className="auth-description">
-                {userProfile?.fullName}, consulte os alunos cadastrados.
+                {userProfile?.fullName},{' '}
+                {operationalView === 'students'
+                  ? 'consulte os alunos cadastrados.'
+                  : 'consulte os usuários administrativos.'}
               </p>
             </div>
             <Button
@@ -903,6 +933,22 @@ function App() {
             </Button>
           </header>
 
+          <nav className="operational-navigation" aria-label="Área operacional">
+            <Button type="button"
+              variant={operationalView === 'students' ? 'default' : 'outline'}
+              aria-pressed={operationalView === 'students'}
+              onClick={() => changeOperationalView('students')}>Alunos</Button>
+            {userProfile?.role === 'ADMIN' ? (
+              <Button type="button"
+                variant={operationalView === 'users' ? 'default' : 'outline'}
+                aria-pressed={operationalView === 'users'}
+                onClick={() => changeOperationalView('users')}>Usuários</Button>
+            ) : null}
+          </nav>
+
+          {operationalView === 'users' ? (
+            <UsersList key={session} />
+          ) : <>
           {showCreate ? (
             <CreateStudentForm key={session} disabled={isLoading}
               onCancel={() => setShowCreate(false)} onCreated={studentCreated} />
@@ -1016,6 +1062,7 @@ function App() {
               }}
             />
           ) : null}
+          </>}
         </section>
       </main>
     )
