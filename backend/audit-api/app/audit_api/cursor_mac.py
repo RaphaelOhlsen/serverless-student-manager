@@ -1,5 +1,7 @@
 from typing import Protocol
 
+from botocore.exceptions import ClientError  # type: ignore[import-untyped]
+
 MAC_ALGORITHM = "HMAC_SHA_256"
 MAC_BYTES = 32
 
@@ -33,12 +35,17 @@ class KmsCursorMac:
         return mac
 
     def verify(self, message: bytes, mac: bytes) -> bool:
-        response = self._client.verify_mac(
-            KeyId=self._key_id,
-            Message=message,
-            Mac=mac,
-            MacAlgorithm=MAC_ALGORITHM,
-        )
+        try:
+            response = self._client.verify_mac(
+                KeyId=self._key_id,
+                Message=message,
+                Mac=mac,
+                MacAlgorithm=MAC_ALGORITHM,
+            )
+        except ClientError as error:
+            if error.response.get("Error", {}).get("Code") == "KMSInvalidMacException":
+                return False
+            raise
         valid = response.get("MacValid")
         if type(valid) is not bool:
             raise RuntimeError("KMS returned an invalid cursor verification result")
