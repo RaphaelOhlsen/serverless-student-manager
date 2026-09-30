@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from audit_api.cursor_mac import MAC_BYTES, CursorMacProtocol
 from audit_api.errors import InvalidAuditCursorError, InvalidAuditQueryRequestError
 from audit_api.query import (
     MAX_CURSOR_BYTES,
@@ -17,23 +18,11 @@ from audit_api.query import (
 )
 
 _TOP_LEVEL_FIELDS = {"v", "query", "continuation"}
-_QUERY_FIELDS = {
-    "from",
-    "to",
-    "resourceType",
-    "resourceId",
-    "eventType",
-    "actorId",
-    "result",
-    "correlationId",
-    "limit",
-    "accessPath",
-}
 _CONTINUATION_FIELDS = {"bucket", "position"}
 _POSITION_FIELDS = {"occurredAt", "eventId", "resourceType", "resourceId"}
 _MONTH_PATTERN = re.compile(r"\d{4}-(?:0[1-9]|1[0-2])\Z")
 _QUERY_FINGERPRINT_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
-_CURRENT_VERSION = 2
+_CURRENT_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -50,7 +39,11 @@ class CursorContinuation:
     position: EventPosition | None
 
 
-def encode_cursor(query: AuditQuery, continuation: CursorContinuation) -> str:
+def encode_cursor(
+    query: AuditQuery,
+    continuation: CursorContinuation,
+    cursor_mac: CursorMacProtocol,
+) -> str:
     try:
         validate_continuation(query, continuation)
     except InvalidAuditCursorError:
@@ -64,35 +57,40 @@ def encode_cursor(query: AuditQuery, continuation: CursorContinuation) -> str:
         },
     }
     raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
-    encoded = base64.urlsafe_b64encode(raw).decode().rstrip("=")
+    mac = cursor_mac.generate(raw)
+    encoded = f"{_encode_base64url(raw)}.{_encode_base64url(mac)}"
     if len(encoded.encode()) > MAX_CURSOR_BYTES:
         raise RuntimeError("Encoded audit cursor exceeds its safety limit")
     return encoded
 
 
-def decode_cursor(value: str, query: AuditQuery) -> CursorContinuation:
-    if (
-        not value
-        or len(value.encode("utf-8")) > MAX_CURSOR_BYTES
-        or "=" in value
-        or re.fullmatch(r"[A-Za-z0-9_-]+", value) is None
-    ):
+def decode_cursor(
+    value: str,
+    query: AuditQuery,
+    cursor_mac: CursorMacProtocol,
+) -> CursorContinuation:
+    if not value or len(value.encode("utf-8")) > MAX_CURSOR_BYTES or value.count(".") != 1:
         raise InvalidAuditCursorError
     try:
-        raw = base64.b64decode(value + "=" * (-len(value) % 4), altchars=b"-_", validate=True)
-        if base64.urlsafe_b64encode(raw).decode().rstrip("=") != value:
-            raise ValueError("non-canonical Base64URL")
-        payload = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_object)
+        encoded_payload, encoded_mac = value.split(".")
+        raw = _decode_base64url(encoded_payload)
+        mac = _decode_base64url(encoded_mac)
     except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        raise InvalidAuditCursorError from None
+    if len(mac) != MAC_BYTES or not cursor_mac.verify(raw, mac):
+        raise InvalidAuditCursorError
+    try:
+        payload = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_object)
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
         raise InvalidAuditCursorError from None
 
     if not isinstance(payload, dict) or set(payload) != _TOP_LEVEL_FIELDS:
         raise InvalidAuditCursorError
     version = payload["v"]
-    if type(version) is not int or version not in {1, _CURRENT_VERSION}:
+    if type(version) is not int or version != _CURRENT_VERSION:
         raise InvalidAuditCursorError
     binding = payload["query"]
-    if not _binding_matches(version, binding, query):
+    if not _binding_matches(binding, query):
         raise InvalidAuditCursorError
 
     raw_continuation = payload["continuation"]
@@ -149,33 +147,7 @@ def _valid_bucket(bucket: str | None, query: AuditQuery) -> bool:
     )
 
 
-def _valid_binding_types(binding: dict[str, object]) -> bool:
-    required_strings = ("from", "to", "accessPath")
-    optional_strings = (
-        "resourceType",
-        "resourceId",
-        "eventType",
-        "actorId",
-        "result",
-        "correlationId",
-    )
-    return (
-        all(isinstance(binding[name], str) for name in required_strings)
-        and all(
-            binding[name] is None or isinstance(binding[name], str) for name in optional_strings
-        )
-        and type(binding["limit"]) is int
-    )
-
-
-def _binding_matches(version: int, binding: object, query: AuditQuery) -> bool:
-    if version == 1:
-        return (
-            isinstance(binding, dict)
-            and set(binding) == _QUERY_FIELDS
-            and _valid_binding_types(binding)
-            and binding == query.cursor_binding()
-        )
+def _binding_matches(binding: object, query: AuditQuery) -> bool:
     return (
         isinstance(binding, str)
         and _QUERY_FINGERPRINT_PATTERN.fullmatch(binding) is not None
@@ -191,6 +163,19 @@ def _query_fingerprint(query: AuditQuery) -> str:
         sort_keys=True,
     ).encode()
     return hashlib.sha256(canonical).hexdigest()
+
+
+def _encode_base64url(value: bytes) -> str:
+    return base64.urlsafe_b64encode(value).decode().rstrip("=")
+
+
+def _decode_base64url(value: str) -> bytes:
+    if not value or "=" in value or re.fullmatch(r"[A-Za-z0-9_-]+", value) is None:
+        raise ValueError("invalid Base64URL")
+    decoded = base64.b64decode(value + "=" * (-len(value) % 4), altchars=b"-_", validate=True)
+    if _encode_base64url(decoded) != value:
+        raise ValueError("non-canonical Base64URL")
+    return decoded
 
 
 def _position_payload(position: EventPosition | None) -> dict[str, str] | None:

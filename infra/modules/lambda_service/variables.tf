@@ -124,6 +124,13 @@ variable "additional_iam_policy_json" {
   nullable    = true
 }
 
+variable "create_additional_iam_policy" {
+  description = "Explicitly controls creation of the service-specific IAM policy; null preserves legacy inference from additional_iam_policy_json."
+  type        = bool
+  default     = null
+  nullable    = true
+}
+
 variable "alias_name" {
   description = "Stable Lambda alias managed structurally by Terraform."
   type        = string

@@ -9,6 +9,17 @@ from audit_api.query_engine import AuditQueryEngine
 from audit_api.repository import AuditEventRepository
 
 
+class FakeCursorMac:
+    def generate(self, message: bytes) -> bytes:
+        return b"m" * 32
+
+    def verify(self, message: bytes, mac: bytes) -> bool:
+        return mac == b"m" * 32
+
+
+CURSOR_MAC = FakeCursorMac()
+
+
 def audit_query(**parameters: str) -> AuditQuery:
     values = {
         "from": "2026-08-01T00%3A00%3A00Z",
@@ -103,7 +114,14 @@ def engine(
     items: list[dict[str, object]], *, max_query_calls: int = 20
 ) -> tuple[AuditQueryEngine, MemoryAuditTable]:
     table = MemoryAuditTable(items)
-    return AuditQueryEngine(AuditEventRepository(table), max_query_calls=max_query_calls), table
+    return (
+        AuditQueryEngine(
+            AuditEventRepository(table),
+            CURSOR_MAC,
+            max_query_calls=max_query_calls,
+        ),
+        table,
+    )
 
 
 def test_post_filters_and_fills_page_across_multiple_queries() -> None:
@@ -187,7 +205,7 @@ def test_period_page_crosses_month_boundary_and_continues_without_gaps() -> None
     query = audit_query()
 
     first = service.execute(query)
-    continuation = decode_cursor(first.next_cursor or "", query)
+    continuation = decode_cursor(first.next_cursor or "", query, CURSOR_MAC)
     second = service.execute(replace(query, cursor=first.next_cursor))
 
     assert [entry["eventId"] for entry in first.items] == ["sep-2", "aug-2"]
@@ -211,7 +229,7 @@ def test_period_cursor_can_continue_after_exhausted_month_transition() -> None:
     query = audit_query()
 
     first = service.execute(query)
-    continuation = decode_cursor(first.next_cursor or "", query)
+    continuation = decode_cursor(first.next_cursor or "", query, CURSOR_MAC)
     second = service.execute(replace(query, cursor=first.next_cursor))
 
     assert first.items == []
@@ -284,5 +302,10 @@ def test_cursor_payload_contains_no_physical_key_names() -> None:
 
     cursor = service.execute(audit_query(limit="1")).next_cursor
     assert cursor is not None
-    decoded = __import__("base64").urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)).decode()
+    encoded_payload, _ = cursor.split(".")
+    decoded = (
+        __import__("base64")
+        .urlsafe_b64decode(encoded_payload + "=" * (-len(encoded_payload) % 4))
+        .decode()
+    )
     assert all(name not in decoded for name in ("PK", "SK", "GSI1", "GSI2", "GSI3"))

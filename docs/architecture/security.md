@@ -63,13 +63,20 @@ A aplicação usa `role` e `status` atuais no DynamoDB.
 
 - `students-api`: alunos + auditoria;
 - `users-api`: usuários + Cognito + auditoria;
-- `audit-api`: leitura da auditoria;
+- `audit-api`: leitura da auditoria e somente `kms:GenerateMac`/`kms:VerifyMac`
+  na chave HMAC específica dos cursores;
 - uma função IAM de deploy por ambiente;
 - roles operacionais separadas das roles de deploy;
 - roles operacionais separadas por capacidade e por ambiente;
 - trust policies OIDC com `sub` exato, sem wildcards;
 - nenhuma credencial AWS permanente no GitHub;
 - frontend sem acesso direto ao DynamoDB.
+
+O cursor `v3` da Audit Query API é autenticado por AWS KMS com chave
+`HMAC_256` e algoritmo `HMAC_SHA_256`. O material secreto nunca sai do KMS; a
+Lambda recebe apenas o ARN da chave. Rotação automática não é suportada para
+essa chave HMAC. Rotação manual futura invalida os cursores transitórios emitidos
+pela chave anterior e exige autorização operacional própria.
 
 ## 7. Bootstrap e recuperação
 

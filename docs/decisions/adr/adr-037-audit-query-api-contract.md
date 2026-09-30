@@ -103,6 +103,19 @@ O cursor será opaco, URL-safe, versionado, validado estruturalmente e vinculado
 autorização e não contém credenciais. Clientes não podem depender de sua
 representação interna.
 
+A versão corrente do cursor é `v3`. Seu formato externo contém o payload JSON
+canônico codificado em Base64URL sem padding, seguido de `.` e do MAC também em
+Base64URL. A `audit-api` autentica os bytes exatos do payload com uma chave AWS
+KMS `HMAC_256` e o algoritmo `HMAC_SHA_256`. O material secreto permanece no
+KMS; a Lambda recebe somente o ARN da chave e possui exclusivamente
+`kms:GenerateMac` e `kms:VerifyMac` nessa chave.
+
+Na retomada, tamanho e envelope Base64URL são validados antes da chamada ao KMS.
+`VerifyMac` ocorre antes do parse ou da interpretação semântica do JSON. MAC
+ausente, truncado ou inválido retorna `400 INVALID_CURSOR`; indisponibilidade,
+timeout, `AccessDenied` inesperado ou outra falha operacional do KMS retorna o
+envelope sanitizado `500 INTERNAL_ERROR`.
+
 O cursor deverá carregar informação suficiente para retomada determinística,
 conceitualmente incluindo versão, fingerprint da consulta, access pattern
 selecionado, bucket corrente quando aplicável, posição de continuação no
@@ -128,6 +141,13 @@ Cursor usado com filtros ou `limit` diferentes, malformado, incompatível,
 estruturalmente inválido ou de versão não suportada retorna
 `400 INVALID_CURSOR`. O cursor não torna a representação física do DynamoDB um
 contrato público.
+
+Cursores `v1` e `v2` não são aceitos após a publicação de `v3`. A invalidação é
+aceitável porque cursores são artefatos transitórios de paginação. Chaves HMAC do
+KMS não usam rotação automática. Uma rotação futura será manual e deverá trocar a
+chave/alias e publicar a nova referência; cursores emitidos pela chave anterior
+serão deliberadamente invalidados. Esta decisão não implementa esse procedimento
+operacional de rotação.
 
 ### Ordenação
 
@@ -341,12 +361,12 @@ motivo em texto livre reduz o risco de exposição de dados pessoais.
 5. ausência de `Scan` e interseção de índices;
 6. ordenação decrescente e desempate por `eventId`;
 7. fan-out mensal limitado aos buckets do intervalo;
-8. paginação opaca vinculada aos filtros e ao `limit`;
+8. paginação `v3` autenticada por KMS HMAC e vinculada aos filtros e ao `limit`;
 9. preenchimento da página pública após filtros sob limite interno defensivo;
 10. resposta vazia `200` e envelope público exato;
 11. exclusão de campos internos, físicos e sensíveis;
 12. IAM sem escrita, `Scan` ou `GetItem` na tabela de auditoria;
-13. Terraform da Lambda, integração, rota JWT e permissões mínimas;
+13. Terraform da Lambda, chave KMS HMAC, integração, rota JWT e permissões mínimas;
 14. E2E real em `dev` para autorização, access patterns e paginação.
 
 ## Relação com decisões anteriores
