@@ -46,6 +46,17 @@ export type UsersQuery = {
   status?: UserStatusFilter
 }
 
+export type CreateUserRequest = {
+  fullName: string
+  email: string
+  role: AdminUser['role']
+}
+
+export type CreatedAdminUser = Omit<AdminUser, 'status' | 'version'> & {
+  status: 'INVITED'
+  version: 1
+}
+
 export type StudentSummary = {
   studentId: string
   registrationNumber: string
@@ -202,9 +213,27 @@ export async function fetchUsers(query: UsersQuery = {}): Promise<UsersPage> {
   if (!response.ok || !isUsersPage(value)) {
     throw new ApiResponseError(
       response.status,
-      !response.ok && isRecord(value) && typeof value.code === 'string'
-        ? value.code
-        : undefined,
+      !response.ok ? publicErrorCode(value) : undefined,
+    )
+  }
+  return value
+}
+
+export async function createUser(
+  body: CreateUserRequest,
+  idempotencyKey: string,
+): Promise<CreatedAdminUser> {
+  const response = await authenticatedPost('/users', idempotencyKey, body)
+  let value: unknown
+  try {
+    value = await response.json()
+  } catch {
+    throw new ApiResponseError(response.status)
+  }
+  if (response.status !== 201 || !isCreatedAdminUser(value)) {
+    throw new ApiResponseError(
+      response.status,
+      response.status !== 201 ? publicErrorCode(value) : undefined,
     )
   }
   return value
@@ -269,6 +298,11 @@ function isAdminUser(value: unknown): value is AdminUser {
     value.updatedAt >= value.createdAt
 }
 
+function isCreatedAdminUser(value: unknown): value is CreatedAdminUser {
+  return isAdminUser(value) && value.status === 'INVITED' && value.version === 1 &&
+    value.updatedAt === value.createdAt
+}
+
 function isExactRecord(value: unknown, fields: string[]): value is Record<string, unknown> {
   return isRecord(value) && Object.keys(value).length === fields.length &&
     fields.every((field) => Object.hasOwn(value, field))
@@ -276,6 +310,12 @@ function isExactRecord(value: unknown, fields: string[]): value is Record<string
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
+}
+
+function publicErrorCode(value: unknown): string | undefined {
+  if (!isRecord(value)) return undefined
+  if (typeof value.error === 'string') return value.error
+  return typeof value.code === 'string' ? value.code : undefined
 }
 
 function isNonEmptyString(value: unknown): value is string {
@@ -337,8 +377,7 @@ export async function createStudent(
   if (response.status !== 201 || !isCreatedStudent(value)) {
     throw new ApiResponseError(
       response.status,
-      response.status !== 201 && isRecord(value) && typeof value.code === 'string'
-        ? value.code : undefined,
+      response.status !== 201 ? publicErrorCode(value) : undefined,
     )
   }
   return value
@@ -355,9 +394,7 @@ export async function fetchStudent(studentId: string): Promise<StudentDetail> {
   if (!response.ok || !isStudentDetail(value)) {
     throw new ApiResponseError(
       response.status,
-      !response.ok && isRecord(value) && typeof value.code === 'string'
-        ? value.code
-        : undefined,
+      !response.ok ? publicErrorCode(value) : undefined,
     )
   }
   return value
@@ -382,9 +419,7 @@ export async function updateStudent(
   if (response.status !== 200 || !isStudentDetail(value)) {
     throw new ApiResponseError(
       response.status,
-      response.status !== 200 && isRecord(value) && typeof value.code === 'string'
-        ? value.code
-        : undefined,
+      response.status !== 200 ? publicErrorCode(value) : undefined,
     )
   }
   return value
@@ -405,9 +440,7 @@ async function lifecycleStudentRequest(
   if (response.status !== 200 || !isStudentDetail(value)) {
     throw new ApiResponseError(
       response.status,
-      response.status !== 200 && isRecord(value) && typeof value.code === 'string'
-        ? value.code
-        : undefined,
+      response.status !== 200 ? publicErrorCode(value) : undefined,
     )
   }
   return value
