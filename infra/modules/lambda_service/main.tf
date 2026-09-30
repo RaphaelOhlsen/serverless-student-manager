@@ -61,7 +61,7 @@ resource "aws_iam_role_policy" "logging" {
 }
 
 resource "aws_iam_role_policy" "additional" {
-  count = var.additional_iam_policy_json == null ? 0 : 1
+  count = var.create_additional_iam_policy != null ? (var.create_additional_iam_policy ? 1 : 0) : (var.additional_iam_policy_json == null ? 0 : 1)
 
   name   = "${var.function_name}-service"
   role   = aws_iam_role.this.name

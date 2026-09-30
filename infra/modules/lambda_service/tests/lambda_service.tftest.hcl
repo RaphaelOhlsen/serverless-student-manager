@@ -172,3 +172,30 @@ run "plans_lambda_service" {
     error_message = "No additional IAM policy must be created when none is provided."
   }
 }
+
+run "plans_legacy_additional_iam_policy" {
+  command = plan
+
+  variables {
+    additional_iam_policy_json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}"
+  }
+
+  assert {
+    condition     = length(aws_iam_role_policy.additional) == 1
+    error_message = "A known legacy additional IAM policy document must create the policy resource."
+  }
+}
+
+run "plans_explicit_additional_iam_policy" {
+  command = plan
+
+  variables {
+    create_additional_iam_policy = true
+    additional_iam_policy_json   = "{\"Version\":\"2012-10-17\",\"Statement\":[]}"
+  }
+
+  assert {
+    condition     = length(aws_iam_role_policy.additional) == 1
+    error_message = "Explicit additional IAM policy creation must create the policy resource."
+  }
+}

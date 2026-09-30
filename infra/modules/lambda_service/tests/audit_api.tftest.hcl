@@ -17,6 +17,8 @@ override_data {
 }
 
 variables {
+  create_additional_iam_policy = true
+
   function_name = "serverless-student-manager-dev-audit-api"
   description   = "Audit Query API Lambda function."
 

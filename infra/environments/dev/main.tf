@@ -525,6 +525,8 @@ data "aws_iam_policy_document" "audit_api" {
 module "audit_api" {
   source = "../../modules/lambda_service"
 
+  create_additional_iam_policy = true
+
   function_name = "serverless-student-manager-dev-audit-api"
   description   = "Audit Query API Lambda function."
 
