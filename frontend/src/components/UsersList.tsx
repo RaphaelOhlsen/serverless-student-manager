@@ -6,6 +6,7 @@ import {
   ApiResponseError,
   AuthSessionUnavailableError,
   fetchUsers,
+  resendUserInvitation,
   type AdminUser,
   type UserRoleFilter,
   type UsersQuery,
@@ -31,6 +32,157 @@ function safeErrorMessage(error: unknown): string {
     if (error.status === 403) return 'Você não tem permissão para consultar usuários.'
   }
   return 'Não foi possível carregar os usuários. Tente novamente.'
+}
+
+function resendErrorMessage(error: unknown): string {
+  if (error instanceof AuthSessionUnavailableError ||
+      (error instanceof ApiResponseError && error.status === 401)) {
+    return 'Sua sessão expirou. Entre novamente.'
+  }
+  if (error instanceof ApiResponseError) {
+    if (error.status === 400) return 'A solicitação de reenvio é inválida.'
+    if (error.status === 403) return 'Você não tem permissão para reenviar convites.'
+    if (error.status === 404 && error.code === 'USER_NOT_FOUND') {
+      return 'O usuário não foi encontrado. A lista será atualizada.'
+    }
+    if (error.status === 409) {
+      switch (error.code) {
+        case 'USER_VERSION_CONFLICT':
+          return 'O usuário foi alterado. A lista será atualizada.'
+        case 'USER_STATE_CONFLICT':
+          return 'O usuário não está mais aguardando convite. A lista será atualizada.'
+        case 'IDEMPOTENCY_KEY_REUSED':
+          return 'Esta tentativa é incompatível com a solicitação anterior.'
+        case 'OPERATION_IN_PROGRESS':
+          return 'O reenvio está em andamento. Aguarde e tente novamente.'
+      }
+    }
+    if (error.status === 503 && error.code === 'INVITATION_DELIVERY_FAILED') {
+      return 'O convite não foi entregue. Tente novamente para retomar a mesma operação.'
+    }
+    if (error.status === 503 && error.code === 'INVITATION_DELIVERY_UNCERTAIN') {
+      return 'O resultado do reenvio é incerto e o convite pode ter sido enviado. Atualize a lista antes de iniciar uma nova intenção.'
+    }
+  }
+  return 'Não foi possível confirmar o reenvio. Tente novamente com a mesma solicitação.'
+}
+
+function isDeliveryUncertain(error: unknown): boolean {
+  return error instanceof ApiResponseError && error.status === 503 &&
+    error.code === 'INVITATION_DELIVERY_UNCERTAIN'
+}
+
+function isUserConflict(error: unknown): boolean {
+  return error instanceof ApiResponseError &&
+    ((error.status === 404 && error.code === 'USER_NOT_FOUND') ||
+      (error.status === 409 &&
+        (error.code === 'USER_VERSION_CONFLICT' || error.code === 'USER_STATE_CONFLICT')))
+}
+
+type ResendInvitationControlProps = {
+  user: AdminUser
+  disabled: boolean
+  onSuccess: () => void
+  onConflict: (message: string) => void
+  onRefresh: () => void
+}
+
+function ResendInvitationControl({
+  user,
+  disabled,
+  onSuccess,
+  onConflict,
+  onRefresh,
+}: ResendInvitationControlProps) {
+  const [confirming, setConfirming] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [deliveryUncertain, setDeliveryUncertain] = useState(false)
+  const idempotencyKey = useRef<string | null>(null)
+  const inFlight = useRef(false)
+  const current = useRef(false)
+
+  useEffect(() => {
+    current.current = true
+    return () => { current.current = false }
+  }, [])
+
+  async function confirm() {
+    if (inFlight.current || disabled || deliveryUncertain) return
+    idempotencyKey.current ??= crypto.randomUUID()
+    inFlight.current = true
+    setLoading(true)
+    setError(null)
+    try {
+      await resendUserInvitation(
+        user.userId,
+        { expectedVersion: user.version },
+        idempotencyKey.current,
+      )
+      if (!current.current) return
+      idempotencyKey.current = null
+      setConfirming(false)
+      onSuccess()
+    } catch (failure) {
+      if (!current.current) return
+      const message = resendErrorMessage(failure)
+      setError(message)
+      if (isDeliveryUncertain(failure)) {
+        setDeliveryUncertain(true)
+      } else if (isUserConflict(failure)) {
+        idempotencyKey.current = null
+        setConfirming(false)
+        onConflict(message)
+      }
+    } finally {
+      inFlight.current = false
+      if (current.current) setLoading(false)
+    }
+  }
+
+  function cancel() {
+    if (loading || disabled) return
+    idempotencyKey.current = null
+    setError(null)
+    setConfirming(false)
+  }
+
+  function startNewIntent() {
+    idempotencyKey.current = null
+    setDeliveryUncertain(false)
+    setError(null)
+  }
+
+  if (!confirming) {
+    return (
+      <Button type="button" variant="outline" disabled={disabled}
+        onClick={() => { setError(null); setConfirming(true) }}>
+        Reenviar convite
+      </Button>
+    )
+  }
+
+  return (
+    <div className="students-feedback" aria-label={`Reenviar convite para ${user.fullName}`}>
+      <p>Confirmar reenvio do convite para {user.fullName}?</p>
+      {error ? <p className="auth-error" role="alert">{error}</p> : null}
+      {loading ? <p className="auth-notice" role="status">Reenviando convite…</p> : null}
+      <Button type="button" disabled={loading || disabled || deliveryUncertain}
+        onClick={() => { void confirm() }}>
+        {error && !deliveryUncertain ? 'Tentar novamente' : 'Confirmar reenvio'}
+      </Button>
+      {deliveryUncertain ? (
+        <>
+          <Button type="button" variant="outline" disabled={loading || disabled}
+            onClick={onRefresh}>Atualizar lista</Button>
+          <Button type="button" variant="outline" disabled={loading || disabled}
+            onClick={startNewIntent}>Iniciar nova intenção</Button>
+        </>
+      ) : null}
+      <Button type="button" variant="outline" disabled={loading || disabled}
+        onClick={cancel}>Cancelar</Button>
+    </div>
+  )
 }
 
 export function UsersList() {
@@ -112,6 +264,12 @@ export function UsersList() {
     void load(appliedQuery, false)
   }
 
+  function refreshAfterResend(message: string) {
+    setCreationMessage(message)
+    setNextCursor(null)
+    void load(appliedQuery, false)
+  }
+
   return (
     <section className="users-directory" aria-label="Diretório de usuários">
       {showCreate ? (
@@ -187,6 +345,17 @@ export function UsersList() {
                 <span className="user-badge">{user.role}</span>
                 <span className="user-badge">{user.status}</span>
               </div>
+              {user.status === 'INVITED' ? (
+                <ResendInvitationControl
+                  user={user}
+                  disabled={isLoading}
+                  onSuccess={() => refreshAfterResend('Convite reenviado com sucesso.')}
+                  onConflict={(message) => refreshAfterResend(message)}
+                  onRefresh={() => refreshAfterResend(
+                    'Lista atualizada. O resultado do reenvio anterior permanece incerto.',
+                  )}
+                />
+              ) : null}
             </li>
           ))}
         </ul>
