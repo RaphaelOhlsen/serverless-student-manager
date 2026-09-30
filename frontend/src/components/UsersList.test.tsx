@@ -5,9 +5,10 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const apiMocks = vi.hoisted(() => ({ fetchUsers: vi.fn() }))
+const apiMocks = vi.hoisted(() => ({ createUser: vi.fn(), fetchUsers: vi.fn() }))
 
 vi.mock('@/lib/api', () => ({
+  createUser: apiMocks.createUser,
   fetchUsers: apiMocks.fetchUsers,
   ApiResponseError: class ApiResponseError extends Error {
     status: number
@@ -42,9 +43,25 @@ const operator = {
   role: 'OPERATOR',
   status: 'INVITED',
 }
+const invited = {
+  ...operator,
+  version: 1,
+  createdAt: '2026-09-30T10:00:00.000Z',
+  updatedAt: '2026-09-30T10:00:00.000Z',
+}
+
+function fillCreateUser() {
+  fireEvent.change(screen.getByLabelText('Nome completo'), {
+    target: { value: invited.fullName },
+  })
+  fireEvent.change(screen.getByLabelText('E-mail'), { target: { value: invited.email } })
+  fireEvent.change(screen.getByLabelText('Perfil'), { target: { value: invited.role } })
+}
 
 describe('UsersList', () => {
   beforeEach(() => {
+    apiMocks.createUser.mockReset()
+    apiMocks.createUser.mockResolvedValue(invited)
     apiMocks.fetchUsers.mockReset()
     apiMocks.fetchUsers.mockResolvedValue({ items: [], nextCursor: null })
   })
@@ -67,6 +84,42 @@ describe('UsersList', () => {
   it('renders the empty state', async () => {
     render(<UsersList />)
     expect(await screen.findByText('Nenhum usuário encontrado.')).toBeTruthy()
+  })
+
+  it('opens and cancels the inline create form', async () => {
+    render(<UsersList />)
+    await screen.findByText('Nenhum usuário encontrado.')
+    fireEvent.click(screen.getByRole('button', { name: 'Novo usuário' }))
+    expect(screen.getByRole('form', { name: 'Novo usuário' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }))
+    expect(screen.queryByRole('form', { name: 'Novo usuário' })).toBeNull()
+    expect(apiMocks.createUser).not.toHaveBeenCalled()
+  })
+
+  it('refreshes the first page with applied filters and drops the old cursor after create', async () => {
+    apiMocks.fetchUsers
+      .mockResolvedValueOnce({ items: [admin], nextCursor: 'old-cursor' })
+      .mockResolvedValueOnce({ items: [operator], nextCursor: 'filtered-cursor' })
+      .mockResolvedValueOnce({ items: [invited], nextCursor: null })
+    render(<UsersList />)
+    await screen.findByRole('button', { name: 'Carregar mais' })
+    fireEvent.change(screen.getByLabelText('Role'), { target: { value: 'OPERATOR' } })
+    fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'INVITED' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Aplicar filtros' }))
+    await waitFor(() => expect(apiMocks.fetchUsers).toHaveBeenCalledTimes(2))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Novo usuário' }))
+    fillCreateUser()
+    fireEvent.submit(screen.getByRole('form', { name: 'Novo usuário' }))
+
+    expect(await screen.findByText('Usuário criado e convite solicitado com sucesso.')).toBeTruthy()
+    await waitFor(() => expect(apiMocks.fetchUsers).toHaveBeenCalledTimes(3))
+    expect(apiMocks.fetchUsers).toHaveBeenLastCalledWith({
+      limit: 20, role: 'OPERATOR', status: 'INVITED',
+    })
+    expect(apiMocks.fetchUsers.mock.calls.at(-1)?.[0]).not.toHaveProperty('cursor')
+    expect(screen.queryByRole('button', { name: 'Carregar mais' })).toBeNull()
+    expect(screen.queryByRole('form', { name: 'Novo usuário' })).toBeNull()
   })
 
   it.each([
@@ -169,6 +222,26 @@ describe('UsersList', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Aplicar filtros' }))
     expect(await screen.findByText('Nenhum usuário encontrado.')).toBeTruthy()
     await act(async () => resolveInitial({ items: [admin], nextCursor: null }))
+    expect(screen.queryByText('Admin Exemplo')).toBeNull()
+  })
+
+  it('ignores a stale post-create refresh after a newer filter request', async () => {
+    let resolveRefresh!: (value: object) => void
+    apiMocks.fetchUsers
+      .mockResolvedValueOnce({ items: [], nextCursor: null })
+      .mockReturnValueOnce(new Promise((done) => { resolveRefresh = done }))
+      .mockResolvedValueOnce({ items: [operator], nextCursor: null })
+    render(<UsersList />)
+    await screen.findByText('Nenhum usuário encontrado.')
+    fireEvent.click(screen.getByRole('button', { name: 'Novo usuário' }))
+    fillCreateUser()
+    fireEvent.submit(screen.getByRole('form', { name: 'Novo usuário' }))
+    await screen.findByText('Usuário criado e convite solicitado com sucesso.')
+
+    fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'INVITED' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Aplicar filtros' }))
+    expect(await screen.findByText('Operador Exemplo')).toBeTruthy()
+    await act(async () => resolveRefresh({ items: [admin], nextCursor: null }))
     expect(screen.queryByText('Admin Exemplo')).toBeNull()
   })
 })

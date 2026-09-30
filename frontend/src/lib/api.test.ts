@@ -12,6 +12,7 @@ vi.mock('@/config/env', () => ({ env: { apiBaseUrl: 'https://api.example.test/' 
 import {
   ApiResponseError,
   createStudent,
+  createUser,
   deactivateStudent,
   fetchStudent,
   updateStudent,
@@ -230,6 +231,84 @@ describe('users directory contract', () => {
     await expect(fetchUsers()).rejects.toMatchObject({
       status: 400, code: 'INVALID_REQUEST', message: 'API request failed with status 400',
     })
+  })
+})
+
+describe('create user contract', () => {
+  const body = { fullName: 'Operador Exemplo', email: 'operator@example.test', role: 'OPERATOR' } as const
+  const created = {
+    ...body,
+    userId: '00000000-0000-4000-8000-000000000010',
+    status: 'INVITED',
+    version: 1,
+    createdAt: '2026-09-30T10:00:00.000Z',
+    updatedAt: '2026-09-30T10:00:00.000Z',
+  }
+
+  beforeEach(() => authMocks.fetchAuthSession.mockResolvedValue({
+    tokens: { accessToken: { toString: () => 'fake-access-token' } },
+  }))
+  afterEach(() => { vi.restoreAllMocks(); vi.clearAllMocks() })
+
+  it('posts exact body with authentication and idempotency and accepts strict 201', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(created), { status: 201 }),
+    )
+    await expect(createUser(
+      body,
+      '00000000-0000-4000-8000-000000000011',
+    )).resolves.toEqual(created)
+    expect(fetchMock).toHaveBeenCalledWith('https://api.example.test/users', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer fake-access-token',
+        'Content-Type': 'application/json',
+        'Idempotency-Key': '00000000-0000-4000-8000-000000000011',
+      },
+      body: JSON.stringify(body),
+    })
+  })
+
+  it.each([
+    { status: 'ACTIVE' }, { status: 'INACTIVE' }, { version: 2 }, { version: '1' },
+    { updatedAt: '2026-09-30T10:00:01.000Z' }, { userId: 'invalid' },
+  ])('rejects a non-INVITED/version-1 creation response: %o', async (change) => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      ...created, ...change,
+    }), { status: 201 }))
+    await expect(createUser(body, 'key')).rejects.toBeInstanceOf(ApiResponseError)
+  })
+
+  it.each(['PK', 'SK', 'authVersion', 'cognitoSub', 'normalizedName'])(
+    'rejects internal response field %s',
+    async (field) => {
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+        ...created, [field]: 'internal',
+      }), { status: 201 }))
+      await expect(createUser(body, 'key')).rejects.toBeInstanceOf(ApiResponseError)
+    },
+  )
+
+  it.each([
+    ['error', 'EMAIL_ALREADY_EXISTS'],
+    ['code', 'OPERATION_IN_PROGRESS'],
+  ] as const)('accepts public error code from %s without exposing message', async (field, code) => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      [field]: code, message: 'sensitive backend detail',
+    }), { status: 409 }))
+    await expect(createUser(body, 'key')).rejects.toMatchObject({
+      status: 409, code, message: 'API request failed with status 409',
+    })
+  })
+
+  it('rejects malformed JSON and non-201 success status', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('not-json', { status: 201 }))
+    await expect(createUser(body, 'key')).rejects.toMatchObject({ status: 201 })
+    vi.restoreAllMocks()
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(created), { status: 200 }),
+    )
+    await expect(createUser(body, 'key')).rejects.toMatchObject({ status: 200 })
   })
 })
 

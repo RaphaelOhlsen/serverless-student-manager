@@ -1,5 +1,6 @@
 import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react'
 
+import { CreateUserForm } from '@/components/CreateUserForm'
 import { Button } from '@/components/ui/button'
 import {
   ApiResponseError,
@@ -42,6 +43,8 @@ export function UsersList() {
   const [role, setRole] = useState<UserRoleFilter>('ALL')
   const [status, setStatus] = useState<UserStatusFilter>('ALL')
   const [appliedQuery, setAppliedQuery] = useState<UsersQuery>(DEFAULT_QUERY)
+  const [showCreate, setShowCreate] = useState(false)
+  const [creationMessage, setCreationMessage] = useState<string | null>(null)
   const requestGeneration = useRef(0)
   const lastAttempt = useRef<Attempt>({ query: DEFAULT_QUERY, append: false })
 
@@ -87,6 +90,7 @@ export function UsersList() {
       ...(term && searchMode === 'email' ? { email: term } : {}),
     }
     setAppliedQuery(query)
+    setCreationMessage(null)
     setUsers([])
     setNextCursor(null)
     void load(query, false)
@@ -101,8 +105,24 @@ export function UsersList() {
     void load(lastAttempt.current.query, lastAttempt.current.append)
   }
 
+  function userCreated() {
+    setShowCreate(false)
+    setCreationMessage('Usuário criado e convite solicitado com sucesso.')
+    setNextCursor(null)
+    void load(appliedQuery, false)
+  }
+
   return (
     <section className="users-directory" aria-label="Diretório de usuários">
+      {showCreate ? (
+        <CreateUserForm onCancel={() => setShowCreate(false)} onCreated={userCreated} />
+      ) : (
+        <Button type="button" onClick={() => {
+          setCreationMessage(null)
+          setShowCreate(true)
+        }}>Novo usuário</Button>
+      )}
+      {creationMessage ? <p className="auth-notice" role="status">{creationMessage}</p> : null}
       <form className="users-filters" aria-label="Filtros de usuários" onSubmit={applyFilters}>
         <div className="form-field">
           <label htmlFor="user-search-mode">Buscar por</label>

@@ -13,6 +13,7 @@ const authMocks = vi.hoisted(() => ({
 const apiMocks = vi.hoisted(() => ({
   authenticatedPost: vi.fn(),
   createStudent: vi.fn(),
+  createUser: vi.fn(),
   deactivateStudent: vi.fn(),
   fetchCurrentUserProfile: vi.fn(),
   fetchStudent: vi.fn(),
@@ -32,6 +33,7 @@ vi.mock('aws-amplify/auth', () => ({
 vi.mock('@/lib/api', () => ({
   authenticatedPost: apiMocks.authenticatedPost,
   createStudent: apiMocks.createStudent,
+  createUser: apiMocks.createUser,
   deactivateStudent: apiMocks.deactivateStudent,
   ApiResponseError: class ApiResponseError extends Error {
     status: number
@@ -240,7 +242,9 @@ describe('operational navigation', () => {
     render(<App />)
     expect(await screen.findByRole('button', { name: 'Alunos' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Usuários' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Novo usuário' })).toBeNull()
     expect(apiMocks.fetchUsers).not.toHaveBeenCalled()
+    expect(apiMocks.createUser).not.toHaveBeenCalled()
   })
 
   it('returns to Students and reloads its current filter', async () => {
