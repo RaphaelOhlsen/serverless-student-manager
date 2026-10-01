@@ -6,6 +6,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const apiMocks = vi.hoisted(() => ({
+  changeUserRole: vi.fn(),
   createUser: vi.fn(),
   fetchUser: vi.fn(),
   fetchUsers: vi.fn(),
@@ -13,6 +14,7 @@ const apiMocks = vi.hoisted(() => ({
 }))
 
 vi.mock('@/lib/api', () => ({
+  changeUserRole: apiMocks.changeUserRole,
   createUser: apiMocks.createUser,
   fetchUser: apiMocks.fetchUser,
   fetchUsers: apiMocks.fetchUsers,
@@ -29,7 +31,7 @@ vi.mock('@/lib/api', () => ({
   AuthSessionUnavailableError: class AuthSessionUnavailableError extends Error {},
 }))
 
-import { UsersList } from '@/components/UsersList'
+import { UsersList as UsersListComponent } from '@/components/UsersList'
 import { ApiResponseError } from '@/lib/api'
 
 const admin = {
@@ -57,6 +59,10 @@ const invited = {
   updatedAt: '2026-09-30T10:00:00.000Z',
 }
 
+function UsersList({ currentUserId = admin.userId }: { currentUserId?: string }) {
+  return <UsersListComponent currentUserId={currentUserId} />
+}
+
 function fillCreateUser() {
   fireEvent.change(screen.getByLabelText('Nome completo'), {
     target: { value: invited.fullName },
@@ -75,6 +81,8 @@ function confirmResend() {
 
 describe('UsersList', () => {
   beforeEach(() => {
+    apiMocks.changeUserRole.mockReset()
+    apiMocks.changeUserRole.mockResolvedValue({ ...admin, role: 'OPERATOR', version: 3 })
     apiMocks.createUser.mockReset()
     apiMocks.createUser.mockResolvedValue(invited)
     apiMocks.fetchUsers.mockReset()
@@ -435,5 +443,72 @@ describe('UsersList', () => {
     expect(await screen.findByText('Operador Exemplo')).toBeTruthy()
     await act(async () => resolveRefresh({ items: [admin], nextCursor: null }))
     expect(screen.queryByText('Admin Exemplo')).toBeNull()
+  })
+
+  it('passes current user identity to the detail self guard', async () => {
+    apiMocks.fetchUsers.mockResolvedValueOnce({ items: [admin, operator], nextCursor: null })
+    apiMocks.fetchUser.mockImplementation(async (userId: string) => (
+      userId === admin.userId ? admin : operator
+    ))
+    render(<UsersList currentUserId={admin.userId} />)
+    const details = await screen.findAllByRole('button', { name: 'Ver detalhes' })
+
+    fireEvent.click(details[0])
+    await screen.findByRole('dialog', { name: 'Detalhes do usuário' })
+    expect(screen.queryByRole('button', { name: 'Alterar role' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Fechar' }))
+
+    fireEvent.click(details[1])
+    expect(await screen.findByRole('button', { name: 'Alterar role' })).toBeTruthy()
+  })
+
+  it('refreshes the first page with filters preserved and cursor discarded after role change', async () => {
+    const updated = { ...operator, role: 'ADMIN' as const, version: operator.version + 1 }
+    apiMocks.fetchUsers
+      .mockResolvedValueOnce({ items: [operator], nextCursor: 'old-cursor' })
+      .mockResolvedValueOnce({ items: [operator], nextCursor: 'filtered-cursor' })
+      .mockResolvedValueOnce({ items: [updated], nextCursor: null })
+    apiMocks.fetchUser.mockResolvedValueOnce(operator).mockResolvedValueOnce(updated)
+    apiMocks.changeUserRole.mockResolvedValueOnce(updated)
+    render(<UsersList currentUserId={admin.userId} />)
+    await screen.findByRole('button', { name: 'Carregar mais' })
+    fireEvent.change(screen.getByLabelText('Role'), { target: { value: 'OPERATOR' } })
+    fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'INVITED' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Aplicar filtros' }))
+    await waitFor(() => expect(apiMocks.fetchUsers).toHaveBeenCalledTimes(2))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ver detalhes' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Alterar role' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar alteração' }))
+
+    await waitFor(() => expect(apiMocks.fetchUsers).toHaveBeenCalledTimes(3))
+    expect(apiMocks.fetchUsers).toHaveBeenLastCalledWith({
+      limit: 20, role: 'OPERATOR', status: 'INVITED',
+    })
+    expect(apiMocks.fetchUsers.mock.calls.at(-1)?.[0]).not.toHaveProperty('cursor')
+    expect(apiMocks.fetchUser).toHaveBeenCalledTimes(2)
+    expect(await screen.findByText(`Role de ${operator.fullName} alterada para ADMIN.`)).toBeTruthy()
+  })
+
+  it('keeps stale post-role-change refresh from replacing a newer filter result', async () => {
+    let resolveRefresh!: (value: object) => void
+    const updated = { ...operator, role: 'ADMIN' as const, version: operator.version + 1 }
+    apiMocks.fetchUsers
+      .mockResolvedValueOnce({ items: [operator], nextCursor: null })
+      .mockReturnValueOnce(new Promise((done) => { resolveRefresh = done }))
+      .mockResolvedValueOnce({ items: [], nextCursor: null })
+    apiMocks.fetchUser.mockResolvedValueOnce(operator).mockResolvedValueOnce(updated)
+    apiMocks.changeUserRole.mockResolvedValueOnce(updated)
+    render(<UsersList currentUserId={admin.userId} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Ver detalhes' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Alterar role' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar alteração' }))
+    await screen.findByText(`Role de ${operator.fullName} alterada para ADMIN.`)
+
+    fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'ACTIVE' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Aplicar filtros' }))
+    expect(await screen.findByText('Nenhum usuário encontrado.')).toBeTruthy()
+    await act(async () => resolveRefresh({ items: [operator], nextCursor: null }))
+    expect(screen.queryByRole('listitem')).toBeNull()
   })
 })

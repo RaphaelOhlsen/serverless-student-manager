@@ -946,8 +946,8 @@ function App() {
             ) : null}
           </nav>
 
-          {operationalView === 'users' ? (
-            <UsersList key={session} />
+          {operationalView === 'users' && userProfile ? (
+            <UsersList key={session} currentUserId={userProfile.userId} />
           ) : <>
           {showCreate ? (
             <CreateStudentForm key={session} disabled={isLoading}

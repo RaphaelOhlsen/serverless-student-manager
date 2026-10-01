@@ -186,7 +186,11 @@ function ResendInvitationControl({
   )
 }
 
-export function UsersList() {
+type UsersListProps = {
+  currentUserId: string
+}
+
+export function UsersList({ currentUserId }: UsersListProps) {
   const [users, setUsers] = useState<AdminUser[]>([])
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -267,6 +271,12 @@ export function UsersList() {
   }
 
   function refreshAfterResend(message: string) {
+    setCreationMessage(message)
+    setNextCursor(null)
+    void load(appliedQuery, false)
+  }
+
+  function refreshAfterRoleChange(message: string) {
     setCreationMessage(message)
     setNextCursor(null)
     void load(appliedQuery, false)
@@ -372,7 +382,12 @@ export function UsersList() {
         </Button>
       ) : null}
       {selectedUserId ? (
-        <UserDetailDialog userId={selectedUserId} onClose={() => setSelectedUserId(null)} />
+        <UserDetailDialog
+          userId={selectedUserId}
+          currentUserId={currentUserId}
+          onClose={() => setSelectedUserId(null)}
+          onRoleChanged={refreshAfterRoleChange}
+        />
       ) : null}
     </section>
   )

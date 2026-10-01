@@ -56,6 +56,11 @@ export type ResendInvitationRequest = {
   expectedVersion: number
 }
 
+export type ChangeUserRoleRequest = {
+  expectedVersion: number
+  role: AdminUser['role']
+}
+
 export type CreatedAdminUser = Omit<AdminUser, 'status' | 'version'> & {
   status: 'INVITED'
   version: 1
@@ -279,6 +284,31 @@ export async function resendUserInvitation(
     value = undefined
   }
   throw new ApiResponseError(response.status, publicErrorCode(value))
+}
+
+export async function changeUserRole(
+  userId: string,
+  body: ChangeUserRoleRequest,
+  idempotencyKey: string,
+): Promise<AdminUser> {
+  const response = await authenticatedPost(
+    `/users/${encodeURIComponent(userId)}/role-change`,
+    idempotencyKey,
+    body,
+  )
+  let value: unknown
+  try {
+    value = await response.json()
+  } catch {
+    throw new ApiResponseError(response.status)
+  }
+  if (response.status !== 200 || !isAdminUser(value)) {
+    throw new ApiResponseError(
+      response.status,
+      response.status !== 200 ? publicErrorCode(value) : undefined,
+    )
+  }
+  return value
 }
 
 function isUserProfile(value: unknown): value is UserProfile {
