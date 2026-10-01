@@ -2,12 +2,13 @@
  * @vitest-environment jsdom
  */
 
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const apiMocks = vi.hoisted(() => ({ fetchUser: vi.fn() }))
+const apiMocks = vi.hoisted(() => ({ changeUserRole: vi.fn(), fetchUser: vi.fn() }))
 
 vi.mock('@/lib/api', () => ({
+  changeUserRole: apiMocks.changeUserRole,
   fetchUser: apiMocks.fetchUser,
   ApiResponseError: class ApiResponseError extends Error {
     status: number
@@ -21,7 +22,7 @@ vi.mock('@/lib/api', () => ({
   AuthSessionUnavailableError: class AuthSessionUnavailableError extends Error {},
 }))
 
-import { UserDetailDialog } from '@/components/UserDetailDialog'
+import { UserDetailDialog as UserDetailDialogComponent } from '@/components/UserDetailDialog'
 import { ApiResponseError } from '@/lib/api'
 
 const first = {
@@ -44,8 +45,31 @@ const second = {
   version: 1,
 }
 
+type DialogProps = {
+  userId: string
+  currentUserId?: string
+  onClose: () => void
+  onRoleChanged?: (message: string) => void
+}
+
+function UserDetailDialog({
+  userId,
+  currentUserId = first.userId,
+  onClose,
+  onRoleChanged = vi.fn(),
+}: DialogProps) {
+  return <UserDetailDialogComponent
+    userId={userId}
+    currentUserId={currentUserId}
+    onClose={onClose}
+    onRoleChanged={onRoleChanged}
+  />
+}
+
 describe('UserDetailDialog', () => {
   beforeEach(() => {
+    apiMocks.changeUserRole.mockReset()
+    apiMocks.changeUserRole.mockResolvedValue({ ...first, role: 'OPERATOR', version: 4 })
     apiMocks.fetchUser.mockReset()
     apiMocks.fetchUser.mockResolvedValue(first)
   })
@@ -112,5 +136,83 @@ describe('UserDetailDialog', () => {
 
     await act(async () => resolve(first))
     expect(screen.queryByText(first.fullName)).toBeNull()
+  })
+
+  it('hides role change for self and exposes it for another fresh detail', async () => {
+    const view = render(<UserDetailDialog userId={first.userId} onClose={vi.fn()} />)
+    await screen.findByText(first.email)
+    expect(screen.queryByRole('button', { name: 'Alterar role' })).toBeNull()
+
+    view.rerender(<UserDetailDialog
+      userId={first.userId}
+      currentUserId={second.userId}
+      onClose={vi.fn()}
+    />)
+    expect(screen.getByRole('button', { name: 'Alterar role' })).toBeTruthy()
+  })
+
+  it('opens role change from fresh detail and refetches it after success', async () => {
+    const updated = { ...first, role: 'OPERATOR' as const, version: 4 }
+    apiMocks.fetchUser.mockResolvedValueOnce(first).mockResolvedValueOnce(updated)
+    const onRoleChanged = vi.fn()
+    render(<UserDetailDialog
+      userId={first.userId}
+      currentUserId={second.userId}
+      onClose={vi.fn()}
+      onRoleChanged={onRoleChanged}
+    />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Alterar role' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar alteração' }))
+
+    await waitFor(() => expect(apiMocks.fetchUser).toHaveBeenCalledTimes(2))
+    expect(apiMocks.changeUserRole).toHaveBeenCalledWith(
+      first.userId,
+      { expectedVersion: first.version, role: 'OPERATOR' },
+      expect.any(String),
+    )
+    expect(onRoleChanged).toHaveBeenCalledOnce()
+    expect(await screen.findByText(String(updated.version))).toBeTruthy()
+    expect(screen.queryByRole('dialog', { name: 'Alterar role' })).toBeNull()
+  })
+
+  it('refetches authoritative detail after a version conflict', async () => {
+    const refreshed = { ...first, version: 5 }
+    apiMocks.fetchUser.mockResolvedValueOnce(first).mockResolvedValueOnce(refreshed)
+    apiMocks.changeUserRole.mockRejectedValueOnce(
+      new ApiResponseError(409, 'USER_VERSION_CONFLICT'),
+    )
+    const onRoleChanged = vi.fn()
+    render(<UserDetailDialog
+      userId={first.userId}
+      currentUserId={second.userId}
+      onClose={vi.fn()}
+      onRoleChanged={onRoleChanged}
+    />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Alterar role' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar alteração' }))
+
+    await waitFor(() => expect(apiMocks.fetchUser).toHaveBeenCalledTimes(2))
+    expect(onRoleChanged).toHaveBeenCalledWith(expect.stringContaining('alterado por outra operação'))
+    expect(await screen.findByText(String(refreshed.version))).toBeTruthy()
+  })
+
+  it('prevents closing the detail while role change is open', async () => {
+    let resolve!: (value: typeof first) => void
+    apiMocks.changeUserRole.mockReturnValueOnce(new Promise((done) => { resolve = done }))
+    const onClose = vi.fn()
+    render(<UserDetailDialog
+      userId={first.userId}
+      currentUserId={second.userId}
+      onClose={onClose}
+    />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Alterar role' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar alteração' }))
+
+    const close = screen.getByRole('button', { name: 'Fechar' }) as HTMLButtonElement
+    expect(close.disabled).toBe(true)
+    fireEvent.click(close)
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(onClose).not.toHaveBeenCalled()
+    await act(async () => resolve({ ...first, role: 'OPERATOR' }))
   })
 })

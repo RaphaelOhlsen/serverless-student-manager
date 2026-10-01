@@ -11,6 +11,7 @@ vi.mock('@/config/env', () => ({ env: { apiBaseUrl: 'https://api.example.test/' 
 
 import {
   ApiResponseError,
+  changeUserRole,
   createStudent,
   createUser,
   deactivateStudent,
@@ -421,6 +422,78 @@ describe('resend user invitation contract', () => {
     await expect(resendUserInvitation(userId, body, key)).rejects.toMatchObject({
       status: 503, code, message: 'API request failed with status 503',
     })
+  })
+})
+
+describe('change user role contract', () => {
+  const userId = '00000000-0000-4000-8000-000000000010'
+  const body = { expectedVersion: 3, role: 'ADMIN' } as const
+  const key = '00000000-0000-4000-8000-000000000011'
+  const updated = {
+    userId,
+    fullName: 'Operador Exemplo',
+    email: 'operator@example.test',
+    role: 'ADMIN',
+    status: 'ACTIVE',
+    version: 4,
+    createdAt: '2026-09-01T10:00:00.000Z',
+    updatedAt: '2026-10-01T10:00:00.000Z',
+  }
+
+  beforeEach(() => authMocks.fetchAuthSession.mockResolvedValue({
+    tokens: { accessToken: { toString: () => 'fake-access-token' } },
+  }))
+  afterEach(() => { vi.restoreAllMocks(); vi.clearAllMocks() })
+
+  it('posts the exact body to the encoded user with authentication and idempotency', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(updated), { status: 200 }),
+    )
+
+    await expect(changeUserRole(`${userId}/segment`, body, key)).resolves.toEqual(updated)
+    expect(fetchMock).toHaveBeenCalledWith(
+      `https://api.example.test/users/${encodeURIComponent(`${userId}/segment`)}/role-change`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer fake-access-token',
+          'Content-Type': 'application/json',
+          'Idempotency-Key': key,
+        },
+        body: JSON.stringify(body),
+      },
+    )
+  })
+
+  it.each(['PK', 'SK', 'authVersion', 'cognitoSub'])(
+    'rejects internal response field %s',
+    async (field) => {
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+        ...updated, [field]: 'internal',
+      }), { status: 200 }))
+      await expect(changeUserRole(userId, body, key)).rejects.toBeInstanceOf(ApiResponseError)
+    },
+  )
+
+  it('preserves only the public error status and code', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      code: 'USER_VERSION_CONFLICT', message: 'sensitive backend detail',
+    }), { status: 409 }))
+    await expect(changeUserRole(userId, body, key)).rejects.toMatchObject({
+      status: 409,
+      code: 'USER_VERSION_CONFLICT',
+      message: 'API request failed with status 409',
+    })
+  })
+
+  it('rejects malformed JSON and a non-200 success status', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('not-json', { status: 200 }))
+    await expect(changeUserRole(userId, body, key)).rejects.toMatchObject({ status: 200 })
+    vi.restoreAllMocks()
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(updated), { status: 201 }),
+    )
+    await expect(changeUserRole(userId, body, key)).rejects.toMatchObject({ status: 201 })
   })
 })
 

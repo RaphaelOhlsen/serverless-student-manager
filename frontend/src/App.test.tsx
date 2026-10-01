@@ -12,12 +12,14 @@ const authMocks = vi.hoisted(() => ({
 }))
 const apiMocks = vi.hoisted(() => ({
   authenticatedPost: vi.fn(),
+  changeUserRole: vi.fn(),
   createStudent: vi.fn(),
   createUser: vi.fn(),
   deactivateStudent: vi.fn(),
   fetchCurrentUserProfile: vi.fn(),
   fetchStudent: vi.fn(),
   fetchStudents: vi.fn(),
+  fetchUser: vi.fn(),
   fetchUsers: vi.fn(),
   reactivateStudent: vi.fn(),
   updateStudent: vi.fn(),
@@ -32,6 +34,7 @@ vi.mock('aws-amplify/auth', () => ({
 
 vi.mock('@/lib/api', () => ({
   authenticatedPost: apiMocks.authenticatedPost,
+  changeUserRole: apiMocks.changeUserRole,
   createStudent: apiMocks.createStudent,
   createUser: apiMocks.createUser,
   deactivateStudent: apiMocks.deactivateStudent,
@@ -47,6 +50,7 @@ vi.mock('@/lib/api', () => ({
   fetchCurrentUserProfile: apiMocks.fetchCurrentUserProfile,
   fetchStudent: apiMocks.fetchStudent,
   fetchStudents: apiMocks.fetchStudents,
+  fetchUser: apiMocks.fetchUser,
   fetchUsers: apiMocks.fetchUsers,
   reactivateStudent: apiMocks.reactivateStudent,
   updateStudent: apiMocks.updateStudent,
@@ -279,6 +283,18 @@ describe('operational navigation', () => {
     expect(await screen.findByRole('heading', { name: 'Acesse sua conta' })).toBeTruthy()
     await act(async () => resolveUsers(usersPage))
     expect(screen.queryByText('Admin Diretório')).toBeNull()
+  })
+
+  it('passes profile.userId to the administrative user self guard', async () => {
+    const self = { ...usersPage.items[0], userId: activeProfile.userId }
+    apiMocks.fetchUsers.mockResolvedValueOnce({ items: [self], nextCursor: null })
+    apiMocks.fetchUser.mockResolvedValueOnce(self)
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Usuários' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Ver detalhes' }))
+
+    expect(await screen.findByRole('dialog', { name: 'Detalhes do usuário' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Alterar role' })).toBeNull()
   })
 })
 
