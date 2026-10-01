@@ -7,12 +7,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const apiMocks = vi.hoisted(() => ({
   createUser: vi.fn(),
+  fetchUser: vi.fn(),
   fetchUsers: vi.fn(),
   resendUserInvitation: vi.fn(),
 }))
 
 vi.mock('@/lib/api', () => ({
   createUser: apiMocks.createUser,
+  fetchUser: apiMocks.fetchUser,
   fetchUsers: apiMocks.fetchUsers,
   resendUserInvitation: apiMocks.resendUserInvitation,
   ApiResponseError: class ApiResponseError extends Error {
@@ -77,6 +79,8 @@ describe('UsersList', () => {
     apiMocks.createUser.mockResolvedValue(invited)
     apiMocks.fetchUsers.mockReset()
     apiMocks.fetchUsers.mockResolvedValue({ items: [], nextCursor: null })
+    apiMocks.fetchUser.mockReset()
+    apiMocks.fetchUser.mockResolvedValue(admin)
     apiMocks.resendUserInvitation.mockReset()
     apiMocks.resendUserInvitation.mockResolvedValue(undefined)
   })
@@ -99,6 +103,23 @@ describe('UsersList', () => {
   it('renders the empty state', async () => {
     render(<UsersList />)
     expect(await screen.findByText('Nenhum usuário encontrado.')).toBeTruthy()
+  })
+
+  it('does not load detail until requested and closes without refreshing the list', async () => {
+    apiMocks.fetchUsers.mockResolvedValueOnce({ items: [admin], nextCursor: null })
+    render(<UsersList />)
+    const detailButton = await screen.findByRole('button', { name: 'Ver detalhes' })
+    expect(apiMocks.fetchUser).not.toHaveBeenCalled()
+
+    fireEvent.click(detailButton)
+    expect(apiMocks.fetchUser).toHaveBeenCalledOnce()
+    expect(apiMocks.fetchUser).toHaveBeenCalledWith(admin.userId)
+    expect(await screen.findByRole('dialog', { name: 'Detalhes do usuário' })).toBeTruthy()
+    expect(await screen.findAllByText(admin.fullName)).toHaveLength(2)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Fechar' }))
+    expect(screen.queryByRole('dialog', { name: 'Detalhes do usuário' })).toBeNull()
+    expect(apiMocks.fetchUsers).toHaveBeenCalledOnce()
   })
 
   it('opens and cancels the inline create form', async () => {

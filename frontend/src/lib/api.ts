@@ -223,6 +223,23 @@ export async function fetchUsers(query: UsersQuery = {}): Promise<UsersPage> {
   return value
 }
 
+export async function fetchUser(userId: string): Promise<AdminUser> {
+  const response = await authenticatedGet(`/users/${encodeURIComponent(userId)}`)
+  let value: unknown
+  try {
+    value = await response.json()
+  } catch {
+    throw new ApiResponseError(response.status)
+  }
+  if (!response.ok || !isAdminUser(value)) {
+    throw new ApiResponseError(
+      response.status,
+      !response.ok ? publicErrorCode(value) : undefined,
+    )
+  }
+  return value
+}
+
 export async function createUser(
   body: CreateUserRequest,
   idempotencyKey: string,

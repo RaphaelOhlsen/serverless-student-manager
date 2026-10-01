@@ -1,6 +1,7 @@
 import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react'
 
 import { CreateUserForm } from '@/components/CreateUserForm'
+import { UserDetailDialog } from '@/components/UserDetailDialog'
 import { Button } from '@/components/ui/button'
 import {
   ApiResponseError,
@@ -196,6 +197,7 @@ export function UsersList() {
   const [status, setStatus] = useState<UserStatusFilter>('ALL')
   const [appliedQuery, setAppliedQuery] = useState<UsersQuery>(DEFAULT_QUERY)
   const [showCreate, setShowCreate] = useState(false)
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null)
   const [creationMessage, setCreationMessage] = useState<string | null>(null)
   const requestGeneration = useRef(0)
   const lastAttempt = useRef<Attempt>({ query: DEFAULT_QUERY, append: false })
@@ -345,6 +347,10 @@ export function UsersList() {
                 <span className="user-badge">{user.role}</span>
                 <span className="user-badge">{user.status}</span>
               </div>
+              <Button type="button" variant="outline"
+                onClick={() => setSelectedUserId(user.userId)}>
+                Ver detalhes
+              </Button>
               {user.status === 'INVITED' ? (
                 <ResendInvitationControl
                   user={user}
@@ -364,6 +370,9 @@ export function UsersList() {
         <Button type="button" variant="outline" disabled={isLoading} onClick={loadNextPage}>
           {isLoading ? 'Carregando…' : 'Carregar mais'}
         </Button>
+      ) : null}
+      {selectedUserId ? (
+        <UserDetailDialog userId={selectedUserId} onClose={() => setSelectedUserId(null)} />
       ) : null}
     </section>
   )
