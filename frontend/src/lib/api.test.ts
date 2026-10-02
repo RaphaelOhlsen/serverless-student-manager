@@ -15,6 +15,7 @@ import {
   createStudent,
   createUser,
   deactivateStudent,
+  deactivateUser,
   fetchStudent,
   updateStudent,
   authenticatedPost,
@@ -23,6 +24,7 @@ import {
   fetchUser,
   fetchUsers,
   reactivateStudent,
+  reactivateUser,
   resendUserInvitation,
 } from '@/lib/api'
 
@@ -494,6 +496,84 @@ describe('change user role contract', () => {
       new Response(JSON.stringify(updated), { status: 201 }),
     )
     await expect(changeUserRole(userId, body, key)).rejects.toMatchObject({ status: 201 })
+  })
+})
+
+describe('administrative user lifecycle contract', () => {
+  const userId = '00000000-0000-4000-8000-000000000010'
+  const body = { expectedVersion: 3 }
+  const key = '00000000-0000-4000-8000-000000000011'
+  const active = {
+    userId,
+    fullName: 'Operador Exemplo',
+    email: 'operator@example.test',
+    role: 'OPERATOR',
+    status: 'ACTIVE',
+    version: 4,
+    createdAt: '2026-09-01T10:00:00.000Z',
+    updatedAt: '2026-10-01T10:00:00.000Z',
+  }
+
+  beforeEach(() => authMocks.fetchAuthSession.mockResolvedValue({
+    tokens: { accessToken: { toString: () => 'fake-access-token' } },
+  }))
+  afterEach(() => { vi.restoreAllMocks(); vi.clearAllMocks() })
+
+  it.each([
+    ['deactivation', deactivateUser, { ...active, status: 'INACTIVE' }],
+    ['reactivation', reactivateUser, active],
+  ] as const)(
+    'posts %s with the exact body, encoded user, authentication and idempotency',
+    async (path, request, updated) => {
+      const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response(JSON.stringify(updated), { status: 200 }),
+      )
+
+      await expect(request(`${userId}/segment`, body, key)).resolves.toEqual(updated)
+      expect(fetchMock).toHaveBeenCalledWith(
+        `https://api.example.test/users/${encodeURIComponent(`${userId}/segment`)}/${path}`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: 'Bearer fake-access-token',
+            'Content-Type': 'application/json',
+            'Idempotency-Key': key,
+          },
+          body: JSON.stringify(body),
+        },
+      )
+    },
+  )
+
+  it.each(['PK', 'SK', 'authVersion', 'cognitoSub'])(
+    'rejects internal lifecycle response field %s',
+    async (field) => {
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+        ...active, [field]: 'internal',
+      }), { status: 200 }))
+      await expect(reactivateUser(userId, body, key)).rejects.toBeInstanceOf(ApiResponseError)
+    },
+  )
+
+  it('preserves only the public lifecycle error status and code', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      error: 'USER_STATE_CONFLICT', message: 'sensitive backend detail',
+    }), { status: 409 }))
+    await expect(deactivateUser(userId, body, key)).rejects.toMatchObject({
+      status: 409,
+      code: 'USER_STATE_CONFLICT',
+      message: 'API request failed with status 409',
+    })
+  })
+
+  it('rejects malformed JSON and non-200 lifecycle success', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('not-json', { status: 200 }))
+    await expect(deactivateUser(userId, body, key)).rejects.toMatchObject({ status: 200 })
+    vi.restoreAllMocks()
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(active), { status: 201 }),
+    )
+    await expect(reactivateUser(userId, body, key)).rejects.toMatchObject({ status: 201 })
   })
 })
 

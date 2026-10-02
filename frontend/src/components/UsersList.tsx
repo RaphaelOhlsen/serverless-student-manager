@@ -282,6 +282,12 @@ export function UsersList({ currentUserId }: UsersListProps) {
     void load(appliedQuery, false)
   }
 
+  function refreshAfterLifecycle(message: string) {
+    setCreationMessage(message)
+    setNextCursor(null)
+    void load(appliedQuery, false)
+  }
+
   return (
     <section className="users-directory" aria-label="Diretório de usuários">
       {showCreate ? (
@@ -387,6 +393,7 @@ export function UsersList({ currentUserId }: UsersListProps) {
           currentUserId={currentUserId}
           onClose={() => setSelectedUserId(null)}
           onRoleChanged={refreshAfterRoleChange}
+          onLifecycleChanged={refreshAfterLifecycle}
         />
       ) : null}
     </section>

@@ -61,6 +61,10 @@ export type ChangeUserRoleRequest = {
   role: AdminUser['role']
 }
 
+export type UserLifecycleRequest = {
+  expectedVersion: number
+}
+
 export type CreatedAdminUser = Omit<AdminUser, 'status' | 'version'> & {
   status: 'INVITED'
   version: 1
@@ -309,6 +313,48 @@ export async function changeUserRole(
     )
   }
   return value
+}
+
+async function changeUserLifecycle(
+  userId: string,
+  action: 'deactivation' | 'reactivation',
+  body: UserLifecycleRequest,
+  idempotencyKey: string,
+): Promise<AdminUser> {
+  const response = await authenticatedPost(
+    `/users/${encodeURIComponent(userId)}/${action}`,
+    idempotencyKey,
+    body,
+  )
+  let value: unknown
+  try {
+    value = await response.json()
+  } catch {
+    throw new ApiResponseError(response.status)
+  }
+  if (response.status !== 200 || !isAdminUser(value)) {
+    throw new ApiResponseError(
+      response.status,
+      response.status !== 200 ? publicErrorCode(value) : undefined,
+    )
+  }
+  return value
+}
+
+export function deactivateUser(
+  userId: string,
+  body: UserLifecycleRequest,
+  idempotencyKey: string,
+): Promise<AdminUser> {
+  return changeUserLifecycle(userId, 'deactivation', body, idempotencyKey)
+}
+
+export function reactivateUser(
+  userId: string,
+  body: UserLifecycleRequest,
+  idempotencyKey: string,
+): Promise<AdminUser> {
+  return changeUserLifecycle(userId, 'reactivation', body, idempotencyKey)
 }
 
 function isUserProfile(value: unknown): value is UserProfile {
