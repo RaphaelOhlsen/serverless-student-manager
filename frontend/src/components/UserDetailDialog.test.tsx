@@ -5,11 +5,18 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const apiMocks = vi.hoisted(() => ({ changeUserRole: vi.fn(), fetchUser: vi.fn() }))
+const apiMocks = vi.hoisted(() => ({
+  changeUserRole: vi.fn(),
+  deactivateUser: vi.fn(),
+  fetchUser: vi.fn(),
+  reactivateUser: vi.fn(),
+}))
 
 vi.mock('@/lib/api', () => ({
   changeUserRole: apiMocks.changeUserRole,
+  deactivateUser: apiMocks.deactivateUser,
   fetchUser: apiMocks.fetchUser,
+  reactivateUser: apiMocks.reactivateUser,
   ApiResponseError: class ApiResponseError extends Error {
     status: number
     code?: string
@@ -50,6 +57,7 @@ type DialogProps = {
   currentUserId?: string
   onClose: () => void
   onRoleChanged?: (message: string) => void
+  onLifecycleChanged?: (message: string) => void
 }
 
 function UserDetailDialog({
@@ -57,12 +65,14 @@ function UserDetailDialog({
   currentUserId = first.userId,
   onClose,
   onRoleChanged = vi.fn(),
+  onLifecycleChanged = vi.fn(),
 }: DialogProps) {
   return <UserDetailDialogComponent
     userId={userId}
     currentUserId={currentUserId}
     onClose={onClose}
     onRoleChanged={onRoleChanged}
+    onLifecycleChanged={onLifecycleChanged}
   />
 }
 
@@ -70,8 +80,12 @@ describe('UserDetailDialog', () => {
   beforeEach(() => {
     apiMocks.changeUserRole.mockReset()
     apiMocks.changeUserRole.mockResolvedValue({ ...first, role: 'OPERATOR', version: 4 })
+    apiMocks.deactivateUser.mockReset()
+    apiMocks.deactivateUser.mockResolvedValue({ ...first, status: 'INACTIVE', version: 4 })
     apiMocks.fetchUser.mockReset()
     apiMocks.fetchUser.mockResolvedValue(first)
+    apiMocks.reactivateUser.mockReset()
+    apiMocks.reactivateUser.mockResolvedValue({ ...first, status: 'ACTIVE', version: 4 })
   })
   afterEach(() => { cleanup(); vi.clearAllMocks() })
 
@@ -149,6 +163,111 @@ describe('UserDetailDialog', () => {
       onClose={vi.fn()}
     />)
     expect(screen.getByRole('button', { name: 'Alterar role' })).toBeTruthy()
+  })
+
+  it('implements the lifecycle status matrix and self deactivation guard', async () => {
+    const view = render(<UserDetailDialog userId={first.userId} onClose={vi.fn()} />)
+    await screen.findByText(first.email)
+    expect(screen.queryByRole('button', { name: 'Desativar usuário' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Reativar usuário' })).toBeNull()
+    view.unmount()
+
+    apiMocks.fetchUser.mockResolvedValueOnce(first)
+    const active = render(<UserDetailDialog
+      userId={first.userId}
+      currentUserId={second.userId}
+      onClose={vi.fn()}
+    />)
+    expect(await screen.findByRole('button', { name: 'Desativar usuário' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Reativar usuário' })).toBeNull()
+    active.unmount()
+
+    const inactive = { ...first, status: 'INACTIVE' as const, version: 4 }
+    apiMocks.fetchUser.mockResolvedValueOnce(inactive)
+    const inactiveView = render(<UserDetailDialog
+      userId={inactive.userId}
+      currentUserId={second.userId}
+      onClose={vi.fn()}
+    />)
+    expect(await screen.findByRole('button', { name: 'Reativar usuário' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Desativar usuário' })).toBeNull()
+    inactiveView.unmount()
+
+    apiMocks.fetchUser.mockResolvedValueOnce(second)
+    render(<UserDetailDialog
+      userId={second.userId}
+      currentUserId={first.userId}
+      onClose={vi.fn()}
+    />)
+    await screen.findByText(second.email)
+    expect(screen.queryByRole('button', { name: 'Desativar usuário' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Reativar usuário' })).toBeNull()
+  })
+
+  it('opens lifecycle from fresh detail and refetches after success', async () => {
+    const updated = { ...first, status: 'INACTIVE' as const, version: 4 }
+    apiMocks.fetchUser.mockResolvedValueOnce(first).mockResolvedValueOnce(updated)
+    const onLifecycleChanged = vi.fn()
+    render(<UserDetailDialog
+      userId={first.userId}
+      currentUserId={second.userId}
+      onClose={vi.fn()}
+      onLifecycleChanged={onLifecycleChanged}
+    />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Desativar usuário' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar desativação' }))
+
+    await waitFor(() => expect(apiMocks.fetchUser).toHaveBeenCalledTimes(2))
+    expect(apiMocks.deactivateUser).toHaveBeenCalledWith(
+      first.userId,
+      { expectedVersion: first.version },
+      expect.any(String),
+    )
+    expect(onLifecycleChanged).toHaveBeenCalledOnce()
+    expect(await screen.findByRole('button', { name: 'Reativar usuário' })).toBeTruthy()
+  })
+
+  it.each([
+    [409, 'USER_VERSION_CONFLICT'],
+    [409, 'USER_STATE_CONFLICT'],
+    [404, 'USER_NOT_FOUND'],
+  ])('refetches lifecycle detail after invalidating %s %s', async (status, code) => {
+    const refreshed = { ...first, status: 'INACTIVE' as const, version: 5 }
+    apiMocks.fetchUser.mockResolvedValueOnce(first).mockResolvedValueOnce(refreshed)
+    apiMocks.deactivateUser.mockRejectedValueOnce(new ApiResponseError(status, code))
+    const onLifecycleChanged = vi.fn()
+    render(<UserDetailDialog
+      userId={first.userId}
+      currentUserId={second.userId}
+      onClose={vi.fn()}
+      onLifecycleChanged={onLifecycleChanged}
+    />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Desativar usuário' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar desativação' }))
+
+    await waitFor(() => expect(apiMocks.fetchUser).toHaveBeenCalledTimes(2))
+    expect(onLifecycleChanged).toHaveBeenCalledOnce()
+  })
+
+  it('keeps reconciliation intent open without refreshing detail', async () => {
+    apiMocks.deactivateUser.mockRejectedValueOnce(
+      new ApiResponseError(503, 'USER_DEACTIVATION_RECONCILIATION_REQUIRED'),
+    )
+    const onLifecycleChanged = vi.fn()
+    render(<UserDetailDialog
+      userId={first.userId}
+      currentUserId={second.userId}
+      onClose={vi.fn()}
+      onLifecycleChanged={onLifecycleChanged}
+    />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Desativar usuário' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar desativação' }))
+
+    expect((await screen.findByRole('alert')).textContent).toContain('precisa ser reconciliado')
+    expect(apiMocks.fetchUser).toHaveBeenCalledOnce()
+    expect(onLifecycleChanged).not.toHaveBeenCalled()
+    expect(screen.getByRole('dialog', { name: 'Desativar usuário' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Reativar usuário' })).toBeNull()
   })
 
   it('opens role change from fresh detail and refetches it after success', async () => {

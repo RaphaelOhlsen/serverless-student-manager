@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 
 import { RoleChangeDialog } from '@/components/RoleChangeDialog'
+import {
+  UserLifecycleDialog,
+  type UserLifecycleAction,
+} from '@/components/UserLifecycleDialog'
 import { Button } from '@/components/ui/button'
 import {
   ApiResponseError,
@@ -14,6 +18,7 @@ type Props = {
   currentUserId: string
   onClose: () => void
   onRoleChanged: (message: string) => void
+  onLifecycleChanged: (message: string) => void
 }
 
 function detailErrorMessage(error: unknown): string {
@@ -28,7 +33,13 @@ function detailErrorMessage(error: unknown): string {
   return 'Não foi possível carregar os detalhes do usuário. Tente novamente.'
 }
 
-export function UserDetailDialog({ userId, currentUserId, onClose, onRoleChanged }: Props) {
+export function UserDetailDialog({
+  userId,
+  currentUserId,
+  onClose,
+  onRoleChanged,
+  onLifecycleChanged,
+}: Props) {
   const [result, setResult] = useState<{
     userId: string
     user: AdminUser | null
@@ -36,6 +47,10 @@ export function UserDetailDialog({ userId, currentUserId, onClose, onRoleChanged
   }>({ userId, user: null, error: null })
   const [refreshGeneration, setRefreshGeneration] = useState(0)
   const [roleChangeUserId, setRoleChangeUserId] = useState<string | null>(null)
+  const [lifecycle, setLifecycle] = useState<{
+    userId: string
+    action: UserLifecycleAction
+  } | null>(null)
   const close = useRef(onClose)
   const closeButton = useRef<HTMLButtonElement>(null)
 
@@ -58,11 +73,13 @@ export function UserDetailDialog({ userId, currentUserId, onClose, onRoleChanged
   useEffect(() => {
     closeButton.current?.focus()
     function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === 'Escape' && roleChangeUserId !== userId) close.current()
+      if (event.key === 'Escape' && roleChangeUserId !== userId && lifecycle?.userId !== userId) {
+        close.current()
+      }
     }
     document.addEventListener('keydown', closeOnEscape)
     return () => document.removeEventListener('keydown', closeOnEscape)
-  }, [roleChangeUserId, userId])
+  }, [lifecycle, roleChangeUserId, userId])
 
   function reconcileAfterRoleChange(message: string) {
     setRoleChangeUserId(null)
@@ -71,10 +88,18 @@ export function UserDetailDialog({ userId, currentUserId, onClose, onRoleChanged
     onRoleChanged(message)
   }
 
+  function reconcileAfterLifecycle(message: string) {
+    setLifecycle(null)
+    setResult({ userId, user: null, error: null })
+    setRefreshGeneration((generation) => generation + 1)
+    onLifecycleChanged(message)
+  }
+
   const isCurrent = result.userId === userId
   const user = isCurrent ? result.user : null
   const error = isCurrent ? result.error : null
   const loading = !isCurrent || (user === null && error === null)
+  const nestedActionOpen = roleChangeUserId === userId || lifecycle?.userId === userId
 
   return (
     <div className="dialog-backdrop">
@@ -99,15 +124,27 @@ export function UserDetailDialog({ userId, currentUserId, onClose, onRoleChanged
               <div><dt>Atualizado em</dt><dd><time dateTime={user.updatedAt}>{user.updatedAt}</time></dd></div>
             </dl>
             {user.userId !== currentUserId ? (
-              <Button type="button" onClick={() => {
+              <Button type="button" disabled={nestedActionOpen} onClick={() => {
                 setRoleChangeUserId(user.userId)
               }}>Alterar role</Button>
+            ) : null}
+            {user.status === 'ACTIVE' && user.userId !== currentUserId ? (
+              <Button type="button" variant="destructive" disabled={nestedActionOpen}
+                onClick={() => {
+                setLifecycle({ userId: user.userId, action: 'deactivate' })
+              }}>Desativar usuário</Button>
+            ) : null}
+            {user.status === 'INACTIVE' ? (
+              <Button type="button" disabled={nestedActionOpen} onClick={() => {
+                setLifecycle({ userId: user.userId, action: 'reactivate' })
+              }}>Reativar usuário</Button>
             ) : null}
           </>
         ) : null}
         <div className="dialog-actions">
           <Button ref={closeButton} type="button" variant="outline"
-            disabled={roleChangeUserId === userId} onClick={onClose}>
+            disabled={nestedActionOpen}
+            onClick={onClose}>
             Fechar
           </Button>
         </div>
@@ -118,6 +155,16 @@ export function UserDetailDialog({ userId, currentUserId, onClose, onRoleChanged
             onCompleted={reconcileAfterRoleChange}
             onInvalidated={reconcileAfterRoleChange}
             onCancel={() => setRoleChangeUserId(null)}
+          />
+        ) : null}
+        {lifecycle?.userId === userId && user ? (
+          <UserLifecycleDialog
+            key={`${user.userId}-${user.version}-${lifecycle.action}`}
+            action={lifecycle.action}
+            user={user}
+            onCompleted={reconcileAfterLifecycle}
+            onInvalidated={reconcileAfterLifecycle}
+            onCancel={() => setLifecycle(null)}
           />
         ) : null}
       </section>

@@ -8,17 +8,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const apiMocks = vi.hoisted(() => ({
   changeUserRole: vi.fn(),
   createUser: vi.fn(),
+  deactivateUser: vi.fn(),
   fetchUser: vi.fn(),
   fetchUsers: vi.fn(),
   resendUserInvitation: vi.fn(),
+  reactivateUser: vi.fn(),
 }))
 
 vi.mock('@/lib/api', () => ({
   changeUserRole: apiMocks.changeUserRole,
   createUser: apiMocks.createUser,
+  deactivateUser: apiMocks.deactivateUser,
   fetchUser: apiMocks.fetchUser,
   fetchUsers: apiMocks.fetchUsers,
   resendUserInvitation: apiMocks.resendUserInvitation,
+  reactivateUser: apiMocks.reactivateUser,
   ApiResponseError: class ApiResponseError extends Error {
     status: number
     code?: string
@@ -58,6 +62,11 @@ const invited = {
   createdAt: '2026-09-30T10:00:00.000Z',
   updatedAt: '2026-09-30T10:00:00.000Z',
 }
+const inactive = {
+  ...operator,
+  status: 'INACTIVE' as const,
+  version: 4,
+}
 
 function UsersList({ currentUserId = admin.userId }: { currentUserId?: string }) {
   return <UsersListComponent currentUserId={currentUserId} />
@@ -89,8 +98,12 @@ describe('UsersList', () => {
     apiMocks.fetchUsers.mockResolvedValue({ items: [], nextCursor: null })
     apiMocks.fetchUser.mockReset()
     apiMocks.fetchUser.mockResolvedValue(admin)
+    apiMocks.deactivateUser.mockReset()
+    apiMocks.deactivateUser.mockResolvedValue({ ...admin, status: 'INACTIVE', version: 3 })
     apiMocks.resendUserInvitation.mockReset()
     apiMocks.resendUserInvitation.mockResolvedValue(undefined)
+    apiMocks.reactivateUser.mockReset()
+    apiMocks.reactivateUser.mockResolvedValue({ ...inactive, status: 'ACTIVE', version: 5 })
   })
   afterEach(() => { cleanup(); vi.clearAllMocks() })
 
@@ -509,6 +522,73 @@ describe('UsersList', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Aplicar filtros' }))
     expect(await screen.findByText('Nenhum usuário encontrado.')).toBeTruthy()
     await act(async () => resolveRefresh({ items: [operator], nextCursor: null }))
+    expect(screen.queryByRole('listitem')).toBeNull()
+  })
+
+  it('refreshes first page with filters preserved and cursor discarded after lifecycle success', async () => {
+    const updated = { ...inactive, status: 'ACTIVE' as const, version: 5 }
+    apiMocks.fetchUsers
+      .mockResolvedValueOnce({ items: [inactive], nextCursor: 'old-cursor' })
+      .mockResolvedValueOnce({ items: [inactive], nextCursor: 'filtered-cursor' })
+      .mockResolvedValueOnce({ items: [updated], nextCursor: null })
+    apiMocks.fetchUser.mockResolvedValueOnce(inactive).mockResolvedValueOnce(updated)
+    apiMocks.reactivateUser.mockResolvedValueOnce(updated)
+    render(<UsersList currentUserId={admin.userId} />)
+    await screen.findByRole('button', { name: 'Carregar mais' })
+    fireEvent.change(screen.getByLabelText('Role'), { target: { value: 'OPERATOR' } })
+    fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'INACTIVE' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Aplicar filtros' }))
+    await waitFor(() => expect(apiMocks.fetchUsers).toHaveBeenCalledTimes(2))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ver detalhes' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Reativar usuário' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar reativação' }))
+
+    await waitFor(() => expect(apiMocks.fetchUsers).toHaveBeenCalledTimes(3))
+    expect(apiMocks.fetchUsers).toHaveBeenLastCalledWith({
+      limit: 20, role: 'OPERATOR', status: 'INACTIVE',
+    })
+    expect(apiMocks.fetchUsers.mock.calls.at(-1)?.[0]).not.toHaveProperty('cursor')
+    expect(apiMocks.fetchUser).toHaveBeenCalledTimes(2)
+    expect(await screen.findByText(`${inactive.fullName} reativado com sucesso.`)).toBeTruthy()
+  })
+
+  it('does not refresh list or detail while lifecycle reconciliation preserves the intent', async () => {
+    apiMocks.fetchUsers.mockResolvedValueOnce({ items: [inactive], nextCursor: null })
+    apiMocks.fetchUser.mockResolvedValueOnce(inactive)
+    apiMocks.reactivateUser.mockRejectedValueOnce(
+      new ApiResponseError(503, 'USER_REACTIVATION_RECONCILIATION_REQUIRED'),
+    )
+    render(<UsersList currentUserId={admin.userId} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Ver detalhes' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Reativar usuário' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar reativação' }))
+
+    expect((await screen.findByRole('alert')).textContent).toContain('precisa ser reconciliado')
+    expect(apiMocks.fetchUsers).toHaveBeenCalledOnce()
+    expect(apiMocks.fetchUser).toHaveBeenCalledOnce()
+    expect(screen.getByRole('dialog', { name: 'Reativar usuário' })).toBeTruthy()
+  })
+
+  it('keeps stale post-lifecycle list refresh from replacing a newer filter result', async () => {
+    let resolveRefresh!: (value: object) => void
+    const updated = { ...inactive, status: 'ACTIVE' as const, version: 5 }
+    apiMocks.fetchUsers
+      .mockResolvedValueOnce({ items: [inactive], nextCursor: null })
+      .mockReturnValueOnce(new Promise((done) => { resolveRefresh = done }))
+      .mockResolvedValueOnce({ items: [], nextCursor: null })
+    apiMocks.fetchUser.mockResolvedValueOnce(inactive).mockResolvedValueOnce(updated)
+    apiMocks.reactivateUser.mockResolvedValueOnce(updated)
+    render(<UsersList currentUserId={admin.userId} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Ver detalhes' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Reativar usuário' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar reativação' }))
+    await screen.findByText(`${inactive.fullName} reativado com sucesso.`)
+
+    fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'ACTIVE' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Aplicar filtros' }))
+    expect(await screen.findByText('Nenhum usuário encontrado.')).toBeTruthy()
+    await act(async () => resolveRefresh({ items: [inactive], nextCursor: null }))
     expect(screen.queryByRole('listitem')).toBeNull()
   })
 })
