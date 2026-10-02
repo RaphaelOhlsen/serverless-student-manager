@@ -113,16 +113,79 @@ describe('RoleChangeDialog', () => {
     apiMocks.changeUserRole.mockRejectedValueOnce(failure).mockResolvedValueOnce({
       ...admin, role: 'OPERATOR', version: 4,
     })
-    renderDialog()
+    const { props } = renderDialog()
     fireEvent.click(screen.getByRole('button', { name: 'Confirmar alteração' }))
     await screen.findByRole('alert')
-    fireEvent.click(screen.getByRole('button', { name: 'Confirmar alteração' }))
+    const cancel = screen.getByRole('button', { name: 'Cancelar' }) as HTMLButtonElement
+    expect(cancel.disabled).toBe(true)
+    fireEvent.click(cancel)
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(props.onCancel).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Tentar novamente' }))
 
     await waitFor(() => expect(apiMocks.changeUserRole).toHaveBeenCalledTimes(2))
     expect(apiMocks.changeUserRole.mock.calls[1][2])
       .toBe(apiMocks.changeUserRole.mock.calls[0][2])
     expect(screen.queryByText('network secret')).toBeNull()
     expect(screen.queryByText('INTERNAL_ERROR')).toBeNull()
+  })
+
+  it('keeps the same key through repeated recoverable retries', async () => {
+    const key = '00000000-0000-4000-8000-000000000010'
+    const uuid = vi.spyOn(crypto, 'randomUUID').mockReturnValue(key)
+    apiMocks.changeUserRole
+      .mockRejectedValueOnce(new TypeError('offline'))
+      .mockRejectedValueOnce(new ApiResponseError(500, 'INTERNAL_ERROR'))
+      .mockResolvedValueOnce({ ...admin, role: 'OPERATOR', version: 4 })
+    renderDialog()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar alteração' }))
+    await screen.findByRole('alert')
+    fireEvent.click(screen.getByRole('button', { name: 'Tentar novamente' }))
+    await screen.findByRole('alert')
+    fireEvent.click(screen.getByRole('button', { name: 'Tentar novamente' }))
+
+    await waitFor(() => expect(apiMocks.changeUserRole).toHaveBeenCalledTimes(3))
+    expect(apiMocks.changeUserRole.mock.calls.map((call) => call[2])).toEqual([key, key, key])
+    expect(uuid).toHaveBeenCalledOnce()
+  })
+
+  it('freezes the original role-change snapshot across a prop change', async () => {
+    apiMocks.changeUserRole
+      .mockRejectedValueOnce(new TypeError('offline'))
+      .mockResolvedValueOnce({ ...admin, role: 'OPERATOR', version: 4 })
+    const view = renderDialog()
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar alteração' }))
+    await screen.findByRole('alert')
+    const originalCall = apiMocks.changeUserRole.mock.calls[0]
+
+    view.rerender(<RoleChangeDialog
+      user={{ ...admin, role: 'OPERATOR', version: admin.version + 1 }}
+      {...view.props}
+    />)
+    fireEvent.click(screen.getByRole('button', { name: 'Tentar novamente' }))
+
+    await waitFor(() => expect(apiMocks.changeUserRole).toHaveBeenCalledTimes(2))
+    expect(apiMocks.changeUserRole.mock.calls[1]).toEqual(originalCall)
+  })
+
+  it('allows Cancel and Escape before confirmation and after a terminal failure', async () => {
+    const preSubmit = renderDialog()
+    fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }))
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(preSubmit.props.onCancel).toHaveBeenCalledTimes(2)
+    preSubmit.unmount()
+
+    apiMocks.changeUserRole.mockRejectedValueOnce(
+      new ApiResponseError(409, 'LAST_ACTIVE_ADMIN_CONFLICT'),
+    )
+    const terminal = renderDialog()
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar alteração' }))
+    await screen.findByRole('alert')
+    const cancel = screen.getByRole('button', { name: 'Cancelar' }) as HTMLButtonElement
+    expect(cancel.disabled).toBe(false)
+    fireEvent.click(cancel)
+    expect(terminal.props.onCancel).toHaveBeenCalledOnce()
   })
 
   it.each([

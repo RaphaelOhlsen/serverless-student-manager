@@ -5,9 +5,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({ createUser: vi.fn() }))
 
-vi.mock('@/lib/api', async (original) => ({
-  ...await original<typeof import('@/lib/api')>(),
+vi.mock('@/lib/api', () => ({
   createUser: mocks.createUser,
+  ApiResponseError: class ApiResponseError extends Error {
+    status: number
+    code?: string
+    constructor(status: number, code?: string) {
+      super(`API request failed with status ${status}`)
+      this.status = status
+      this.code = code
+    }
+  },
+  AuthSessionUnavailableError: class AuthSessionUnavailableError extends Error {},
 }))
 
 import { CreateUserForm } from '@/components/CreateUserForm'
@@ -35,6 +44,20 @@ function submit() {
   fireEvent.submit(screen.getByRole('form', { name: 'Novo usuário' }))
 }
 
+function renderForm(overrides: Partial<{
+  onCreated: (user: typeof created) => void
+  onCancel: () => void
+  onReconcileUncertain: (email: string) => Promise<boolean>
+}> = {}) {
+  const props = {
+    onCreated: vi.fn(),
+    onCancel: vi.fn(),
+    onReconcileUncertain: vi.fn(async () => false),
+    ...overrides,
+  }
+  return { ...render(<CreateUserForm {...props} />), props }
+}
+
 describe('CreateUserForm', () => {
   beforeEach(() => { mocks.createUser.mockReset() })
   afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.clearAllMocks() })
@@ -42,7 +65,7 @@ describe('CreateUserForm', () => {
   it('cancels without creating an idempotency key or request', () => {
     const cancel = vi.fn()
     const uuid = vi.spyOn(crypto, 'randomUUID')
-    render(<CreateUserForm onCreated={vi.fn()} onCancel={cancel} />)
+    renderForm({ onCancel: cancel })
     fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }))
     expect(cancel).toHaveBeenCalledOnce()
     expect(uuid).not.toHaveBeenCalled()
@@ -60,7 +83,7 @@ describe('CreateUserForm', () => {
     ['Operador Exemplo', `a${'x'.repeat(245)}@example.test`],
   ])('rejects invalid name/email before creating a key', (fullName, email) => {
     const uuid = vi.spyOn(crypto, 'randomUUID')
-    render(<CreateUserForm onCreated={vi.fn()} onCancel={vi.fn()} />)
+    renderForm()
     fill({ ...body, fullName, email })
     submit()
     expect(screen.getByRole('alert')).toBeTruthy()
@@ -70,7 +93,7 @@ describe('CreateUserForm', () => {
 
   it('normalizes the payload and supports both roles', async () => {
     mocks.createUser.mockResolvedValue(created)
-    render(<CreateUserForm onCreated={vi.fn()} onCancel={vi.fn()} />)
+    renderForm()
     fill({ fullName: '  Ａna   Silva  ', email: ' ADMIN@EXAMPLE.TEST ', role: 'ADMIN' })
     submit()
     await waitFor(() => expect(mocks.createUser).toHaveBeenCalledWith({
@@ -80,7 +103,7 @@ describe('CreateUserForm', () => {
 
   it('accepts 150 Unicode code points after normalization', async () => {
     mocks.createUser.mockResolvedValue(created)
-    render(<CreateUserForm onCreated={vi.fn()} onCancel={vi.fn()} />)
+    renderForm()
     fill({ ...body, fullName: '😀'.repeat(150) })
     submit()
     await waitFor(() => expect(mocks.createUser).toHaveBeenCalledOnce())
@@ -90,7 +113,7 @@ describe('CreateUserForm', () => {
     let resolve!: (value: typeof created) => void
     mocks.createUser.mockReturnValue(new Promise((done) => { resolve = done }))
     const cancel = vi.fn()
-    render(<CreateUserForm onCreated={vi.fn()} onCancel={cancel} />)
+    renderForm({ onCancel: cancel })
     fill()
     submit()
     submit()
@@ -109,42 +132,87 @@ describe('CreateUserForm', () => {
     [new ApiResponseError(503, 'INVITATION_DELIVERY_FAILED'), 'retomar a mesma operação'],
   ])('retries recoverable failure %o with the same key', async (failure, message) => {
     mocks.createUser.mockRejectedValueOnce(failure).mockResolvedValueOnce(created)
-    render(<CreateUserForm onCreated={vi.fn()} onCancel={vi.fn()} />)
+    const { props } = renderForm()
     fill()
     submit()
     expect((await screen.findByRole('alert')).textContent).toContain(message)
     expect(screen.queryByText('network secret')).toBeNull()
-    submit()
+    expect((screen.getByLabelText('Nome completo') as HTMLInputElement).disabled).toBe(true)
+    expect((screen.getByLabelText('E-mail') as HTMLInputElement).disabled).toBe(true)
+    expect((screen.getByLabelText('Perfil') as HTMLSelectElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'Cancelar' }) as HTMLButtonElement).disabled)
+      .toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }))
+    expect(props.onCancel).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Tentar novamente' }))
     await waitFor(() => expect(mocks.createUser).toHaveBeenCalledTimes(2))
+    expect(mocks.createUser.mock.calls[1][0]).toEqual(mocks.createUser.mock.calls[0][0])
     expect(mocks.createUser.mock.calls[1][1]).toBe(mocks.createUser.mock.calls[0][1])
   })
 
-  it('uses a new key after a semantic payload change', async () => {
-    mocks.createUser.mockRejectedValue(new ApiResponseError(500, 'INTERNAL_ERROR'))
-    render(<CreateUserForm onCreated={vi.fn()} onCancel={vi.fn()} />)
+  it('freezes the original payload and key through repeated recoverable retries', async () => {
+    const key = '00000000-0000-4000-8000-000000000010'
+    const uuid = vi.spyOn(crypto, 'randomUUID').mockReturnValue(key)
+    mocks.createUser
+      .mockRejectedValueOnce(new ApiResponseError(500, 'INTERNAL_ERROR'))
+      .mockRejectedValueOnce(new TypeError('offline'))
+      .mockResolvedValueOnce(created)
+    renderForm()
     fill()
     submit()
     await screen.findByRole('alert')
     fill({ ...body, fullName: 'Outro Operador' })
-    submit()
-    await waitFor(() => expect(mocks.createUser).toHaveBeenCalledTimes(2))
-    expect(mocks.createUser.mock.calls[1][1]).not.toBe(mocks.createUser.mock.calls[0][1])
+    expect((screen.getByLabelText('Nome completo') as HTMLInputElement).value).toBe(body.fullName)
+    fireEvent.click(screen.getByRole('button', { name: 'Tentar novamente' }))
+    await screen.findByRole('alert')
+    fireEvent.click(screen.getByRole('button', { name: 'Tentar novamente' }))
+    await waitFor(() => expect(mocks.createUser).toHaveBeenCalledTimes(3))
+    expect(mocks.createUser.mock.calls.map((call) => call[0])).toEqual([body, body, body])
+    expect(mocks.createUser.mock.calls.map((call) => call[1])).toEqual([key, key, key])
+    expect(uuid).toHaveBeenCalledOnce()
   })
 
-  it('does not retry uncertain delivery or silently replace its key', async () => {
-    mocks.createUser
-      .mockRejectedValueOnce(new ApiResponseError(503, 'INVITATION_DELIVERY_UNCERTAIN'))
-      .mockResolvedValueOnce(created)
-    render(<CreateUserForm onCreated={vi.fn()} onCancel={vi.fn()} />)
+  it('reconciles uncertain delivery without retrying or allowing a new create', async () => {
+    mocks.createUser.mockRejectedValueOnce(
+      new ApiResponseError(503, 'INVITATION_DELIVERY_UNCERTAIN'),
+    )
+    const reconcile = vi.fn(async () => true)
+    const { props } = renderForm({ onReconcileUncertain: reconcile })
     fill()
     submit()
     expect((await screen.findByRole('alert')).textContent).toContain('pode ter sido concluída')
     submit()
     expect(mocks.createUser).toHaveBeenCalledOnce()
-    fireEvent.click(screen.getByRole('button', { name: 'Iniciar nova intenção' }))
+    expect(screen.queryByRole('button', { name: 'Tentar novamente' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Iniciar nova intenção' })).toBeNull()
+    expect((screen.getByLabelText('Nome completo') as HTMLInputElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'Cancelar' }) as HTMLButtonElement).disabled)
+      .toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Reconciliar estado' }))
+    await waitFor(() => expect(reconcile).toHaveBeenCalledWith(body.email))
+    expect(props.onCancel).not.toHaveBeenCalled()
+    expect(mocks.createUser).toHaveBeenCalledOnce()
+  })
+
+  it('keeps uncertain creation locked when remote reconciliation fails', async () => {
+    mocks.createUser.mockRejectedValueOnce(
+      new ApiResponseError(503, 'INVITATION_DELIVERY_UNCERTAIN'),
+    )
+    const reconcile = vi.fn()
+      .mockRejectedValueOnce(new TypeError('network secret'))
+      .mockResolvedValueOnce(false)
+    renderForm({ onReconcileUncertain: reconcile })
+    fill()
     submit()
-    await waitFor(() => expect(mocks.createUser).toHaveBeenCalledTimes(2))
-    expect(mocks.createUser.mock.calls[1][1]).not.toBe(mocks.createUser.mock.calls[0][1])
+    await screen.findByRole('alert')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reconciliar estado' }))
+    expect((await screen.findByRole('alert')).textContent).toContain('estado remoto')
+    fireEvent.click(screen.getByRole('button', { name: 'Reconciliar estado' }))
+    expect((await screen.findByRole('alert')).textContent).toContain('ainda não foi localizado')
+    expect((screen.getByRole('button', { name: 'Cancelar' }) as HTMLButtonElement).disabled)
+      .toBe(true)
+    expect(mocks.createUser).toHaveBeenCalledOnce()
   })
 
   it.each([
@@ -155,16 +223,40 @@ describe('CreateUserForm', () => {
     [new ApiResponseError(409, 'IDEMPOTENCY_KEY_REUSED'), 'tentativa é incompatível'],
   ])('maps terminal failure safely: %o', async (failure, message) => {
     mocks.createUser.mockRejectedValueOnce(failure)
-    render(<CreateUserForm onCreated={vi.fn()} onCancel={vi.fn()} />)
+    const { props } = renderForm()
     fill()
     submit()
     expect((await screen.findByRole('alert')).textContent).toContain(message)
+    expect((screen.getByRole('button', { name: 'Cancelar' }) as HTMLButtonElement).disabled)
+      .toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }))
+    expect(props.onCancel).toHaveBeenCalledOnce()
+  })
+
+  it('uses a new key for a new submission after a terminal result', async () => {
+    vi.spyOn(crypto, 'randomUUID')
+      .mockReturnValueOnce('00000000-0000-4000-8000-000000000020')
+      .mockReturnValueOnce('00000000-0000-4000-8000-000000000021')
+    mocks.createUser
+      .mockRejectedValueOnce(new ApiResponseError(409, 'EMAIL_ALREADY_EXISTS'))
+      .mockResolvedValueOnce(created)
+    renderForm()
+    fill()
+    submit()
+    await screen.findByRole('alert')
+    submit()
+
+    await waitFor(() => expect(mocks.createUser).toHaveBeenCalledTimes(2))
+    expect(mocks.createUser.mock.calls.map((call) => call[1])).toEqual([
+      '00000000-0000-4000-8000-000000000020',
+      '00000000-0000-4000-8000-000000000021',
+    ])
   })
 
   it('finishes the attempt after a successful invitation', async () => {
     mocks.createUser.mockResolvedValue(created)
     const onCreated = vi.fn()
-    render(<CreateUserForm onCreated={onCreated} onCancel={vi.fn()} />)
+    renderForm({ onCreated })
     fill()
     submit()
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith(created))
@@ -174,7 +266,7 @@ describe('CreateUserForm', () => {
     let resolve!: (value: typeof created) => void
     mocks.createUser.mockReturnValue(new Promise((done) => { resolve = done }))
     const onCreated = vi.fn()
-    const view = render(<CreateUserForm onCreated={onCreated} onCancel={vi.fn()} />)
+    const view = renderForm({ onCreated })
     fill()
     submit()
     view.unmount()

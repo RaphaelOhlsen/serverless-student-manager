@@ -15,6 +15,13 @@ type Props = {
   onCancel: () => void
 }
 
+type RoleChangeAttempt = {
+  snapshot: string
+  userId: string
+  body: { expectedVersion: number; role: AdminUser['role'] }
+  key: string
+}
+
 function roleChangeErrorMessage(error: unknown): string {
   if (error instanceof AuthSessionUnavailableError ||
       (error instanceof ApiResponseError && error.status === 401)) {
@@ -57,7 +64,8 @@ function endsAttempt(error: unknown): boolean {
 export function RoleChangeDialog({ user, onCompleted, onInvalidated, onCancel }: Props) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const attempt = useRef<{ snapshot: string; key: string } | null>(null)
+  const [hasPendingRecoverableIntent, setHasPendingRecoverableIntent] = useState(false)
+  const attempt = useRef<RoleChangeAttempt | null>(null)
   const inFlight = useRef(false)
   const current = useRef(false)
   const cancel = useRef(onCancel)
@@ -72,35 +80,53 @@ export function RoleChangeDialog({ user, onCompleted, onInvalidated, onCancel }:
     current.current = true
     confirmButton.current?.focus()
     function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === 'Escape' && !inFlight.current) cancel.current()
+      if (event.key === 'Escape' && !inFlight.current && !hasPendingRecoverableIntent) {
+        cancel.current()
+      }
     }
     document.addEventListener('keydown', closeOnEscape)
     return () => {
       current.current = false
       document.removeEventListener('keydown', closeOnEscape)
     }
-  }, [])
+  }, [hasPendingRecoverableIntent])
+
+  function requestCancel() {
+    if (inFlight.current || hasPendingRecoverableIntent) return
+    cancel.current()
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (inFlight.current) return
     const body = { expectedVersion: user.version, role: targetRole }
     const snapshot = JSON.stringify({ userId: user.userId, ...body })
-    if (attempt.current?.snapshot !== snapshot) {
-      attempt.current = { snapshot, key: crypto.randomUUID() }
+    if (attempt.current === null) {
+      attempt.current = { snapshot, userId: user.userId, body, key: crypto.randomUUID() }
     }
+    const currentAttempt = attempt.current
     inFlight.current = true
     setLoading(true)
     setError(null)
     try {
-      await changeUserRole(user.userId, body, attempt.current.key)
+      await changeUserRole(
+        currentAttempt.userId,
+        currentAttempt.body,
+        currentAttempt.key,
+      )
       if (!current.current) return
       attempt.current = null
+      setHasPendingRecoverableIntent(false)
       onCompleted(`Role de ${user.fullName} alterada para ${targetRole}.`)
     } catch (failure) {
       if (!current.current) return
       const message = roleChangeErrorMessage(failure)
-      if (endsAttempt(failure)) attempt.current = null
+      if (endsAttempt(failure)) {
+        attempt.current = null
+        setHasPendingRecoverableIntent(false)
+      } else {
+        setHasPendingRecoverableIntent(true)
+      }
       if (requiresRefresh(failure)) onInvalidated(message)
       else setError(message)
     } finally {
@@ -130,9 +156,12 @@ export function RoleChangeDialog({ user, onCompleted, onInvalidated, onCancel }:
           {loading ? <p className="auth-notice" role="status">Alterando role…</p> : null}
           <div className="dialog-actions">
             <Button ref={confirmButton} type="submit" disabled={loading}>
-              {loading ? 'Alterando…' : 'Confirmar alteração'}
+              {loading ? 'Alterando…' : hasPendingRecoverableIntent
+                ? 'Tentar novamente'
+                : 'Confirmar alteração'}
             </Button>
-            <Button type="button" variant="outline" disabled={loading} onClick={onCancel}>
+            <Button type="button" variant="outline"
+              disabled={loading || hasPendingRecoverableIntent} onClick={requestCancel}>
               Cancelar
             </Button>
           </div>

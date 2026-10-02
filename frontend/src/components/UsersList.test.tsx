@@ -179,6 +179,62 @@ describe('UsersList', () => {
     expect(screen.queryByRole('form', { name: 'Novo usuário' })).toBeNull()
   })
 
+  it('reconciles uncertain create through an exact remote email lookup before closing', async () => {
+    apiMocks.fetchUsers
+      .mockResolvedValueOnce({ items: [], nextCursor: null })
+      .mockResolvedValueOnce({ items: [invited], nextCursor: null })
+      .mockResolvedValueOnce({ items: [invited], nextCursor: null })
+    apiMocks.createUser.mockRejectedValueOnce(
+      new ApiResponseError(503, 'INVITATION_DELIVERY_UNCERTAIN'),
+    )
+    render(<UsersList />)
+    await screen.findByText('Nenhum usuário encontrado.')
+    fireEvent.click(screen.getByRole('button', { name: 'Novo usuário' }))
+    fillCreateUser()
+    fireEvent.submit(screen.getByRole('form', { name: 'Novo usuário' }))
+    await screen.findByRole('alert')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reconciliar estado' }))
+
+    await waitFor(() => expect(apiMocks.fetchUsers).toHaveBeenCalledWith({
+      limit: 1,
+      email: invited.email,
+      role: 'ALL',
+      status: 'ALL',
+    }))
+    expect(await screen.findByText('O usuário existe, mas a entrega do convite anterior permanece incerta.', {
+      exact: false,
+    })).toBeTruthy()
+    expect(screen.queryByRole('form', { name: 'Novo usuário' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Reenviar convite' })).toBeTruthy()
+    expect(apiMocks.createUser).toHaveBeenCalledOnce()
+  })
+
+  it('keeps uncertain create locked when exact remote reconciliation fails', async () => {
+    apiMocks.fetchUsers
+      .mockResolvedValueOnce({ items: [], nextCursor: null })
+      .mockRejectedValueOnce(new TypeError('lookup secret'))
+    apiMocks.createUser.mockRejectedValueOnce(
+      new ApiResponseError(503, 'INVITATION_DELIVERY_UNCERTAIN'),
+    )
+    render(<UsersList />)
+    await screen.findByText('Nenhum usuário encontrado.')
+    fireEvent.click(screen.getByRole('button', { name: 'Novo usuário' }))
+    fillCreateUser()
+    fireEvent.submit(screen.getByRole('form', { name: 'Novo usuário' }))
+    await screen.findByRole('alert')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reconciliar estado' }))
+
+    expect((await screen.findByText('Não foi possível reconciliar o estado remoto.', {
+      exact: false,
+    })).textContent).not.toContain('lookup secret')
+    expect(screen.getByRole('form', { name: 'Novo usuário' })).toBeTruthy()
+    expect((screen.getByRole('button', { name: 'Cancelar' }) as HTMLButtonElement).disabled)
+      .toBe(true)
+    expect(apiMocks.createUser).toHaveBeenCalledOnce()
+  })
+
   it('offers resend only for INVITED users and cancels before creating a key', async () => {
     apiMocks.fetchUsers.mockResolvedValueOnce({ items: [admin, invited], nextCursor: null })
     const uuid = vi.spyOn(crypto, 'randomUUID')
@@ -201,7 +257,7 @@ describe('UsersList', () => {
     render(<UsersList />)
     await openResendConfirmation()
     confirmResend()
-    fireEvent.click(screen.getByRole('button', { name: 'Confirmar reenvio' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Reenviando…' }))
 
     expect(apiMocks.resendUserInvitation).toHaveBeenCalledOnce()
     expect(apiMocks.resendUserInvitation).toHaveBeenCalledWith(
@@ -209,7 +265,7 @@ describe('UsersList', () => {
       { expectedVersion: invited.version },
       expect.stringMatching(/^[0-9a-f-]{36}$/),
     )
-    expect((screen.getByRole('button', { name: 'Confirmar reenvio' }) as HTMLButtonElement).disabled)
+    expect((screen.getByRole('button', { name: 'Reenviando…' }) as HTMLButtonElement).disabled)
       .toBe(true)
     await act(async () => resolve())
   })
@@ -226,6 +282,10 @@ describe('UsersList', () => {
     await openResendConfirmation()
     confirmResend()
     await screen.findByRole('alert')
+    expect((screen.getByRole('button', { name: 'Cancelar' }) as HTMLButtonElement).disabled)
+      .toBe(true)
+    expect((screen.getByRole('button', { name: 'Aplicar filtros' }) as HTMLButtonElement).disabled)
+      .toBe(true)
     fireEvent.click(screen.getByRole('button', { name: 'Tentar novamente' }))
 
     await waitFor(() => expect(apiMocks.resendUserInvitation).toHaveBeenCalledTimes(2))
@@ -234,7 +294,10 @@ describe('UsersList', () => {
     expect(screen.queryByText('network secret')).toBeNull()
   })
 
-  it('locks uncertain delivery and creates a new key only after explicit new intent', async () => {
+  it('reconciles uncertain delivery before allowing a new explicit intent', async () => {
+    vi.spyOn(crypto, 'randomUUID')
+      .mockReturnValueOnce('00000000-0000-4000-8000-000000000020')
+      .mockReturnValueOnce('00000000-0000-4000-8000-000000000021')
     apiMocks.fetchUsers.mockResolvedValue({ items: [invited], nextCursor: null })
     apiMocks.resendUserInvitation
       .mockRejectedValueOnce(new ApiResponseError(503, 'INVITATION_DELIVERY_UNCERTAIN'))
@@ -248,16 +311,111 @@ describe('UsersList', () => {
     expect(locked.disabled).toBe(true)
     fireEvent.click(locked)
     expect(apiMocks.resendUserInvitation).toHaveBeenCalledOnce()
+    expect(screen.queryByRole('button', { name: 'Tentar novamente' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Iniciar nova intenção' })).toBeNull()
+    expect((screen.getByRole('button', { name: 'Cancelar' }) as HTMLButtonElement).disabled)
+      .toBe(true)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Atualizar lista' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Reconciliar estado' }))
     await waitFor(() => expect(apiMocks.fetchUsers).toHaveBeenCalledTimes(2))
     expect(apiMocks.resendUserInvitation).toHaveBeenCalledOnce()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Iniciar nova intenção' }))
+    await openResendConfirmation()
     confirmResend()
     await waitFor(() => expect(apiMocks.resendUserInvitation).toHaveBeenCalledTimes(2))
-    expect(apiMocks.resendUserInvitation.mock.calls[1][2])
-      .not.toBe(apiMocks.resendUserInvitation.mock.calls[0][2])
+    expect(apiMocks.resendUserInvitation.mock.calls.map((call) => call[2])).toEqual([
+      '00000000-0000-4000-8000-000000000020',
+      '00000000-0000-4000-8000-000000000021',
+    ])
+  })
+
+  it('keeps uncertain resend locked when reconciliation refresh fails', async () => {
+    apiMocks.fetchUsers
+      .mockResolvedValueOnce({ items: [invited], nextCursor: null })
+      .mockRejectedValueOnce(new TypeError('offline'))
+    apiMocks.resendUserInvitation.mockRejectedValueOnce(
+      new ApiResponseError(503, 'INVITATION_DELIVERY_UNCERTAIN'),
+    )
+    render(<UsersList />)
+    await openResendConfirmation()
+    confirmResend()
+    await screen.findByRole('alert')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reconciliar estado' }))
+    expect((await screen.findByText('Não foi possível reconciliar o estado remoto.', {
+      exact: false,
+    })).textContent).not.toContain('offline')
+    expect(screen.getByText(`Confirmar reenvio do convite para ${invited.fullName}?`)).toBeTruthy()
+    expect((screen.getByRole('button', { name: 'Cancelar' }) as HTMLButtonElement).disabled)
+      .toBe(true)
+    expect(screen.queryByRole('button', { name: 'Reenviar convite' })).toBeNull()
+  })
+
+  it('removes resend after uncertain reconciliation returns a non-INVITED target', async () => {
+    const active = { ...invited, status: 'ACTIVE' as const, version: 2 }
+    apiMocks.fetchUsers
+      .mockResolvedValueOnce({ items: [invited], nextCursor: null })
+      .mockResolvedValueOnce({ items: [active], nextCursor: null })
+    apiMocks.resendUserInvitation.mockRejectedValueOnce(
+      new ApiResponseError(503, 'INVITATION_DELIVERY_UNCERTAIN'),
+    )
+    render(<UsersList />)
+    await openResendConfirmation()
+    confirmResend()
+    await screen.findByRole('alert')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reconciliar estado' }))
+
+    await waitFor(() => expect(apiMocks.fetchUsers).toHaveBeenCalledTimes(2))
+    expect(screen.queryByRole('button', { name: 'Reenviar convite' })).toBeNull()
+    expect(screen.getByText('Lista atualizada. O resultado do reenvio anterior permanece incerto.'))
+      .toBeTruthy()
+  })
+
+  it('freezes resend expectedVersion with its key across a prop change', async () => {
+    const changingUser = { ...invited }
+    apiMocks.fetchUsers.mockResolvedValueOnce({ items: [changingUser], nextCursor: null })
+    apiMocks.resendUserInvitation
+      .mockRejectedValueOnce(new TypeError('offline'))
+      .mockResolvedValueOnce(undefined)
+    const view = render(<UsersList />)
+    await openResendConfirmation()
+    confirmResend()
+    await screen.findByRole('alert')
+    const originalKey = apiMocks.resendUserInvitation.mock.calls[0][2]
+
+    changingUser.version += 1
+    view.rerender(<UsersList />)
+    fireEvent.click(screen.getByRole('button', { name: 'Tentar novamente' }))
+
+    await waitFor(() => expect(apiMocks.resendUserInvitation).toHaveBeenCalledTimes(2))
+    expect(apiMocks.resendUserInvitation.mock.calls[1]).toEqual([
+      invited.userId,
+      { expectedVersion: invited.version },
+      originalKey,
+    ])
+  })
+
+  it('keeps one resend key through repeated recoverable retries', async () => {
+    const key = '00000000-0000-4000-8000-000000000030'
+    const uuid = vi.spyOn(crypto, 'randomUUID').mockReturnValue(key)
+    apiMocks.fetchUsers.mockResolvedValueOnce({ items: [invited], nextCursor: null })
+    apiMocks.resendUserInvitation
+      .mockRejectedValueOnce(new TypeError('offline'))
+      .mockRejectedValueOnce(new ApiResponseError(503, 'INVITATION_DELIVERY_FAILED'))
+      .mockResolvedValueOnce(undefined)
+    render(<UsersList />)
+    await openResendConfirmation()
+    confirmResend()
+    await screen.findByRole('alert')
+    fireEvent.click(screen.getByRole('button', { name: 'Tentar novamente' }))
+    await screen.findByRole('alert')
+    fireEvent.click(screen.getByRole('button', { name: 'Tentar novamente' }))
+
+    await waitFor(() => expect(apiMocks.resendUserInvitation).toHaveBeenCalledTimes(3))
+    expect(apiMocks.resendUserInvitation.mock.calls.map((call) => call[2]))
+      .toEqual([key, key, key])
+    expect(uuid).toHaveBeenCalledOnce()
   })
 
   it.each([

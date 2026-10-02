@@ -80,12 +80,24 @@ function isUserConflict(error: unknown): boolean {
         (error.code === 'USER_VERSION_CONFLICT' || error.code === 'USER_STATE_CONFLICT')))
 }
 
+function endsResendAttempt(error: unknown): boolean {
+  return error instanceof AuthSessionUnavailableError ||
+    (error instanceof ApiResponseError && error.status >= 400 && error.status < 500 &&
+      !(error.status === 409 && error.code === 'OPERATION_IN_PROGRESS'))
+}
+
+type ResendAttempt = {
+  snapshot: { userId: string; expectedVersion: number }
+  key: string
+}
+
 type ResendInvitationControlProps = {
   user: AdminUser
   disabled: boolean
   onSuccess: () => void
   onConflict: (message: string) => void
-  onRefresh: () => void
+  onReconcile: () => Promise<boolean>
+  onIntentLock: (userId: string | null) => void
 }
 
 function ResendInvitationControl({
@@ -93,13 +105,16 @@ function ResendInvitationControl({
   disabled,
   onSuccess,
   onConflict,
-  onRefresh,
+  onReconcile,
+  onIntentLock,
 }: ResendInvitationControlProps) {
   const [confirming, setConfirming] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [deliveryUncertain, setDeliveryUncertain] = useState(false)
-  const idempotencyKey = useRef<string | null>(null)
+  const [hasPendingRecoverableIntent, setHasPendingRecoverableIntent] = useState(false)
+  const [reconciling, setReconciling] = useState(false)
+  const attempt = useRef<ResendAttempt | null>(null)
   const inFlight = useRef(false)
   const current = useRef(false)
 
@@ -110,19 +125,26 @@ function ResendInvitationControl({
 
   async function confirm() {
     if (inFlight.current || disabled || deliveryUncertain) return
-    idempotencyKey.current ??= crypto.randomUUID()
+    attempt.current ??= {
+      snapshot: { userId: user.userId, expectedVersion: user.version },
+      key: crypto.randomUUID(),
+    }
+    const currentAttempt = attempt.current
+    onIntentLock(currentAttempt.snapshot.userId)
     inFlight.current = true
     setLoading(true)
     setError(null)
     try {
       await resendUserInvitation(
-        user.userId,
-        { expectedVersion: user.version },
-        idempotencyKey.current,
+        currentAttempt.snapshot.userId,
+        { expectedVersion: currentAttempt.snapshot.expectedVersion },
+        currentAttempt.key,
       )
       if (!current.current) return
-      idempotencyKey.current = null
+      attempt.current = null
+      setHasPendingRecoverableIntent(false)
       setConfirming(false)
+      onIntentLock(null)
       onSuccess()
     } catch (failure) {
       if (!current.current) return
@@ -130,10 +152,19 @@ function ResendInvitationControl({
       setError(message)
       if (isDeliveryUncertain(failure)) {
         setDeliveryUncertain(true)
+        setHasPendingRecoverableIntent(false)
       } else if (isUserConflict(failure)) {
-        idempotencyKey.current = null
+        attempt.current = null
+        setHasPendingRecoverableIntent(false)
         setConfirming(false)
+        onIntentLock(null)
         onConflict(message)
+      } else if (endsResendAttempt(failure)) {
+        attempt.current = null
+        setHasPendingRecoverableIntent(false)
+        onIntentLock(null)
+      } else {
+        setHasPendingRecoverableIntent(true)
       }
     } finally {
       inFlight.current = false
@@ -142,16 +173,37 @@ function ResendInvitationControl({
   }
 
   function cancel() {
-    if (loading || disabled) return
-    idempotencyKey.current = null
+    if (inFlight.current || disabled || hasPendingRecoverableIntent || deliveryUncertain || reconciling) {
+      return
+    }
+    attempt.current = null
     setError(null)
     setConfirming(false)
+    onIntentLock(null)
   }
 
-  function startNewIntent() {
-    idempotencyKey.current = null
-    setDeliveryUncertain(false)
+  async function reconcileUncertain() {
+    if (!deliveryUncertain || reconciling) return
+    setReconciling(true)
     setError(null)
+    try {
+      const reconciled = await onReconcile()
+      if (!current.current) return
+      if (reconciled) {
+        attempt.current = null
+        setDeliveryUncertain(false)
+        setConfirming(false)
+        onIntentLock(null)
+      } else {
+        setError('Não foi possível reconciliar o estado remoto. Tente atualizar a lista novamente.')
+      }
+    } catch {
+      if (current.current) {
+        setError('Não foi possível reconciliar o estado remoto. Tente atualizar a lista novamente.')
+      }
+    } finally {
+      if (current.current) setReconciling(false)
+    }
   }
 
   if (!confirming) {
@@ -170,17 +222,18 @@ function ResendInvitationControl({
       {loading ? <p className="auth-notice" role="status">Reenviando convite…</p> : null}
       <Button type="button" disabled={loading || disabled || deliveryUncertain}
         onClick={() => { void confirm() }}>
-        {error && !deliveryUncertain ? 'Tentar novamente' : 'Confirmar reenvio'}
+        {loading ? 'Reenviando…' : hasPendingRecoverableIntent
+          ? 'Tentar novamente'
+          : 'Confirmar reenvio'}
       </Button>
       {deliveryUncertain ? (
-        <>
-          <Button type="button" variant="outline" disabled={loading || disabled}
-            onClick={onRefresh}>Atualizar lista</Button>
-          <Button type="button" variant="outline" disabled={loading || disabled}
-            onClick={startNewIntent}>Iniciar nova intenção</Button>
-        </>
+        <Button type="button" variant="outline" disabled={loading || disabled || reconciling}
+          onClick={() => { void reconcileUncertain() }}>
+          {reconciling ? 'Reconciliando…' : 'Reconciliar estado'}
+        </Button>
       ) : null}
-      <Button type="button" variant="outline" disabled={loading || disabled}
+      <Button type="button" variant="outline"
+        disabled={loading || disabled || hasPendingRecoverableIntent || deliveryUncertain || reconciling}
         onClick={cancel}>Cancelar</Button>
     </div>
   )
@@ -203,26 +256,33 @@ export function UsersList({ currentUserId }: UsersListProps) {
   const [showCreate, setShowCreate] = useState(false)
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null)
   const [creationMessage, setCreationMessage] = useState<string | null>(null)
+  const [resendIntentUserId, setResendIntentUserId] = useState<string | null>(null)
   const requestGeneration = useRef(0)
   const lastAttempt = useRef<Attempt>({ query: DEFAULT_QUERY, append: false })
 
-  const load = useCallback(async (query: UsersQuery, append: boolean) => {
+  const load = useCallback(async (
+    query: UsersQuery,
+    append: boolean,
+    preserveExistingOnError = false,
+  ): Promise<boolean> => {
     const generation = ++requestGeneration.current
     lastAttempt.current = { query, append }
     setIsLoading(true)
     setError(null)
     try {
       const page = await fetchUsers(query)
-      if (generation !== requestGeneration.current) return
+      if (generation !== requestGeneration.current) return false
       setUsers((current) => append ? [...current, ...page.items] : page.items)
       setNextCursor(page.nextCursor)
+      return true
     } catch (failure) {
-      if (generation !== requestGeneration.current) return
+      if (generation !== requestGeneration.current) return false
       setError(safeErrorMessage(failure))
-      if (!append) {
+      if (!append && !preserveExistingOnError) {
         setUsers([])
         setNextCursor(null)
       }
+      return false
     } finally {
       if (generation === requestGeneration.current) setIsLoading(false)
     }
@@ -270,6 +330,19 @@ export function UsersList({ currentUserId }: UsersListProps) {
     void load(appliedQuery, false)
   }
 
+  async function reconcileCreateUncertain(email: string): Promise<boolean> {
+    const page = await fetchUsers({ limit: 1, email, role: 'ALL', status: 'ALL' })
+    const found = page.items.some((user) => user.email.toLowerCase() === email.toLowerCase())
+    if (!found) return false
+    setShowCreate(false)
+    setCreationMessage(
+      'O usuário existe, mas a entrega do convite anterior permanece incerta. Use o reenvio de convite se ele continuar aguardando ativação.',
+    )
+    setNextCursor(null)
+    await load(appliedQuery, false)
+    return true
+  }
+
   function refreshAfterResend(message: string) {
     setCreationMessage(message)
     setNextCursor(null)
@@ -291,9 +364,10 @@ export function UsersList({ currentUserId }: UsersListProps) {
   return (
     <section className="users-directory" aria-label="Diretório de usuários">
       {showCreate ? (
-        <CreateUserForm onCancel={() => setShowCreate(false)} onCreated={userCreated} />
+        <CreateUserForm onCancel={() => setShowCreate(false)} onCreated={userCreated}
+          onReconcileUncertain={reconcileCreateUncertain} />
       ) : (
-        <Button type="button" onClick={() => {
+        <Button type="button" disabled={resendIntentUserId !== null} onClick={() => {
           setCreationMessage(null)
           setShowCreate(true)
         }}>Novo usuário</Button>
@@ -302,7 +376,7 @@ export function UsersList({ currentUserId }: UsersListProps) {
       <form className="users-filters" aria-label="Filtros de usuários" onSubmit={applyFilters}>
         <div className="form-field">
           <label htmlFor="user-search-mode">Buscar por</label>
-          <select id="user-search-mode" value={searchMode}
+          <select id="user-search-mode" value={searchMode} disabled={resendIntentUserId !== null}
             onChange={(event) => {
               setSearchMode(event.target.value as SearchMode)
               setSearchValue('')
@@ -314,12 +388,12 @@ export function UsersList({ currentUserId }: UsersListProps) {
         <div className="form-field users-search-field">
           <label htmlFor="user-search">{searchMode === 'name' ? 'Nome' : 'E-mail'}</label>
           <input id="user-search" type={searchMode === 'email' ? 'email' : 'search'}
-            value={searchValue}
+            value={searchValue} disabled={resendIntentUserId !== null}
             onChange={(event) => setSearchValue(event.target.value)} />
         </div>
         <div className="form-field">
           <label htmlFor="user-role-filter">Role</label>
-          <select id="user-role-filter" value={role}
+          <select id="user-role-filter" value={role} disabled={resendIntentUserId !== null}
             onChange={(event) => setRole(event.target.value as UserRoleFilter)}>
             <option value="ALL">Todas</option>
             <option value="ADMIN">ADMIN</option>
@@ -328,7 +402,7 @@ export function UsersList({ currentUserId }: UsersListProps) {
         </div>
         <div className="form-field">
           <label htmlFor="user-status-filter">Status</label>
-          <select id="user-status-filter" value={status}
+          <select id="user-status-filter" value={status} disabled={resendIntentUserId !== null}
             onChange={(event) => setStatus(event.target.value as UserStatusFilter)}>
             <option value="ALL">Todos</option>
             <option value="INVITED">INVITED</option>
@@ -336,7 +410,7 @@ export function UsersList({ currentUserId }: UsersListProps) {
             <option value="INACTIVE">INACTIVE</option>
           </select>
         </div>
-        <Button type="submit">Aplicar filtros</Button>
+        <Button type="submit" disabled={resendIntentUserId !== null}>Aplicar filtros</Button>
       </form>
 
       {isLoading && users.length === 0 ? (
@@ -345,7 +419,9 @@ export function UsersList({ currentUserId }: UsersListProps) {
       {error ? (
         <div className="students-feedback">
           <p className="auth-error" role="alert">{error}</p>
-          <Button type="button" onClick={retry}>Tentar novamente</Button>
+          <Button type="button" disabled={resendIntentUserId !== null} onClick={retry}>
+            Tentar novamente
+          </Button>
         </div>
       ) : null}
       {!isLoading && !error && users.length === 0 ? (
@@ -364,18 +440,27 @@ export function UsersList({ currentUserId }: UsersListProps) {
                 <span className="user-badge">{user.status}</span>
               </div>
               <Button type="button" variant="outline"
+                disabled={resendIntentUserId !== null}
                 onClick={() => setSelectedUserId(user.userId)}>
                 Ver detalhes
               </Button>
               {user.status === 'INVITED' ? (
                 <ResendInvitationControl
                   user={user}
-                  disabled={isLoading}
+                  disabled={isLoading || (resendIntentUserId !== null &&
+                    resendIntentUserId !== user.userId)}
                   onSuccess={() => refreshAfterResend('Convite reenviado com sucesso.')}
                   onConflict={(message) => refreshAfterResend(message)}
-                  onRefresh={() => refreshAfterResend(
-                    'Lista atualizada. O resultado do reenvio anterior permanece incerto.',
-                  )}
+                  onReconcile={async () => {
+                    const reconciled = await load(appliedQuery, false, true)
+                    if (!reconciled) return false
+                    setCreationMessage(
+                      'Lista atualizada. O resultado do reenvio anterior permanece incerto.',
+                    )
+                    setResendIntentUserId(null)
+                    return true
+                  }}
+                  onIntentLock={setResendIntentUserId}
                 />
               ) : null}
             </li>
@@ -383,7 +468,8 @@ export function UsersList({ currentUserId }: UsersListProps) {
         </ul>
       ) : null}
       {nextCursor && !error ? (
-        <Button type="button" variant="outline" disabled={isLoading} onClick={loadNextPage}>
+        <Button type="button" variant="outline"
+          disabled={isLoading || resendIntentUserId !== null} onClick={loadNextPage}>
           {isLoading ? 'Carregando…' : 'Carregar mais'}
         </Button>
       ) : null}

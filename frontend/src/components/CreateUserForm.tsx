@@ -78,15 +78,29 @@ function shouldEndAttempt(error: unknown): boolean {
 type Props = {
   onCreated: (user: CreatedAdminUser) => void
   onCancel: () => void
+  onReconcileUncertain: (email: string) => Promise<boolean>
   disabled?: boolean
 }
 
-export function CreateUserForm({ onCreated, onCancel, disabled = false }: Props) {
+type CreateAttempt = {
+  snapshot: string
+  payload: CreateUserRequest
+  key: string
+}
+
+export function CreateUserForm({
+  onCreated,
+  onCancel,
+  onReconcileUncertain,
+  disabled = false,
+}: Props) {
   const [fields, setFields] = useState<CreateUserRequest>(empty)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [deliveryUncertain, setDeliveryUncertain] = useState(false)
-  const attempt = useRef<{ snapshot: string; key: string } | null>(null)
+  const [hasPendingRecoverableIntent, setHasPendingRecoverableIntent] = useState(false)
+  const [reconciling, setReconciling] = useState(false)
+  const attempt = useRef<CreateAttempt | null>(null)
   const inFlight = useRef(false)
   const current = useRef(false)
 
@@ -98,26 +112,38 @@ export function CreateUserForm({ onCreated, onCancel, disabled = false }: Props)
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (inFlight.current || disabled || deliveryUncertain) return
-    const payload = normalize(fields)
-    const invalid = validate(fields, payload)
-    if (invalid) { setError(invalid); return }
-    const snapshot = JSON.stringify(payload)
-    if (attempt.current?.snapshot !== snapshot) {
-      attempt.current = { snapshot, key: crypto.randomUUID() }
+    if (attempt.current === null) {
+      const payload = normalize(fields)
+      const invalid = validate(fields, payload)
+      if (invalid) { setError(invalid); return }
+      attempt.current = {
+        snapshot: JSON.stringify(payload),
+        payload,
+        key: crypto.randomUUID(),
+      }
     }
+    const currentAttempt = attempt.current
     inFlight.current = true
     setLoading(true)
     setError(null)
     try {
-      const user = await createUser(payload, attempt.current.key)
+      const user = await createUser(currentAttempt.payload, currentAttempt.key)
       if (!current.current) return
       attempt.current = null
+      setHasPendingRecoverableIntent(false)
       onCreated(user)
     } catch (failure) {
       if (!current.current) return
       setError(messageFor(failure))
-      if (isUncertain(failure)) setDeliveryUncertain(true)
-      else if (shouldEndAttempt(failure)) attempt.current = null
+      if (isUncertain(failure)) {
+        setDeliveryUncertain(true)
+        setHasPendingRecoverableIntent(false)
+      } else if (shouldEndAttempt(failure)) {
+        attempt.current = null
+        setHasPendingRecoverableIntent(false)
+      } else {
+        setHasPendingRecoverableIntent(true)
+      }
     } finally {
       inFlight.current = false
       if (current.current) setLoading(false)
@@ -125,15 +151,36 @@ export function CreateUserForm({ onCreated, onCancel, disabled = false }: Props)
   }
 
   function cancel() {
+    if (inFlight.current || hasPendingRecoverableIntent || deliveryUncertain || reconciling) return
     attempt.current = null
     onCancel()
   }
 
-  function startNewIntent() {
-    attempt.current = null
-    setDeliveryUncertain(false)
+  async function reconcileUncertain() {
+    const email = attempt.current?.payload.email
+    if (!email || reconciling) return
+    setReconciling(true)
     setError(null)
+    try {
+      const found = await onReconcileUncertain(email)
+      if (!current.current) return
+      if (found) {
+        attempt.current = null
+        setDeliveryUncertain(false)
+      } else {
+        setError('O usuário ainda não foi localizado. Reconcile o estado novamente antes de iniciar outra criação.')
+      }
+    } catch {
+      if (current.current) {
+        setError('Não foi possível reconciliar o estado remoto. Tente novamente antes de iniciar outra criação.')
+      }
+    } finally {
+      if (current.current) setReconciling(false)
+    }
   }
+
+  const intentLocked = hasPendingRecoverableIntent || deliveryUncertain
+  const controlsDisabled = loading || disabled || intentLocked || reconciling
 
   return (
     <form className="auth-form" aria-label="Novo usuário" onSubmit={submit} noValidate>
@@ -141,35 +188,46 @@ export function CreateUserForm({ onCreated, onCancel, disabled = false }: Props)
       <div className="form-field">
         <label htmlFor="create-user-fullName">Nome completo</label>
         <input id="create-user-fullName" value={fields.fullName} required
-          disabled={loading || disabled}
-          onChange={(event) => setFields((old) => ({ ...old, fullName: event.target.value }))} />
+          disabled={controlsDisabled}
+          onChange={(event) => {
+            if (!controlsDisabled) {
+              setFields((old) => ({ ...old, fullName: event.target.value }))
+            }
+          }} />
       </div>
       <div className="form-field">
         <label htmlFor="create-user-email">E-mail</label>
         <input id="create-user-email" type="email" inputMode="email" value={fields.email}
-          required disabled={loading || disabled}
-          onChange={(event) => setFields((old) => ({ ...old, email: event.target.value }))} />
+          required disabled={controlsDisabled}
+          onChange={(event) => {
+            if (!controlsDisabled) setFields((old) => ({ ...old, email: event.target.value }))
+          }} />
       </div>
       <div className="form-field">
         <label htmlFor="create-user-role">Perfil</label>
-        <select id="create-user-role" value={fields.role} disabled={loading || disabled}
-          onChange={(event) => setFields((old) => ({
-            ...old, role: event.target.value as CreateUserRequest['role'],
-          }))}>
+        <select id="create-user-role" value={fields.role} disabled={controlsDisabled}
+          onChange={(event) => {
+            if (controlsDisabled) return
+            setFields((old) => ({
+              ...old, role: event.target.value as CreateUserRequest['role'],
+            }))
+          }}>
           <option value="OPERATOR">OPERATOR</option>
           <option value="ADMIN">ADMIN</option>
         </select>
       </div>
       {error ? <p className="auth-error" role="alert">{error}</p> : null}
       {loading ? <p className="auth-notice" role="status">Criando usuário e enviando convite…</p> : null}
-      <Button type="submit" disabled={loading || disabled || deliveryUncertain}>
-        Criar e convidar
+      <Button type="submit" disabled={loading || disabled || deliveryUncertain || reconciling}>
+        {loading ? 'Criando…' : hasPendingRecoverableIntent ? 'Tentar novamente' : 'Criar e convidar'}
       </Button>
       {deliveryUncertain ? (
         <Button type="button" variant="outline" disabled={loading || disabled}
-          onClick={startNewIntent}>Iniciar nova intenção</Button>
+          onClick={() => { void reconcileUncertain() }}>
+          {reconciling ? 'Reconciliando…' : 'Reconciliar estado'}
+        </Button>
       ) : null}
-      <Button type="button" variant="outline" disabled={loading || disabled}
+      <Button type="button" variant="outline" disabled={controlsDisabled}
         onClick={cancel}>Cancelar</Button>
     </form>
   )
