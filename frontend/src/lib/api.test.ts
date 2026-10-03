@@ -16,6 +16,7 @@ import {
   createUser,
   deactivateStudent,
   deactivateUser,
+  fetchAuditEvents,
   fetchStudent,
   updateStudent,
   authenticatedPost,
@@ -235,6 +236,150 @@ describe('users directory contract', () => {
     }), { status: 400 }))
     await expect(fetchUsers()).rejects.toMatchObject({
       status: 400, code: 'INVALID_REQUEST', message: 'API request failed with status 400',
+    })
+  })
+})
+
+describe('audit query contract', () => {
+  const event = {
+    eventId: 'event-1',
+    eventType: 'STUDENT_UPDATED',
+    resourceType: 'STUDENT',
+    resourceId: 'student-1',
+    actorId: 'admin-1',
+    occurredAt: '2026-09-02T10:00:00.000Z',
+    result: 'SUCCESS',
+    correlationId: 'correlation-1',
+  }
+  const page = { items: [event], nextCursor: 'opaque.payload.signature' }
+  const required = {
+    from: '2026-09-01T00:00:00.000Z',
+    to: '2026-09-02T00:00:00.000Z',
+  }
+
+  beforeEach(() => authMocks.fetchAuthSession.mockResolvedValue({
+    tokens: { accessToken: { toString: () => 'fake-access-token' } },
+  }))
+  afterEach(() => { vi.restoreAllMocks(); vi.clearAllMocks() })
+
+  it('uses authenticated GET and serializes every supported filter', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(page), { status: 200 }),
+    )
+    await expect(fetchAuditEvents({
+      ...required,
+      resourceType: 'STUDENT',
+      resourceId: 'student/1',
+      eventType: 'Student Updated',
+      actorId: 'admin+1',
+      result: 'SUCCESS',
+      correlationId: 'correlation=1',
+      limit: 25,
+      cursor: 'opaque.payload.signature',
+    })).resolves.toEqual(page)
+
+    const [request, init] = fetchMock.mock.calls[0] ?? []
+    const url = new URL(String(request))
+    expect(url.pathname).toBe('/audit-events')
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      from: required.from,
+      to: required.to,
+      resourceType: 'STUDENT',
+      resourceId: 'student/1',
+      eventType: 'Student Updated',
+      actorId: 'admin+1',
+      result: 'SUCCESS',
+      correlationId: 'correlation=1',
+      limit: '25',
+      cursor: 'opaque.payload.signature',
+    })
+    expect(init).toEqual({
+      method: 'GET', headers: { Authorization: 'Bearer fake-access-token' },
+    })
+  })
+
+  it('omits optional parameters and preserves second-precision UTC input', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ items: [], nextCursor: null }), { status: 200 }),
+    )
+    await fetchAuditEvents({
+      from: '2026-09-01T00:00:00Z',
+      to: '2026-09-01T01:00:00Z',
+    })
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      'https://api.example.test/audit-events?from=2026-09-01T00%3A00%3A00Z&to=2026-09-01T01%3A00%3A00Z',
+    )
+  })
+
+  it('keeps the cursor opaque while URLSearchParams encodes transport bytes', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(page), { status: 200 }),
+    )
+    const cursor = 'opaque+/=.payload-_'
+    await fetchAuditEvents({ ...required, cursor })
+    expect(new URL(String(fetchMock.mock.calls[0]?.[0])).searchParams.get('cursor')).toBe(cursor)
+  })
+
+  it.each([
+    { ...required, from: '2026-09-02T00:00:00.000Z', to: '2026-09-01T00:00:00.000Z' },
+    { from: '2025-01-01T00:00:00.000Z', to: '2026-01-03T00:00:00.000Z' },
+    { ...required, resourceId: 'student-1' },
+    { ...required, eventType: ' STUDENT_UPDATED' },
+    { ...required, actorId: 'admin\u0000' },
+    { ...required, correlationId: 'a'.repeat(513) },
+    { ...required, limit: 0 },
+    { ...required, limit: 101 },
+    { ...required, cursor: '' },
+  ])('rejects invalid query %o before authentication or HTTP', async (query) => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+    authMocks.fetchAuthSession.mockClear()
+    await expect(fetchAuditEvents(query)).rejects.toBeInstanceOf(TypeError)
+    expect(authMocks.fetchAuthSession).not.toHaveBeenCalled()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    { eventId: '' },
+    { resourceType: 'COURSE' },
+    { result: 'DENIED' },
+    { occurredAt: '2026-09-02T10:00:00Z' },
+    { actorId: 42 },
+  ])('rejects malformed public event %o', async (change) => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      ...page, items: [{ ...event, ...change }],
+    }), { status: 200 }))
+    await expect(fetchAuditEvents(required)).rejects.toBeInstanceOf(ApiResponseError)
+  })
+
+  it.each(['PK', 'SK', 'expiresAt', 'changes', 'reason', 'operationId', 'authVersion'])(
+    'rejects internal audit field %s',
+    async (field) => {
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+        ...page, items: [{ ...event, [field]: 'internal' }],
+      }), { status: 200 }))
+      await expect(fetchAuditEvents(required)).rejects.toBeInstanceOf(ApiResponseError)
+    },
+  )
+
+  it.each([
+    { items: 'invalid', nextCursor: null },
+    { items: [], nextCursor: 42 },
+    { items: [], nextCursor: null, internal: true },
+  ])('rejects malformed audit page %o', async (malformed) => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(malformed), { status: 200 }),
+    )
+    await expect(fetchAuditEvents(required)).rejects.toBeInstanceOf(ApiResponseError)
+  })
+
+  it('preserves only public status and code from an API error', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      code: 'INVALID_CURSOR', message: 'KMS internal detail', details: ['secret'],
+    }), { status: 400 }))
+    await expect(fetchAuditEvents(required)).rejects.toMatchObject({
+      status: 400,
+      code: 'INVALID_CURSOR',
+      message: 'API request failed with status 400',
     })
   })
 })
