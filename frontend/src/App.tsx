@@ -8,6 +8,7 @@ import {
 } from 'aws-amplify/auth'
 
 import { CreateStudentForm } from '@/components/CreateStudentForm'
+import { AuditViewer } from '@/components/AuditViewer'
 import { EditStudentForm } from '@/components/EditStudentForm'
 import {
   StudentLifecycleDialog,
@@ -42,7 +43,7 @@ type AuthView =
   | 'operational'
   | 'unsupported-step'
 
-type OperationalView = 'students' | 'users'
+type OperationalView = 'students' | 'users' | 'audit'
 
 const GENERIC_SIGN_IN_ERROR =
   'Não foi possível entrar. Verifique seus dados e tente novamente.'
@@ -888,8 +889,10 @@ function App() {
       setLifecycleError(null)
       void loadStudents(next)
     }
+    const visibleOperationalView = userProfile?.role === 'ADMIN' ? operationalView : 'students'
     function changeOperationalView(next: OperationalView) {
-      if (next === operationalView || (next === 'users' && userProfile?.role !== 'ADMIN')) return
+      if (next === visibleOperationalView ||
+          (next !== 'students' && userProfile?.role !== 'ADMIN')) return
       ++listGeneration.current
       ++editGeneration.current
       ++lifecycleGeneration.current
@@ -914,13 +917,16 @@ function App() {
             <div className="auth-heading">
               <p className="auth-eyebrow">Área operacional</p>
               <h1 id="operational-title">
-                {operationalView === 'students' ? 'Alunos' : 'Usuários'}
+                {visibleOperationalView === 'students' ? 'Alunos' :
+                  visibleOperationalView === 'users' ? 'Usuários' : 'Auditoria'}
               </h1>
               <p className="auth-description">
                 {userProfile?.fullName},{' '}
-                {operationalView === 'students'
+                {visibleOperationalView === 'students'
                   ? 'consulte os alunos cadastrados.'
-                  : 'consulte os usuários administrativos.'}
+                  : visibleOperationalView === 'users'
+                    ? 'consulte os usuários administrativos.'
+                    : 'consulte os eventos de auditoria.'}
               </p>
             </div>
             <Button
@@ -935,18 +941,26 @@ function App() {
 
           <nav className="operational-navigation" aria-label="Área operacional">
             <Button type="button"
-              variant={operationalView === 'students' ? 'default' : 'outline'}
-              aria-pressed={operationalView === 'students'}
+              variant={visibleOperationalView === 'students' ? 'default' : 'outline'}
+              aria-pressed={visibleOperationalView === 'students'}
               onClick={() => changeOperationalView('students')}>Alunos</Button>
             {userProfile?.role === 'ADMIN' ? (
+              <>
               <Button type="button"
-                variant={operationalView === 'users' ? 'default' : 'outline'}
-                aria-pressed={operationalView === 'users'}
+                variant={visibleOperationalView === 'users' ? 'default' : 'outline'}
+                aria-pressed={visibleOperationalView === 'users'}
                 onClick={() => changeOperationalView('users')}>Usuários</Button>
+              <Button type="button"
+                variant={visibleOperationalView === 'audit' ? 'default' : 'outline'}
+                aria-pressed={visibleOperationalView === 'audit'}
+                onClick={() => changeOperationalView('audit')}>Auditoria</Button>
+              </>
             ) : null}
           </nav>
 
-          {operationalView === 'users' && userProfile ? (
+          {visibleOperationalView === 'audit' && userProfile?.role === 'ADMIN' ? (
+            <AuditViewer key={session} />
+          ) : visibleOperationalView === 'users' && userProfile ? (
             <UsersList key={session} currentUserId={userProfile.userId} />
           ) : <>
           {showCreate ? (

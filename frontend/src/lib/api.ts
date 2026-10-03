@@ -46,6 +46,35 @@ export type UsersQuery = {
   status?: UserStatusFilter
 }
 
+export type AuditEvent = {
+  eventId: string
+  eventType: string
+  resourceType: 'STUDENT' | 'USER'
+  resourceId: string
+  actorId: string
+  occurredAt: string
+  result: 'SUCCESS' | 'FAILURE'
+  correlationId: string
+}
+
+export type AuditPage = {
+  items: AuditEvent[]
+  nextCursor: string | null
+}
+
+export type AuditQuery = {
+  from: string
+  to: string
+  resourceType?: AuditEvent['resourceType']
+  resourceId?: string
+  eventType?: string
+  actorId?: string
+  result?: AuditEvent['result']
+  correlationId?: string
+  limit?: number
+  cursor?: string
+}
+
 export type CreateUserRequest = {
   fullName: string
   email: string
@@ -232,6 +261,36 @@ export async function fetchUsers(query: UsersQuery = {}): Promise<UsersPage> {
   return value
 }
 
+export async function fetchAuditEvents(query: AuditQuery): Promise<AuditPage> {
+  validateAuditQuery(query)
+  const parameters = new URLSearchParams()
+  parameters.set('from', query.from)
+  parameters.set('to', query.to)
+  if (query.resourceType !== undefined) parameters.set('resourceType', query.resourceType)
+  if (query.resourceId !== undefined) parameters.set('resourceId', query.resourceId)
+  if (query.eventType !== undefined) parameters.set('eventType', query.eventType)
+  if (query.actorId !== undefined) parameters.set('actorId', query.actorId)
+  if (query.result !== undefined) parameters.set('result', query.result)
+  if (query.correlationId !== undefined) parameters.set('correlationId', query.correlationId)
+  if (query.limit !== undefined) parameters.set('limit', String(query.limit))
+  if (query.cursor !== undefined) parameters.set('cursor', query.cursor)
+
+  const response = await authenticatedGet(`/audit-events?${parameters.toString()}`)
+  let value: unknown
+  try {
+    value = await response.json()
+  } catch {
+    throw new ApiResponseError(response.status)
+  }
+  if (!response.ok || !isAuditPage(value)) {
+    throw new ApiResponseError(
+      response.status,
+      !response.ok ? publicErrorCode(value) : undefined,
+    )
+  }
+  return value
+}
+
 export async function fetchUser(userId: string): Promise<AdminUser> {
   const response = await authenticatedGet(`/users/${encodeURIComponent(userId)}`)
   let value: unknown
@@ -398,6 +457,74 @@ function isUsersPage(value: unknown): value is UsersPage {
   return isExactRecord(value, ['items', 'nextCursor']) &&
     Array.isArray(value.items) && value.items.every(isAdminUser) &&
     (value.nextCursor === null || isNonEmptyString(value.nextCursor))
+}
+
+function isAuditPage(value: unknown): value is AuditPage {
+  return isExactRecord(value, ['items', 'nextCursor']) &&
+    Array.isArray(value.items) && value.items.every(isAuditEvent) &&
+    (value.nextCursor === null || isNonEmptyString(value.nextCursor))
+}
+
+function isAuditEvent(value: unknown): value is AuditEvent {
+  const fields = [
+    'eventId', 'eventType', 'resourceType', 'resourceId', 'actorId',
+    'occurredAt', 'result', 'correlationId',
+  ]
+  return isExactRecord(value, fields) &&
+    isExactAuditValue(value.eventId) &&
+    isExactAuditValue(value.eventType) &&
+    (value.resourceType === 'STUDENT' || value.resourceType === 'USER') &&
+    isExactAuditValue(value.resourceId) &&
+    isExactAuditValue(value.actorId) &&
+    isTimestamp(value.occurredAt) &&
+    (value.result === 'SUCCESS' || value.result === 'FAILURE') &&
+    isExactAuditValue(value.correlationId)
+}
+
+function validateAuditQuery(query: AuditQuery): void {
+  if (!isCanonicalAuditTimestamp(query.from) || !isCanonicalAuditTimestamp(query.to)) {
+    throw new TypeError('Invalid audit date range')
+  }
+  const from = Date.parse(query.from)
+  const to = Date.parse(query.to)
+  if (from > to || to - from > 366 * 24 * 60 * 60 * 1000) {
+    throw new TypeError('Invalid audit date range')
+  }
+  if (query.resourceType !== undefined &&
+      query.resourceType !== 'STUDENT' && query.resourceType !== 'USER') {
+    throw new TypeError('Invalid audit resource type')
+  }
+  if (query.resourceId !== undefined && query.resourceType === undefined) {
+    throw new TypeError('Audit resource ID requires resource type')
+  }
+  if (query.result !== undefined && query.result !== 'SUCCESS' && query.result !== 'FAILURE') {
+    throw new TypeError('Invalid audit result')
+  }
+  for (const value of [
+    query.resourceId, query.eventType, query.actorId, query.correlationId,
+  ]) {
+    if (value !== undefined && !isExactAuditValue(value)) {
+      throw new TypeError('Invalid exact audit filter')
+    }
+  }
+  if (query.limit !== undefined &&
+      (!Number.isInteger(query.limit) || query.limit < 1 || query.limit > 100)) {
+    throw new TypeError('Invalid audit limit')
+  }
+  if (query.cursor === '') throw new TypeError('Invalid audit cursor')
+}
+
+function isCanonicalAuditTimestamp(value: unknown): value is string {
+  if (typeof value !== 'string' ||
+      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value) ||
+      value.startsWith('0000-')) return false
+  const normalized = value.includes('.') ? value : value.replace(/Z$/, '.000Z')
+  return Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === normalized
+}
+
+function isExactAuditValue(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value === value.trim() &&
+    new TextEncoder().encode(value).length <= 512 && !/\p{C}/u.test(value)
 }
 
 function isAdminUser(value: unknown): value is AdminUser {

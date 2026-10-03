@@ -16,6 +16,7 @@ const apiMocks = vi.hoisted(() => ({
   createStudent: vi.fn(),
   createUser: vi.fn(),
   deactivateStudent: vi.fn(),
+  fetchAuditEvents: vi.fn(),
   fetchCurrentUserProfile: vi.fn(),
   fetchStudent: vi.fn(),
   fetchStudents: vi.fn(),
@@ -47,6 +48,7 @@ vi.mock('@/lib/api', () => ({
       this.code = code
     }
   },
+  fetchAuditEvents: apiMocks.fetchAuditEvents,
   fetchCurrentUserProfile: apiMocks.fetchCurrentUserProfile,
   fetchStudent: apiMocks.fetchStudent,
   fetchStudents: apiMocks.fetchStudents,
@@ -227,27 +229,38 @@ describe('operational navigation', () => {
     apiMocks.fetchCurrentUserProfile.mockResolvedValue(activeProfile)
     apiMocks.fetchStudents.mockResolvedValue(studentsPage)
     apiMocks.fetchUsers.mockResolvedValue(usersPage)
+    apiMocks.fetchAuditEvents.mockResolvedValue({ items: [], nextCursor: null })
   })
   afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.clearAllMocks() })
 
-  it('shows Students and Users navigation to ADMIN and loads users on demand', async () => {
+  it('shows Students, Users and Audit navigation to ADMIN and loads on demand', async () => {
     render(<App />)
     expect(await screen.findByRole('button', { name: 'Alunos' })).toBeTruthy()
     const users = screen.getByRole('button', { name: 'Usuários' })
+    const audit = screen.getByRole('button', { name: 'Auditoria' })
     expect(users).toBeTruthy()
+    expect(audit).toBeTruthy()
     expect(apiMocks.fetchUsers).not.toHaveBeenCalled()
+    expect(apiMocks.fetchAuditEvents).not.toHaveBeenCalled()
     fireEvent.click(users)
     expect(await screen.findByText('Admin Diretório')).toBeTruthy()
     expect(apiMocks.fetchUsers).toHaveBeenCalledOnce()
+    fireEvent.click(audit)
+    expect(await screen.findByRole('heading', { name: 'Auditoria', level: 2 })).toBeTruthy()
+    expect(apiMocks.fetchAuditEvents).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Alunos' }))
+    expect(await screen.findByText('Aluno Exemplo')).toBeTruthy()
   })
 
-  it('does not expose Users or request it for OPERATOR', async () => {
+  it('does not expose ADMIN views or request them for OPERATOR', async () => {
     apiMocks.fetchCurrentUserProfile.mockResolvedValue({ ...activeProfile, role: 'OPERATOR' })
     render(<App />)
     expect(await screen.findByRole('button', { name: 'Alunos' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Usuários' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Auditoria' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Novo usuário' })).toBeNull()
     expect(apiMocks.fetchUsers).not.toHaveBeenCalled()
+    expect(apiMocks.fetchAuditEvents).not.toHaveBeenCalled()
     expect(apiMocks.createUser).not.toHaveBeenCalled()
   })
 
@@ -283,6 +296,40 @@ describe('operational navigation', () => {
     expect(await screen.findByRole('heading', { name: 'Acesse sua conta' })).toBeTruthy()
     await act(async () => resolveUsers(usersPage))
     expect(screen.queryByText('Admin Diretório')).toBeNull()
+  })
+
+  it('does not present a late Audit response after logout', async () => {
+    const auditPage = {
+      items: [{
+        eventId: 'event-late',
+        eventType: 'STUDENT_UPDATED',
+        resourceType: 'STUDENT',
+        resourceId: 'student-1',
+        actorId: activeProfile.userId,
+        occurredAt: '2026-09-01T12:00:00.000Z',
+        result: 'SUCCESS',
+        correlationId: 'correlation-1',
+      }],
+      nextCursor: null,
+    }
+    let resolveAudit!: (value: typeof auditPage) => void
+    apiMocks.fetchAuditEvents.mockReturnValueOnce(
+      new Promise((resolve) => { resolveAudit = resolve }),
+    )
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Auditoria' }))
+    fireEvent.change(screen.getByLabelText('Início'), {
+      target: { value: '2026-09-01T09:00' },
+    })
+    fireEvent.change(screen.getByLabelText('Fim'), {
+      target: { value: '2026-09-02T09:00' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Aplicar filtros' }))
+    await screen.findByText('Carregando auditoria…')
+    fireEvent.click(screen.getByRole('button', { name: 'Sair' }))
+    expect(await screen.findByRole('heading', { name: 'Acesse sua conta' })).toBeTruthy()
+    await act(async () => resolveAudit(auditPage))
+    expect(screen.queryByText('event-late')).toBeNull()
   })
 
   it('passes profile.userId to the administrative user self guard', async () => {
