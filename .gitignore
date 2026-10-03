@@ -8,6 +8,7 @@
 # Editors and operating systems
 .idea/
 .vscode/
+/docs/.obsidian/
 *.swp
 *.swo
 .DS_Store

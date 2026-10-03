@@ -8,6 +8,16 @@
 
 Este diretório é a fonte de verdade documental do **Serverless Student Manager**.
 
+## Navegação
+
+- [Mapa da documentação](serverless-student-manager-ordem-de-leitura.md)
+- [Arquitetura](architecture/architecture-overview.md)
+- [Requisitos](requirements/srs.md)
+- [ADRs e registro de decisões](decisions/decision-register.md)
+
+O diretório `docs/` pode ser aberto como um Vault do Obsidian opcional; os
+arquivos Markdown versionados continuam sendo a fonte canônica.
+
 O projeto demonstra a construção de uma aplicação serverless profissional na AWS utilizando:
 
 - React e TypeScript;
