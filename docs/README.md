@@ -1,8 +1,8 @@
 # Serverless Student Manager — Documentação canônica
 
-**Versão:** 2.9 — Engineering Ready
-**Data:** 2026-09-04
-**Status:** Engenharia em andamento — ADR-001 a ADR-030 aprovadas
+**Versão:** 3.0 — Frontend Functional Complete
+**Data:** 2026-10-04
+**Status:** Frontend funcional completo — engenharia do projeto continua
 
 ## Objetivo
 
@@ -58,18 +58,18 @@ Estão concluídos e aprovados:
 - criação transacional e idempotente de aluno;
 - ADR-001 a ADR-030.
 
-A implementação está em andamento. A ADR-025 possui implementação Python, CLI,
-workflow e Terraform declarativo da capacidade operacional em `dev`; os
-recursos IAM, o GitHub Environment e suas variables ainda não foram
-provisionados ou configurados, e a correção histórica não foi autorizada.
+O **Frontend Functional Milestone** está `COMPLETE` na baseline
+`5f6794974ff7ce062cde8ee949f97862f50abc4b`. As evidências, o escopo concluído e
+os itens de polish/DevOps explicitamente adiados estão no
+[registro formal de fechamento](FRONTEND-MILESTONE-CLOSURE.md).
+
+A engenharia do projeto continua além do marco funcional do frontend.
 
 ## Próximo marco
 
-1. implementar `POST /students` conforme a ADR-030;
-2. revisar e integrar rota, IAM mínimo, idempotência e auditoria;
-3. aplicar infraestrutura e publicar a `students-api` somente após autorização;
-4. validar a criação em `dev`;
-5. integrar o formulário de criação ao frontend.
+1. tratar separadamente os itens de polish adiados;
+2. planejar os itens de DevOps adiados, incluindo CI e E2E automatizado;
+3. continuar os demais marcos de engenharia sem reabrir o fechamento funcional.
 
 ## Estrutura documental
 
@@ -77,6 +77,7 @@ provisionados ou configurados, e a correção histórica não foi autorizada.
 docs/
 ├── README.md
 ├── DOCUMENTATION-VERSION.md
+├── FRONTEND-MILESTONE-CLOSURE.md
 ├── ENGINEERING-READINESS.md
 ├── AUDIT-REPORT.md
 ├── MANIFEST.md

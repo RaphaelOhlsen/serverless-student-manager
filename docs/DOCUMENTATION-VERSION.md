@@ -1,9 +1,9 @@
 # Versão documental canônica
 
 **Projeto:** Serverless Student Manager  
-**Versão:** 2.9 — Engineering Ready
-**Data:** 2026-09-04
-**Status:** Canônica — engenharia em andamento
+**Versão:** 3.0 — Frontend Functional Complete
+**Data:** 2026-10-04
+**Status:** Canônica — frontend funcional completo; engenharia do projeto continua
 
 ## Escopo desta versão
 
@@ -29,26 +29,21 @@ Esta versão consolida:
 - guia canônico de leitura;
 - manifesto com SHA-256.
 
-## Mudanças principais em relação à v2.8
+## Mudanças principais em relação à v2.9
 
-1. ADR-030 aprovada — contrato canônico de `POST /students`.
-2. Criação exige ADMIN/OPERATOR `ACTIVE`, JWT e `Idempotency-Key` UUID.
-3. Request, resposta `201`, normalização, validação e conflitos foram definidos.
-4. Perfil, reservas de matrícula/e-mail e `STUDENT_CREATED / SUCCESS` usam uma
-   única `TransactWriteItems`.
-5. As reservas usam `SK = UNIQUE`, garantem unicidade concorrente e referenciam
-   o `studentId`.
-6. O fluxo reutiliza ADR-012/Powertools, com replay exato e
-   `ClientRequestToken` determinístico.
-7. IAM mínimo da `students-api` deverá permitir somente a transação e o acesso
-   técnico necessário à idempotência, sem Cognito ou novos índices/tabelas.
+1. O marco funcional do frontend foi encerrado na baseline
+   `5f6794974ff7ce062cde8ee949f97862f50abc4b`.
+2. Auth, Students, Users Admin, Audit Viewer e a integração de navegação/sessão
+   possuem evidências automatizadas e E2E integradas aprovadas.
+3. O fechamento está registrado em `FRONTEND-MILESTONE-CLOSURE.md`.
+4. Polish visual/acessibilidade avançada e automações de DevOps permanecem
+   explicitamente adiados e não bloqueiam o marco funcional.
 
 ## Estado de implementação desta baseline
 
-A ADR-030 consolida somente a decisão documental. Backend, rota, IAM,
-infraestrutura, release, integração frontend e teste E2E de criação ainda não
-foram implementados ou executados por esta baseline.
+O frontend funcional está 100% concluído. Isso não declara o projeto inteiro
+como 100% concluído; a engenharia do projeto e os itens adiados continuam.
 
 ## Regra de precedência
 
-Esta versão substitui documentalmente a v2.8 como fonte de verdade para a engenharia.
+Esta versão substitui documentalmente a v2.9 como fonte de verdade para a engenharia.

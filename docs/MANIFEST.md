@@ -1,9 +1,9 @@
-# Manifesto do pacote canônico v2.9 — Engineering Ready
+# Manifesto do pacote canônico v3.0 — Frontend Functional Complete
 
 **Projeto:** Serverless Student Manager
-**Versão:** 2.9
-**Data:** 2026-09-28
-**Arquivos listados:** 65
+**Versão:** 3.0
+**Data:** 2026-10-04
+**Arquivos listados:** 66
 
 O próprio `MANIFEST.md` não é listado para evitar hash autorreferencial.
 
@@ -15,9 +15,10 @@ O próprio `MANIFEST.md` não é listado para evitar hash autorreferencial.
 | `CLAUDE.md` | `8d0c661384c9b8c101c9a64e688576ad6a08ac187c984d0ff114ca44cf410260` |
 | `RESTORE-INSTRUCTIONS.md` | `9f7d55d96f112e2bb50f73995f2ca42fbb5a4bbb5ba4b32fb54ba2beb6438e8d` |
 | `docs/AUDIT-REPORT.md` | `60eb194a127c553fcf6b9ebe991ab8ba403deebeead4bd49c284b00794e7e13f` |
-| `docs/DOCUMENTATION-VERSION.md` | `c720a20ab35e8b64456ec8697e42fdfbe6c03f44c4f1783921b6b5a61e2f0eee` |
+| `docs/DOCUMENTATION-VERSION.md` | `4188d6e73cff88f8baf458b64ac9390e2fc81b02d97df600b388d26e5cdb9471` |
 | `docs/ENGINEERING-READINESS.md` | `1a890640dbd850a116d57311e9afc5b2197b0b3c1bd6b6f8e30bfab90ebac36a` |
-| `docs/README.md` | `a6bd38ae75fe56ce43f4a3cc27f95d41639367dda36a9e21b588e3546aea6d54` |
+| `docs/FRONTEND-MILESTONE-CLOSURE.md` | `906ee878757b087e3458460194ad5cc9516d7c654eb53b43d022af47c4330984` |
+| `docs/README.md` | `7cf11b862f15689c3721601d91679f7e334e0a8516dfe38a3eba22eb299b4ea6` |
 | `docs/architecture/architecture-overview.md` | `2d07a3425ba5896f04bd570fcd3ca6050e0492f1693e0a0e0eb640ccf382fefb` |
 | `docs/architecture/data-model.md` | `d1ad9aad9f8a6f2fc9370023f125f85f3861a96532e578324ce85da26232c9b1` |
 | `docs/architecture/deployment-and-cicd.md` | `5a34bde2310a274fb62557a007695bddb8f73fe9a65b9ad6681fde6df3358b21` |
