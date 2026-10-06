@@ -1,8 +1,8 @@
 # Serverless Student Manager — Documentação canônica
 
-**Versão:** 3.1 — OpenAPI API Contract
+**Versão:** 3.2 — Frontend Hosting Infrastructure Declared
 **Data:** 2026-10-06
-**Status:** Contrato público OpenAPI versionado — engenharia do projeto continua
+**Status:** Hosting frontend declarado em Terraform — release ainda não implementada
 
 ## Objetivo
 
@@ -70,11 +70,18 @@ As 18 operações HTTP públicas atualmente implementadas estão versionadas em
 [`api/openapi.yaml`](api/openapi.yaml). O contrato representa os envelopes de
 erro legados e canônicos que coexistem no runtime, sem normalização retroativa.
 
+A infraestrutura de hosting do frontend em `dev` está declarada em Terraform:
+bucket S3 privado e versionado, CloudFront com OAC, HTTPS, security headers
+gerenciados, cache separado para assets fingerprinted e fallback controlado de
+SPA. A infraestrutura ainda não foi aplicada e o workflow de release ainda não
+foi criado.
+
 ## Próximo marco
 
-1. implementar hosting e release do frontend;
-2. adicionar CI do frontend, Playwright e smoke pós-deploy;
-3. continuar os marcos operacionais sem reabrir o fechamento funcional.
+1. implementar o workflow de release e rollback do frontend em `dev`;
+2. executar o primeiro deploy, smoke e validação de rollback;
+3. adicionar CI do frontend e Playwright;
+4. continuar os marcos operacionais sem reabrir o fechamento funcional.
 
 ## Estrutura documental
 

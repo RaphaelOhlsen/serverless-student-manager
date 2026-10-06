@@ -1,6 +1,6 @@
 # Infraestrutura, ambientes e CI/CD
 
-**Versão:** 2.8
+**Versão:** 3.2
 **Status:** Approved
 
 ## 1. Ambientes
@@ -155,6 +155,35 @@ GitHub Actions executa:
 
 Terraform não usa provisioners para essas ações.
 
+### 5.1 Hosting frontend declarado em `dev`
+
+O módulo `infra/modules/frontend_hosting` e sua composição em
+`infra/environments/dev` declaram:
+
+- bucket S3 privado, sem website hosting, com Block Public Access,
+  `BucketOwnerEnforced`, SSE-S3 e Versioning;
+- CloudFront como único caminho público, usando o domínio e certificado default;
+- Origin Access Control com assinatura SigV4 e bucket policy limitada ao ARN da
+  distribuição;
+- `SecurityHeadersPolicy` gerenciada pela AWS;
+- CloudFront Function no evento `viewer-request`, reescrevendo somente paths sem
+  extensão para `/index.html`; o comportamento `/assets/*` não usa essa função e
+  assets ausentes não são mascarados;
+- cache desabilitado para o entry point e rotas SPA, e cache de um ano para
+  assets fingerprinted em `/assets/*`;
+- outputs de bucket, distribuição e URL para o pipeline futuro;
+- policy mínima anexada à role existente
+  `student-manager-github-dev-deploy`, limitada a publicação/restauração de
+  objetos e invalidação da distribuição, sem `s3:DeleteObject`.
+
+Este estado é apenas **declarado/implementado em código**. Nenhum `terraform
+apply` ou deploy do frontend faz parte desta baseline. O workflow de release,
+smoke e rollback automático em `dev` será implementado na fase seguinte.
+
+CSP específica, domínio próprio, ACM, Route 53, WAF e hosting de `prod`
+permanecem fora deste incremento. A policy gerenciada de security headers é a
+proteção aprovada nesta fase.
+
 ## 6. Tags
 
 Tags:
@@ -189,3 +218,9 @@ Conforme ADR-020:
 - DynamoDB PITR restaura para nova tabela;
 - mudanças de dados devem preferir `expand-contract`;
 - rollback automático pós-smoke é limitado à release da aplicação dentro de workflow já aprovado.
+
+Para `dev`, ficou decidido que uma falha no smoke do futuro workflow de release
+acionará automaticamente a restauração da versão anterior de `index.html`,
+seguida de invalidação CloudFront e novo smoke. A infraestrutura desta baseline
+fornece Versioning e as permissões mínimas para esse fluxo, mas não implementa
+nem executa o workflow.

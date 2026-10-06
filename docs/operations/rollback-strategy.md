@@ -102,7 +102,12 @@ Nunca sobrescrever automaticamente a tabela ativa.
 
 ## Rollback automático por smoke failure
 
-Somente dentro de um deploy já aprovado de `prod`:
+Em `dev`, o futuro workflow de release executará rollback automático quando o
+smoke pós-deploy falhar. Essa automação foi decidida, mas ainda não está
+implementada nesta baseline de infraestrutura.
+
+Em `prod`, o rollback automático continua limitado a um deploy previamente
+aprovado:
 
 ```text
 deploy application
@@ -125,6 +130,10 @@ Se o segundo smoke falhar:
 - bloquear novas promoções;
 - alertar operação;
 - exigir intervenção humana.
+
+O rollback do frontend restaura a versão S3 anterior do `index.html`, preserva
+os assets fingerprinted de releases anteriores, invalida apenas os entry points
+necessários e nunca usa `sync --delete`.
 
 ## Compatibilidade de dados
 

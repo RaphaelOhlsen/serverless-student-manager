@@ -13,6 +13,36 @@ output "aws_region" {
   value       = var.aws_region
 }
 
+output "frontend_bucket_name" {
+  description = "Name of the private frontend S3 bucket."
+  value       = module.frontend_hosting.frontend_bucket_name
+}
+
+output "frontend_bucket_arn" {
+  description = "ARN of the private frontend S3 bucket."
+  value       = module.frontend_hosting.frontend_bucket_arn
+}
+
+output "frontend_cloudfront_distribution_id" {
+  description = "ID of the frontend CloudFront distribution."
+  value       = module.frontend_hosting.frontend_cloudfront_distribution_id
+}
+
+output "frontend_cloudfront_distribution_arn" {
+  description = "ARN of the frontend CloudFront distribution."
+  value       = module.frontend_hosting.frontend_cloudfront_distribution_arn
+}
+
+output "frontend_cloudfront_domain_name" {
+  description = "Default CloudFront domain name for the frontend."
+  value       = module.frontend_hosting.frontend_cloudfront_domain_name
+}
+
+output "frontend_url" {
+  description = "HTTPS URL of the frontend on the default CloudFront domain."
+  value       = module.frontend_hosting.frontend_url
+}
+
 output "students_table_name" {
   description = "Name of the students DynamoDB table."
   value       = module.student_store.table_name
