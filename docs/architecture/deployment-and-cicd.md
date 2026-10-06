@@ -1,6 +1,6 @@
 # Infraestrutura, ambientes e CI/CD
 
-**Versão:** 3.2
+**Versão:** 3.3
 **Status:** Approved
 
 ## 1. Ambientes
@@ -155,7 +155,7 @@ GitHub Actions executa:
 
 Terraform não usa provisioners para essas ações.
 
-### 5.1 Hosting frontend declarado em `dev`
+### 5.1 Hosting frontend implantado em `dev`
 
 O módulo `infra/modules/frontend_hosting` e sua composição em
 `infra/environments/dev` declaram:
@@ -176,9 +176,49 @@ O módulo `infra/modules/frontend_hosting` e sua composição em
   `student-manager-github-dev-deploy`, limitada a publicação/restauração de
   objetos e invalidação da distribuição, sem `s3:DeleteObject`.
 
-Este estado é apenas **declarado/implementado em código**. Nenhum `terraform
-apply` ou deploy do frontend faz parte desta baseline. O workflow de release,
-smoke e rollback automático em `dev` será implementado na fase seguinte.
+O hosting foi aplicado em `dev` e o plan pós-apply confirmou convergência sem
+drift. O bucket permanece privado e pode continuar vazio até o primeiro release.
+
+### 5.2 Release frontend automatizada em `dev`
+
+O workflow `.github/workflows/frontend-release.yml` está implementado e ainda
+não foi executado. Ele dispara automaticamente apenas para mudanças em
+`frontend/**` enviadas à `main` e também oferece `workflow_dispatch` na própria
+`main`. Alterações no workflow, helper, documentação ou Terraform não disparam o
+primeiro deploy por si só.
+
+O job usa OIDC com a role existente `student-manager-github-dev-deploy`. Não usa
+GitHub Environment porque o trust atual dessa role restringe o subject à ref
+`refs/heads/main`; associar um Environment mudaria o subject OIDC. O nome do
+bucket de state deve ser fornecido pela repository variable
+`TERRAFORM_STATE_BUCKET`. Depois do `terraform init`, todos os alvos de aplicação
+e as configurações públicas do Vite são obtidos por `terraform output`:
+
+- `frontend_bucket_name`;
+- `frontend_cloudfront_distribution_id`;
+- `frontend_cloudfront_domain_name`;
+- `frontend_url`;
+- `cognito_user_pool_id`;
+- `cognito_user_pool_client_id`;
+- `http_api_endpoint`.
+
+O build usa as três últimas configurações como
+`VITE_COGNITO_USER_POOL_ID`, `VITE_COGNITO_USER_POOL_CLIENT_ID` e
+`VITE_API_BASE_URL`. Elas são identificadores/URLs públicos incorporados ao
+bundle; nenhum segredo usa o prefixo `VITE_`.
+
+O helper `tools/frontend_release/release.py` captura a versão corrente de
+`index.html`, publica assets fingerprinted com cache imutável, publica os demais
+arquivos com cache conservador e envia `index.html` por último com `no-cache` e
+metadata `commit-sha`. Não usa exclusão nem `sync --delete`. Em seguida invalida
+somente `/` e `/index.html`, aguarda a invalidação e valida frontend, asset,
+security headers e `GET /health`.
+
+Se o smoke falhar e existir uma versão anterior, o helper copia essa versão S3
+de `index.html` para uma nova versão corrente, repete invalidação e smoke e mantém
+o workflow como failed. No primeiro release, a ausência de versão anterior é
+registrada como `ROLLBACK_NOT_AVAILABLE_FIRST_RELEASE`, sem excluir conteúdo.
+O primeiro release permanece reservado a gate operacional separado.
 
 CSP específica, domínio próprio, ACM, Route 53, WAF e hosting de `prod`
 permanecem fora deste incremento. A policy gerenciada de security headers é a
@@ -219,8 +259,7 @@ Conforme ADR-020:
 - mudanças de dados devem preferir `expand-contract`;
 - rollback automático pós-smoke é limitado à release da aplicação dentro de workflow já aprovado.
 
-Para `dev`, ficou decidido que uma falha no smoke do futuro workflow de release
-acionará automaticamente a restauração da versão anterior de `index.html`,
-seguida de invalidação CloudFront e novo smoke. A infraestrutura desta baseline
-fornece Versioning e as permissões mínimas para esse fluxo, mas não implementa
-nem executa o workflow.
+Para `dev`, o workflow implementado restaura automaticamente a versão anterior
+de `index.html` após falha de smoke, invalida os entry points e executa novo
+smoke. A release original continua marcada como failed mesmo quando a restauração
+recupera o serviço. O workflow ainda não foi executado nesta baseline.

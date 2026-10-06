@@ -1,0 +1,156 @@
+name: Frontend Release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "frontend/**"
+      - "!frontend/*.md"
+      - "!frontend/**/*.md"
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: frontend-release-dev
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release frontend to dev
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    env:
+      AWS_REGION: us-east-1
+      TERRAFORM_STATE_BUCKET: ${{ vars.TERRAFORM_STATE_BUCKET }}
+
+    steps:
+      - name: Checkout exact release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: "1.15.8"
+          terraform_wrapper: false
+
+      - name: Validate release configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "${TERRAFORM_STATE_BUCKET}" ]] || {
+            echo "Repository variable TERRAFORM_STATE_BUCKET is required." >&2
+            exit 1
+          }
+          [[ "${TERRAFORM_STATE_BUCKET}" != *$'\n'* && "${TERRAFORM_STATE_BUCKET}" != *$'\r'* ]] || {
+            echo "Repository variable TERRAFORM_STATE_BUCKET is invalid." >&2
+            exit 1
+          }
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          role-to-assume: arn:aws:iam::590183756378:role/student-manager-github-dev-deploy
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Read dev Terraform outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          aws_account_id="$(aws sts get-caller-identity --query Account --output text)"
+          terraform -chdir=infra/environments/dev init \
+            -input=false \
+            -no-color \
+            -backend-config="bucket=${TERRAFORM_STATE_BUCKET}" \
+            -backend-config="key=environments/dev/terraform.tfstate" \
+            -backend-config="region=${AWS_REGION}" \
+            -backend-config="use_lockfile=true" \
+            -backend-config="encrypt=true" \
+            -backend-config="allowed_account_ids=[\"${aws_account_id}\"]"
+
+          frontend_bucket_name="$(terraform -chdir=infra/environments/dev output -raw frontend_bucket_name)"
+          distribution_id="$(terraform -chdir=infra/environments/dev output -raw frontend_cloudfront_distribution_id)"
+          distribution_domain="$(terraform -chdir=infra/environments/dev output -raw frontend_cloudfront_domain_name)"
+          frontend_url="$(terraform -chdir=infra/environments/dev output -raw frontend_url)"
+          user_pool_id="$(terraform -chdir=infra/environments/dev output -raw cognito_user_pool_id)"
+          user_pool_client_id="$(terraform -chdir=infra/environments/dev output -raw cognito_user_pool_client_id)"
+          api_base_url="$(terraform -chdir=infra/environments/dev output -raw http_api_endpoint)"
+
+          required_outputs=(
+            frontend_bucket_name
+            distribution_id
+            distribution_domain
+            frontend_url
+            user_pool_id
+            user_pool_client_id
+            api_base_url
+          )
+          for output_name in "${required_outputs[@]}"; do
+            output_value="${!output_name}"
+            [[ -n "${output_value}" && "${output_value}" != "null" ]] || {
+              echo "Required Terraform output ${output_name} is absent." >&2
+              exit 1
+            }
+            [[ "${output_value}" != *$'\n'* && "${output_value}" != *$'\r'* ]] || {
+              echo "Required Terraform output ${output_name} is invalid." >&2
+              exit 1
+            }
+          done
+          [[ "${frontend_url}" == https://* && "${api_base_url}" == https://* ]] || {
+            echo "Frontend and API URLs must use HTTPS." >&2
+            exit 1
+          }
+
+          {
+            printf 'FRONTEND_BUCKET_NAME=%s\n' "${frontend_bucket_name}"
+            printf 'CLOUDFRONT_DISTRIBUTION_ID=%s\n' "${distribution_id}"
+            printf 'CLOUDFRONT_DOMAIN_NAME=%s\n' "${distribution_domain}"
+            printf 'FRONTEND_URL=%s\n' "${frontend_url}"
+            printf 'VITE_COGNITO_USER_POOL_ID=%s\n' "${user_pool_id}"
+            printf 'VITE_COGNITO_USER_POOL_CLIENT_ID=%s\n' "${user_pool_client_id}"
+            printf 'VITE_API_BASE_URL=%s\n' "${api_base_url}"
+          } >> "${GITHUB_ENV}"
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      - name: Publish, smoke, and rollback on failure
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/frontend_release/release.py \
+            --dist-dir frontend/dist \
+            --bucket "${FRONTEND_BUCKET_NAME}" \
+            --distribution-id "${CLOUDFRONT_DISTRIBUTION_ID}" \
+            --frontend-url "${FRONTEND_URL}" \
+            --api-base-url "${VITE_API_BASE_URL}" \
+            --commit-sha "${GITHUB_SHA}" \
+            --output-file "${GITHUB_OUTPUT}" \
+            --summary-file "${GITHUB_STEP_SUMMARY}"

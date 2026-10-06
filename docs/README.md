@@ -1,8 +1,8 @@
 # Serverless Student Manager — Documentação canônica
 
-**Versão:** 3.2 — Frontend Hosting Infrastructure Declared
+**Versão:** 3.3 — Frontend Release Automation Implemented
 **Data:** 2026-10-06
-**Status:** Hosting frontend declarado em Terraform — release ainda não implementada
+**Status:** Hosting frontend implantado em dev — release automatizada ainda não executada
 
 ## Objetivo
 
@@ -70,18 +70,18 @@ As 18 operações HTTP públicas atualmente implementadas estão versionadas em
 [`api/openapi.yaml`](api/openapi.yaml). O contrato representa os envelopes de
 erro legados e canônicos que coexistem no runtime, sem normalização retroativa.
 
-A infraestrutura de hosting do frontend em `dev` está declarada em Terraform:
+A infraestrutura de hosting do frontend em `dev` está implantada e convergente:
 bucket S3 privado e versionado, CloudFront com OAC, HTTPS, security headers
 gerenciados, cache separado para assets fingerprinted e fallback controlado de
-SPA. A infraestrutura ainda não foi aplicada e o workflow de release ainda não
-foi criado.
+SPA. O workflow de release, smoke e rollback automático está implementado, mas
+o primeiro deploy de conteúdo ainda não foi executado e o bucket pode permanecer
+vazio.
 
 ## Próximo marco
 
-1. implementar o workflow de release e rollback do frontend em `dev`;
-2. executar o primeiro deploy, smoke e validação de rollback;
-3. adicionar CI do frontend e Playwright;
-4. continuar os marcos operacionais sem reabrir o fechamento funcional.
+1. executar o primeiro deploy, smoke e validação de rollback em gate separado;
+2. adicionar CI do frontend e Playwright;
+3. continuar os marcos operacionais sem reabrir o fechamento funcional.
 
 ## Estrutura documental
 
