@@ -1,9 +1,9 @@
 # Versão documental canônica
 
 **Projeto:** Serverless Student Manager  
-**Versão:** 3.0 — Frontend Functional Complete
-**Data:** 2026-10-04
-**Status:** Canônica — frontend funcional completo; engenharia do projeto continua
+**Versão:** 3.1 — OpenAPI API Contract
+**Data:** 2026-10-06
+**Status:** Canônica — contrato público OpenAPI versionado; engenharia do projeto continua
 
 ## Escopo desta versão
 
@@ -28,22 +28,24 @@ Esta versão consolida:
 - runbooks operacionais;
 - guia canônico de leitura;
 - manifesto com SHA-256.
+- contrato público real das 18 operações HTTP em OpenAPI 3.1;
+- lint local e CI dedicado com Redocly, sem credenciais AWS ou deploy.
 
-## Mudanças principais em relação à v2.9
+## Mudanças principais em relação à v3.0
 
-1. O marco funcional do frontend foi encerrado na baseline
-   `5f6794974ff7ce062cde8ee949f97862f50abc4b`.
-2. Auth, Students, Users Admin, Audit Viewer e a integração de navegação/sessão
-   possuem evidências automatizadas e E2E integradas aprovadas.
-3. O fechamento está registrado em `FRONTEND-MILESTONE-CLOSURE.md`.
-4. Polish visual/acessibilidade avançada e automações de DevOps permanecem
-   explicitamente adiados e não bloqueiam o marco funcional.
+1. `docs/api/openapi.yaml` passa a versionar as 18 operações públicas reais.
+2. O contrato preserva `CanonicalError` e `LegacyError`, incluindo
+   `EMAIL_ALREADY_EXISTS` no runtime de Users.
+3. `redocly.yaml` aplica `recommended-strict` e o workflow dedicado executa lint
+   sem AWS, OIDC, deploy ou mutações externas.
+4. O marco funcional do frontend permanece encerrado e não foi reaberto.
 
 ## Estado de implementação desta baseline
 
-O frontend funcional está 100% concluído. Isso não declara o projeto inteiro
-como 100% concluído; a engenharia do projeto e os itens adiados continuam.
+O frontend funcional permanece 100% concluído e o contrato público da API está
+versionado. Isso não declara o projeto inteiro como 100% concluído; a engenharia
+do projeto e os itens adiados continuam.
 
 ## Regra de precedência
 
-Esta versão substitui documentalmente a v2.9 como fonte de verdade para a engenharia.
+Esta versão substitui documentalmente a v3.0 como fonte de verdade para a engenharia.

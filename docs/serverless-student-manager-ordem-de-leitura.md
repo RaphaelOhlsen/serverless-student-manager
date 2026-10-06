@@ -1,6 +1,6 @@
 # Serverless Student Manager — Ordem canônica de leitura
 
-**Versão:** 2.9 — Engineering Ready
+**Versão:** 3.1 — OpenAPI API Contract
 
 Antes de qualquer implementação, o Codex deve ler `../AGENTS.md`.
 
@@ -17,7 +17,11 @@ Antes de qualquer implementação, o Codex deve ler `../AGENTS.md`.
 6. `decisions/decision-register.md`
 7. `decisions/pending-decisions.md`
 
-## 3. ADRs
+## 3. Contrato público da API
+
+- `api/openapi.yaml`
+
+## 4. ADRs
 
 8. `decisions/adr/adr-001-monorepo.md`
 9. `decisions/adr/adr-002-frontend-hosting.md`
@@ -68,7 +72,7 @@ Para consulta exata de Student por matrícula, consultar também a
 Para a Audit Query API, consultar também a
 [ADR-037 — Contrato da Audit Query API](decisions/adr/adr-037-audit-query-api-contract.md) — Approved.
 
-## 4. Arquitetura consolidada
+## 5. Arquitetura consolidada
 
 38. `architecture/architecture-overview.md`
 39. `architecture/data-model.md`
@@ -77,7 +81,7 @@ Para a Audit Query API, consultar também a
 42. `architecture/observability.md`
 43. `architecture/diagrams.md`
 
-## 5. Operação
+## 6. Operação
 
 44. `operations/cognito-dynamodb-compensation.md`
 45. `operations/non-http-idempotency.md`
@@ -86,7 +90,7 @@ Para a Audit Query API, consultar também a
 48. `operations/sole-admin-mfa-recovery.md`
 49. `operations/rollback-strategy.md`
 
-## 6. Apoio e auditoria
+## 7. Apoio e auditoria
 
 50. `references.md`
 51. `AUDIT-REPORT.md`

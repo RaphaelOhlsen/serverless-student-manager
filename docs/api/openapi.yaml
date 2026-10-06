@@ -1,0 +1,520 @@
+openapi: 3.1.0
+info:
+  title: Serverless Student Manager API
+  version: 1.0.0
+  license:
+    name: Unlicensed
+    identifier: LicenseRef-Proprietary
+  description: |
+    Public contract for the implemented Students, Users and Audit APIs. Protected
+    operations require an Amazon Cognito access token and backend role/status checks.
+    Error envelopes intentionally reflect the current runtime: both CanonicalError
+    and LegacyError exist. API Gateway 401 responses have no guaranteed app envelope.
+tags:
+  - name: Health
+    description: Public service health endpoint.
+  - name: Students
+    description: Student creation, lookup, listing, update and lifecycle.
+  - name: Users
+    description: Self-profile and administrative user management.
+  - name: Audit
+    description: Administrative audit-event queries.
+servers:
+  - url: /
+    description: Current API origin.
+security:
+  - cognitoAccessToken: []
+paths:
+  /health:
+    get:
+      tags: [Health]
+      operationId: getHealth
+      summary: Check service health
+      security: []
+      responses:
+        '200':
+          description: Service is available.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }
+  /students:
+    get:
+      tags: [Students]
+      operationId: listStudents
+      summary: List students
+      parameters:
+        - $ref: '#/components/parameters/PageLimit20'
+        - $ref: '#/components/parameters/Cursor'
+        - { name: status, in: query, schema: { type: string, enum: [ACTIVE, INACTIVE, ALL], default: ACTIVE } }
+        - { name: namePrefix, in: query, schema: { type: string } }
+      responses:
+        '200': { $ref: '#/components/responses/StudentPage' }
+        '400': { $ref: '#/components/responses/LegacyBadRequest' }
+        '401': { $ref: '#/components/responses/GatewayUnauthorized' }
+        '403': { $ref: '#/components/responses/LegacyForbidden' }
+    post:
+      tags: [Students]
+      operationId: createStudent
+      summary: Create a student
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateStudentRequest' }
+      responses:
+        '201': { $ref: '#/components/responses/StudentCreated' }
+        '400': { $ref: '#/components/responses/CanonicalBadRequest' }
+        '401': { $ref: '#/components/responses/GatewayUnauthorized' }
+        '403': { $ref: '#/components/responses/CanonicalForbidden' }
+        '409': { $ref: '#/components/responses/CanonicalConflict' }
+        '500': { $ref: '#/components/responses/CanonicalInternalError' }
+  /students/{studentId}:
+    parameters: [{ $ref: '#/components/parameters/StudentId' }]
+    get:
+      tags: [Students]
+      operationId: getStudent
+      summary: Get a student by identifier
+      responses:
+        '200': { $ref: '#/components/responses/StudentOk' }
+        '401': { $ref: '#/components/responses/GatewayUnauthorized' }
+        '403': { $ref: '#/components/responses/LegacyForbidden' }
+        '404': { $ref: '#/components/responses/LegacyNotFound' }
+    patch:
+      tags: [Students]
+      operationId: updateStudent
+      summary: Partially update a student
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateStudentRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/StudentOk' }
+        '400': { $ref: '#/components/responses/CanonicalBadRequest' }
+        '401': { $ref: '#/components/responses/GatewayUnauthorized' }
+        '403': { $ref: '#/components/responses/CanonicalForbidden' }
+        '404': { $ref: '#/components/responses/CanonicalNotFound' }
+        '409': { $ref: '#/components/responses/CanonicalConflict' }
+        '500': { $ref: '#/components/responses/CanonicalInternalError' }
+  /students/by-registration/{registrationNumber}:
+    get:
+      tags: [Students]
+      operationId: getStudentByRegistration
+      summary: Get a student by exact registration number
+      parameters: [{ $ref: '#/components/parameters/RegistrationNumber' }]
+      responses:
+        '200': { $ref: '#/components/responses/StudentOk' }
+        '400': { $ref: '#/components/responses/CanonicalBadRequest' }
+        '401': { $ref: '#/components/responses/GatewayUnauthorized' }
+        '403': { $ref: '#/components/responses/CanonicalForbidden' }
+        '404': { $ref: '#/components/responses/CanonicalNotFound' }
+        '500': { $ref: '#/components/responses/CanonicalInternalError' }
+  /students/{studentId}/deactivation:
+    post:
+      tags: [Students]
+      operationId: deactivateStudent
+      summary: Deactivate a student
+      parameters:
+        - $ref: '#/components/parameters/StudentId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DeactivateStudentRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/StudentOk' }
+        '400': { $ref: '#/components/responses/CanonicalBadRequest' }
+        '401': { $ref: '#/components/responses/GatewayUnauthorized' }
+        '403': { $ref: '#/components/responses/CanonicalForbidden' }
+        '404': { $ref: '#/components/responses/CanonicalNotFound' }
+        '409': { $ref: '#/components/responses/CanonicalConflict' }
+        '500': { $ref: '#/components/responses/CanonicalInternalError' }
+  /students/{studentId}/reactivation:
+    post:
+      tags: [Students]
+      operationId: reactivateStudent
+      summary: Reactivate a student
+      parameters:
+        - $ref: '#/components/parameters/StudentId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody: { $ref: '#/components/requestBodies/ExpectedVersion' }
+      responses:
+        '200': { $ref: '#/components/responses/StudentOk' }
+        '400': { $ref: '#/components/responses/CanonicalBadRequest' }
+        '401': { $ref: '#/components/responses/GatewayUnauthorized' }
+        '403': { $ref: '#/components/responses/CanonicalForbidden' }
+        '404': { $ref: '#/components/responses/CanonicalNotFound' }
+        '409': { $ref: '#/components/responses/CanonicalConflict' }
+        '500': { $ref: '#/components/responses/CanonicalInternalError' }
+  /users/me:
+    get:
+      tags: [Users]
+      operationId: getCurrentUser
+      summary: Get the authenticated user's profile
+      responses:
+        '200': { $ref: '#/components/responses/SelfProfileOk' }
+        '400': { $ref: '#/components/responses/LegacyBadRequest' }
+        '401': { $ref: '#/components/responses/GatewayUnauthorized' }
+        '403': { $ref: '#/components/responses/LegacyForbidden' }
+        '500': { $ref: '#/components/responses/LegacyInternalError' }
+  /users/me/activation:
+    post:
+      tags: [Users]
+      operationId: activateCurrentUser
+      summary: Activate the authenticated user after first sign-in
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      responses:
+        '200': { $ref: '#/components/responses/SelfProfileOk' }
+        '400': { $ref: '#/components/responses/LegacyBadRequest' }
+        '401': { $ref: '#/components/responses/GatewayUnauthorized' }
+        '403': { $ref: '#/components/responses/LegacyForbidden' }
+        '409': { $ref: '#/components/responses/LegacyConflict' }
+        '500': { $ref: '#/components/responses/LegacyInternalError' }
+  /users:
+    get:
+      tags: [Users]
+      operationId: listUsers
+      summary: List administrative users
+      parameters:
+        - $ref: '#/components/parameters/PageLimit20'
+        - $ref: '#/components/parameters/Cursor'
+        - { name: namePrefix, in: query, schema: { type: string } }
+        - { name: email, in: query, schema: { type: string, format: email, maxLength: 254 } }
+        - { name: role, in: query, schema: { type: string, enum: [ADMIN, OPERATOR, ALL], default: ALL } }
+        - { name: status, in: query, schema: { type: string, enum: [INVITED, ACTIVE, INACTIVE, ALL], default: ALL } }
+      responses:
+        '200': { $ref: '#/components/responses/UserPage' }
+        '400': { $ref: '#/components/responses/LegacyBadRequest' }
+        '401': { $ref: '#/components/responses/GatewayUnauthorized' }
+        '403': { $ref: '#/components/responses/LegacyForbidden' }
+        '500': { $ref: '#/components/responses/LegacyInternalError' }
+    post:
+      tags: [Users]
+      operationId: createUser
+      summary: Create and invite an administrative user
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateUserRequest' }
+      responses:
+        '201': { $ref: '#/components/responses/UserCreated' }
+        '400': { $ref: '#/components/responses/LegacyBadRequest' }
+        '401': { $ref: '#/components/responses/GatewayUnauthorized' }
+        '403': { $ref: '#/components/responses/LegacyForbidden' }
+        '409': { $ref: '#/components/responses/LegacyConflict' }
+        '500': { $ref: '#/components/responses/LegacyInternalError' }
+        '503': { $ref: '#/components/responses/LegacyServiceUnavailable' }
+  /users/{userId}:
+    get:
+      tags: [Users]
+      operationId: getUser
+      summary: Get an administrative user
+      parameters: [{ $ref: '#/components/parameters/UserId' }]
+      responses:
+        '200': { $ref: '#/components/responses/UserOk' }
+        '400': { $ref: '#/components/responses/LegacyBadRequest' }
+        '401': { $ref: '#/components/responses/GatewayUnauthorized' }
+        '403': { $ref: '#/components/responses/LegacyForbidden' }
+        '404': { $ref: '#/components/responses/LegacyNotFound' }
+        '500': { $ref: '#/components/responses/LegacyInternalError' }
+  /users/{userId}/invitation/resend:
+    post:
+      tags: [Users]
+      operationId: resendUserInvitation
+      summary: Resend an administrative user's invitation
+      parameters: [{ $ref: '#/components/parameters/UserId' }, { $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody: { $ref: '#/components/requestBodies/ExpectedVersion' }
+      responses:
+        '204': { description: Invitation dispatch completed or replayed; no response body. }
+        '400': { $ref: '#/components/responses/LegacyBadRequest' }
+        '401': { $ref: '#/components/responses/GatewayUnauthorized' }
+        '403': { $ref: '#/components/responses/LegacyForbidden' }
+        '404': { $ref: '#/components/responses/LegacyNotFound' }
+        '409': { $ref: '#/components/responses/LegacyConflict' }
+        '500': { $ref: '#/components/responses/LegacyInternalError' }
+        '503': { $ref: '#/components/responses/LegacyServiceUnavailable' }
+  /users/{userId}/role-change:
+    post:
+      tags: [Users]
+      operationId: changeUserRole
+      summary: Change an administrative user's role
+      parameters: [{ $ref: '#/components/parameters/UserId' }, { $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RoleChangeRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/UserOk' }
+        '400': { $ref: '#/components/responses/LegacyBadRequest' }
+        '401': { $ref: '#/components/responses/GatewayUnauthorized' }
+        '403': { $ref: '#/components/responses/LegacyForbidden' }
+        '404': { $ref: '#/components/responses/LegacyNotFound' }
+        '409': { $ref: '#/components/responses/LegacyConflict' }
+        '500': { $ref: '#/components/responses/LegacyInternalError' }
+  /users/{userId}/deactivation:
+    post:
+      tags: [Users]
+      operationId: deactivateUser
+      summary: Deactivate an administrative user
+      parameters: [{ $ref: '#/components/parameters/UserId' }, { $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody: { $ref: '#/components/requestBodies/ExpectedVersion' }
+      responses:
+        '200': { $ref: '#/components/responses/UserOk' }
+        '400': { $ref: '#/components/responses/LegacyBadRequest' }
+        '401': { $ref: '#/components/responses/GatewayUnauthorized' }
+        '403': { $ref: '#/components/responses/LegacyForbidden' }
+        '404': { $ref: '#/components/responses/LegacyNotFound' }
+        '409': { $ref: '#/components/responses/LegacyConflict' }
+        '500': { $ref: '#/components/responses/LegacyInternalError' }
+        '503': { $ref: '#/components/responses/LegacyServiceUnavailable' }
+  /users/{userId}/reactivation:
+    post:
+      tags: [Users]
+      operationId: reactivateUser
+      summary: Reactivate an administrative user
+      parameters: [{ $ref: '#/components/parameters/UserId' }, { $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody: { $ref: '#/components/requestBodies/ExpectedVersion' }
+      responses:
+        '200': { $ref: '#/components/responses/UserOk' }
+        '400': { $ref: '#/components/responses/LegacyBadRequest' }
+        '401': { $ref: '#/components/responses/GatewayUnauthorized' }
+        '403': { $ref: '#/components/responses/LegacyForbidden' }
+        '404': { $ref: '#/components/responses/LegacyNotFound' }
+        '409': { $ref: '#/components/responses/LegacyConflict' }
+        '500': { $ref: '#/components/responses/LegacyInternalError' }
+        '503': { $ref: '#/components/responses/LegacyServiceUnavailable' }
+  /audit-events:
+    get:
+      tags: [Audit]
+      operationId: listAuditEvents
+      summary: Query audit events
+      parameters:
+        - { name: from, in: query, required: true, description: Inclusive RFC3339 UTC bound; interval maximum is 366 days., schema: { $ref: '#/components/schemas/UtcTimestamp' } }
+        - { name: to, in: query, required: true, description: Inclusive RFC3339 UTC bound., schema: { $ref: '#/components/schemas/UtcTimestamp' } }
+        - { name: resourceType, in: query, schema: { type: string, enum: [STUDENT, USER] } }
+        - { name: resourceId, in: query, description: Requires resourceType., schema: { type: string, minLength: 1, maxLength: 512 } }
+        - { name: eventType, in: query, schema: { type: string, minLength: 1, maxLength: 512 } }
+        - { name: actorId, in: query, schema: { type: string, minLength: 1, maxLength: 512 } }
+        - { name: result, in: query, schema: { type: string, enum: [SUCCESS, FAILURE] } }
+        - { name: correlationId, in: query, schema: { type: string, minLength: 1, maxLength: 512 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200': { $ref: '#/components/responses/AuditPage' }
+        '400': { $ref: '#/components/responses/CanonicalBadRequest' }
+        '401': { $ref: '#/components/responses/GatewayUnauthorized' }
+        '403': { $ref: '#/components/responses/CanonicalForbidden' }
+        '500': { $ref: '#/components/responses/CanonicalInternalError' }
+components:
+  securitySchemes:
+    cognitoAccessToken:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Amazon Cognito access token validated by the API Gateway JWT Authorizer.
+  parameters:
+    StudentId: { name: studentId, in: path, required: true, schema: { type: string } }
+    UserId: { name: userId, in: path, required: true, schema: { type: string } }
+    RegistrationNumber: { name: registrationNumber, in: path, required: true, schema: { type: string, pattern: '^[A-Z0-9-]{4,20}$' } }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Canonical lowercase UUID for this write intent.
+      schema: { type: string, format: uuid }
+    Cursor:
+      name: cursor
+      in: query
+      description: Opaque cursor returned by the same operation and filters.
+      schema: { type: string, minLength: 1 }
+    PageLimit20: { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+  requestBodies:
+    ExpectedVersion:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ExpectedVersionRequest' }
+  schemas:
+    Health:
+      type: object
+      additionalProperties: false
+      required: [status, service]
+      properties: { status: { type: string, const: ok }, service: { type: string } }
+    StudentStatus: { type: string, enum: [ACTIVE, INACTIVE] }
+    StudentSummary:
+      type: object
+      additionalProperties: false
+      required: [studentId, registrationNumber, fullName, status]
+      properties:
+        studentId: { type: string }
+        registrationNumber: { type: string }
+        fullName: { type: string }
+        status: { $ref: '#/components/schemas/StudentStatus' }
+    Student:
+      type: object
+      additionalProperties: false
+      required: [studentId, registrationNumber, fullName, studentEmail, phone, birthDate, status, version, createdAt, updatedAt]
+      properties:
+        studentId: { type: string, format: uuid }
+        registrationNumber: { type: string, pattern: '^[A-Z0-9-]{4,20}$' }
+        fullName: { type: string, minLength: 2, maxLength: 150 }
+        studentEmail: { type: string, format: email, maxLength: 254 }
+        phone: { type: string, pattern: '^\+[1-9][0-9]{7,14}$' }
+        birthDate: { type: string, format: date }
+        status: { $ref: '#/components/schemas/StudentStatus' }
+        version: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    StudentPage:
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor, hasMore]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/StudentSummary' } }
+        nextCursor: { type: [string, 'null'] }
+        hasMore: { type: boolean }
+    CreateStudentRequest:
+      type: object
+      additionalProperties: false
+      required: [fullName, registrationNumber, studentEmail, phone, birthDate]
+      properties:
+        fullName: { type: string, minLength: 2, maxLength: 150 }
+        registrationNumber: { type: string, pattern: '^[A-Z0-9-]{4,20}$' }
+        studentEmail: { type: string, format: email, maxLength: 254 }
+        phone: { type: string, pattern: '^\+[1-9][0-9]{7,14}$' }
+        birthDate: { type: string, format: date }
+    UpdateStudentRequest:
+      type: object
+      additionalProperties: false
+      required: [expectedVersion]
+      anyOf: [{ required: [fullName] }, { required: [studentEmail] }, { required: [phone] }, { required: [birthDate] }]
+      properties:
+        expectedVersion: { type: integer, minimum: 1 }
+        fullName: { type: string, minLength: 2, maxLength: 150 }
+        studentEmail: { type: string, format: email, maxLength: 254 }
+        phone: { type: string, pattern: '^\+[1-9][0-9]{7,14}$' }
+        birthDate: { type: string, format: date }
+    DeactivateStudentRequest:
+      type: object
+      additionalProperties: false
+      required: [expectedVersion, reason]
+      properties:
+        expectedVersion: { type: integer, minimum: 1 }
+        reason: { type: string, minLength: 5, maxLength: 300 }
+    ExpectedVersionRequest:
+      type: object
+      additionalProperties: false
+      required: [expectedVersion]
+      properties: { expectedVersion: { type: integer, minimum: 1 } }
+    UserRole: { type: string, enum: [ADMIN, OPERATOR] }
+    UserStatus: { type: string, enum: [INVITED, ACTIVE, INACTIVE] }
+    User:
+      type: object
+      additionalProperties: false
+      required: [userId, fullName, email, role, status, version, createdAt, updatedAt]
+      properties:
+        userId: { type: string }
+        fullName: { type: string, minLength: 2, maxLength: 150 }
+        email: { type: string, format: email, maxLength: 254 }
+        role: { $ref: '#/components/schemas/UserRole' }
+        status: { $ref: '#/components/schemas/UserStatus' }
+        version: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    SelfProfile:
+      type: object
+      additionalProperties: false
+      required: [userId, fullName, email, role, status, authVersion]
+      properties:
+        userId: { type: string }
+        fullName: { type: string }
+        email: { type: string, format: email }
+        role: { $ref: '#/components/schemas/UserRole' }
+        status: { type: string, enum: [INVITED, ACTIVE] }
+        authVersion: { type: integer, minimum: 1 }
+    UserPage:
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/User' } }
+        nextCursor: { type: [string, 'null'] }
+    CreateUserRequest:
+      type: object
+      additionalProperties: false
+      required: [fullName, email, role]
+      properties:
+        fullName: { type: string, minLength: 2, maxLength: 150 }
+        email: { type: string, format: email, maxLength: 254 }
+        role: { $ref: '#/components/schemas/UserRole' }
+    RoleChangeRequest:
+      type: object
+      additionalProperties: false
+      required: [expectedVersion, role]
+      properties:
+        expectedVersion: { type: integer, minimum: 1 }
+        role: { $ref: '#/components/schemas/UserRole' }
+    UtcTimestamp: { type: string, format: date-time, pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$' }
+    AuditEvent:
+      type: object
+      additionalProperties: false
+      required: [eventId, eventType, resourceType, resourceId, actorId, occurredAt, result, correlationId]
+      properties:
+        eventId: { type: string }
+        eventType: { type: string }
+        resourceType: { type: string, enum: [STUDENT, USER] }
+        resourceId: { type: string }
+        actorId: { type: string }
+        occurredAt: { $ref: '#/components/schemas/UtcTimestamp' }
+        result: { type: string, enum: [SUCCESS, FAILURE] }
+        correlationId: { type: string }
+    AuditPage:
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/AuditEvent' } }
+        nextCursor: { type: [string, 'null'] }
+    CanonicalError:
+      type: object
+      additionalProperties: false
+      required: [code, message, correlationId, details]
+      properties:
+        code: { type: string }
+        message: { type: string }
+        correlationId: { type: string }
+        details: { type: array, items: {} }
+    LegacyError:
+      type: object
+      additionalProperties: false
+      required: [error, message]
+      properties: { error: { type: string }, message: { type: string } }
+  responses:
+    StudentOk: { description: 'Student returned, including no-op or replay where applicable.', content: { application/json: { schema: { $ref: '#/components/schemas/Student' } } } }
+    StudentCreated: { description: Student created or completed request replayed., content: { application/json: { schema: { $ref: '#/components/schemas/Student' } } } }
+    StudentPage: { description: Page of student summaries., content: { application/json: { schema: { $ref: '#/components/schemas/StudentPage' } } } }
+    UserOk: { description: Administrative user returned., content: { application/json: { schema: { $ref: '#/components/schemas/User' } } } }
+    UserCreated: { description: User created and invitation confirmed., content: { application/json: { schema: { $ref: '#/components/schemas/User' } } } }
+    UserPage: { description: Page of administrative users., content: { application/json: { schema: { $ref: '#/components/schemas/UserPage' } } } }
+    SelfProfileOk: { description: Current user profile., content: { application/json: { schema: { $ref: '#/components/schemas/SelfProfile' } } } }
+    AuditPage: { description: Events ordered by occurredAt and eventId descending., content: { application/json: { schema: { $ref: '#/components/schemas/AuditPage' } } } }
+    GatewayUnauthorized: { description: Unauthorized; an API Gateway response has no guaranteed application envelope. }
+    CanonicalBadRequest: { description: Invalid request or cursor., content: { application/json: { schema: { $ref: '#/components/schemas/CanonicalError' } } } }
+    CanonicalForbidden: { description: Forbidden., content: { application/json: { schema: { $ref: '#/components/schemas/CanonicalError' } } } }
+    CanonicalNotFound: { description: Student not found., content: { application/json: { schema: { $ref: '#/components/schemas/CanonicalError' } } } }
+    CanonicalConflict: { description: 'Version, uniqueness, idempotency, or in-progress conflict.', content: { application/json: { schema: { $ref: '#/components/schemas/CanonicalError' } } } }
+    CanonicalInternalError: { description: Unexpected internal error., content: { application/json: { schema: { $ref: '#/components/schemas/CanonicalError' } } } }
+    LegacyBadRequest: { description: Invalid request., content: { application/json: { schema: { $ref: '#/components/schemas/LegacyError' } } } }
+    LegacyForbidden: { description: Forbidden., content: { application/json: { schema: { $ref: '#/components/schemas/LegacyError' } } } }
+    LegacyNotFound: { description: Resource not found., content: { application/json: { schema: { $ref: '#/components/schemas/LegacyError' } } } }
+    LegacyConflict: { description: Conflict. User email conflicts use EMAIL_ALREADY_EXISTS., content: { application/json: { schema: { $ref: '#/components/schemas/LegacyError' } } } }
+    LegacyInternalError: { description: Unexpected internal error., content: { application/json: { schema: { $ref: '#/components/schemas/LegacyError' } } } }
+    LegacyServiceUnavailable:
+      description: User reconciliation or invitation delivery is unavailable; applicable codes include INVITATION_DELIVERY_FAILED, INVITATION_DELIVERY_UNCERTAIN, USER_DEACTIVATION_RECONCILIATION_REQUIRED, and USER_REACTIVATION_RECONCILIATION_REQUIRED.
+      content: { application/json: { schema: { $ref: '#/components/schemas/LegacyError' } } }

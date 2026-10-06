@@ -1,0 +1,6 @@
+docs/api/openapi.yaml:
+  no-ambiguous-paths:
+    - '#/paths/~1students~1{studentId}~1deactivation'
+    - '#/paths/~1students~1{studentId}~1reactivation'
+  operation-4xx-response:
+    - '#/paths/~1health/get/responses'
