@@ -1,8 +1,8 @@
 # Serverless Student Manager — Documentação canônica
 
-**Versão:** 3.0 — Frontend Functional Complete
-**Data:** 2026-10-04
-**Status:** Frontend funcional completo — engenharia do projeto continua
+**Versão:** 3.1 — OpenAPI API Contract
+**Data:** 2026-10-06
+**Status:** Contrato público OpenAPI versionado — engenharia do projeto continua
 
 ## Objetivo
 
@@ -14,6 +14,7 @@ Este diretório é a fonte de verdade documental do **Serverless Student Manager
 - [Arquitetura](architecture/architecture-overview.md)
 - [Requisitos](requirements/srs.md)
 - [ADRs e registro de decisões](decisions/decision-register.md)
+- [Contrato público OpenAPI 3.1](api/openapi.yaml)
 
 O diretório `docs/` pode ser aberto como um Vault do Obsidian opcional; os
 arquivos Markdown versionados continuam sendo a fonte canônica.
@@ -65,17 +66,23 @@ os itens de polish/DevOps explicitamente adiados estão no
 
 A engenharia do projeto continua além do marco funcional do frontend.
 
+As 18 operações HTTP públicas atualmente implementadas estão versionadas em
+[`api/openapi.yaml`](api/openapi.yaml). O contrato representa os envelopes de
+erro legados e canônicos que coexistem no runtime, sem normalização retroativa.
+
 ## Próximo marco
 
-1. tratar separadamente os itens de polish adiados;
-2. planejar os itens de DevOps adiados, incluindo CI e E2E automatizado;
-3. continuar os demais marcos de engenharia sem reabrir o fechamento funcional.
+1. implementar hosting e release do frontend;
+2. adicionar CI do frontend, Playwright e smoke pós-deploy;
+3. continuar os marcos operacionais sem reabrir o fechamento funcional.
 
 ## Estrutura documental
 
 ```text
 docs/
 ├── README.md
+├── api/
+│   └── openapi.yaml
 ├── DOCUMENTATION-VERSION.md
 ├── FRONTEND-MILESTONE-CLOSURE.md
 ├── ENGINEERING-READINESS.md
