@@ -23,6 +23,67 @@ module "identity" {
   user_pool_client_name = "serverless-student-manager-dev-web"
 }
 
+module "frontend_hosting" {
+  source = "../../modules/frontend_hosting"
+
+  bucket_name       = "${local.project_name}-${local.environment}-frontend-${var.aws_account_id}"
+  distribution_name = "${local.project_name}-${local.environment}-frontend"
+
+  data_classification = "public"
+
+  tags = local.common_tags
+}
+
+data "aws_iam_policy_document" "frontend_application_release" {
+  statement {
+    sid    = "ListFrontendReleaseBucket"
+    effect = "Allow"
+
+    actions = [
+      "s3:ListBucket",
+    ]
+
+    resources = [
+      module.frontend_hosting.frontend_bucket_arn,
+    ]
+  }
+
+  statement {
+    sid    = "PublishAndRestoreFrontendObjects"
+    effect = "Allow"
+
+    actions = [
+      "s3:GetObject",
+      "s3:GetObjectVersion",
+      "s3:PutObject",
+    ]
+
+    resources = [
+      "${module.frontend_hosting.frontend_bucket_arn}/*",
+    ]
+  }
+
+  statement {
+    sid    = "InvalidateFrontendDistribution"
+    effect = "Allow"
+
+    actions = [
+      "cloudfront:CreateInvalidation",
+      "cloudfront:GetInvalidation",
+    ]
+
+    resources = [
+      module.frontend_hosting.frontend_cloudfront_distribution_arn,
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "frontend_application_release" {
+  name   = "student-manager-dev-frontend-application-release"
+  role   = "student-manager-github-dev-deploy"
+  policy = data.aws_iam_policy_document.frontend_application_release.json
+}
+
 data "aws_iam_policy_document" "students_api" {
   statement {
     sid    = "ReadStudentProfiles"

@@ -43,6 +43,18 @@ override_module {
 }
 
 override_module {
+  target = module.frontend_hosting
+  outputs = {
+    frontend_bucket_name                 = "serverless-student-manager-dev-frontend-123456789012"
+    frontend_bucket_arn                  = "arn:aws:s3:::serverless-student-manager-dev-frontend-123456789012"
+    frontend_cloudfront_distribution_id  = "E1234567890ABC"
+    frontend_cloudfront_distribution_arn = "arn:aws:cloudfront::123456789012:distribution/E1234567890ABC"
+    frontend_cloudfront_domain_name      = "d1234567890abc.cloudfront.net"
+    frontend_url                         = "https://d1234567890abc.cloudfront.net"
+  }
+}
+
+override_module {
   target = module.students_api
   outputs = {
     function_name      = "serverless-student-manager-dev-students-api"
@@ -205,6 +217,35 @@ override_data {
 }
 
 override_data {
+  target = data.aws_iam_policy_document.frontend_application_release
+  values = {
+    json = jsonencode({
+      Version = "2012-10-17"
+      Statement = [
+        {
+          Sid      = "ListFrontendReleaseBucket"
+          Effect   = "Allow"
+          Action   = "s3:ListBucket"
+          Resource = "arn:aws:s3:::serverless-student-manager-dev-frontend-123456789012"
+        },
+        {
+          Sid      = "PublishAndRestoreFrontendObjects"
+          Effect   = "Allow"
+          Action   = ["s3:GetObject", "s3:GetObjectVersion", "s3:PutObject"]
+          Resource = "arn:aws:s3:::serverless-student-manager-dev-frontend-123456789012/*"
+        },
+        {
+          Sid      = "InvalidateFrontendDistribution"
+          Effect   = "Allow"
+          Action   = ["cloudfront:CreateInvalidation", "cloudfront:GetInvalidation"]
+          Resource = "arn:aws:cloudfront::123456789012:distribution/E1234567890ABC"
+        },
+      ]
+    })
+  }
+}
+
+override_data {
   target          = module.resume_first_admin_invitation_operational_access.data.aws_iam_policy_document.trust
   override_during = plan
   values = {
@@ -281,6 +322,95 @@ override_resource {
   override_during = plan
   values = {
     arn = "arn:aws:iam::123456789012:policy/student-manager-dev-verify-first-admin-email"
+  }
+}
+
+run "plans_frontend_release_access" {
+  command = plan
+
+  assert {
+    condition     = aws_iam_role_policy.frontend_application_release.role == "student-manager-github-dev-deploy"
+    error_message = "Frontend release permissions must extend only the existing dev deployment role."
+  }
+
+  assert {
+    condition     = length(data.aws_iam_policy_document.frontend_application_release.statement) == 3
+    error_message = "The frontend release policy must contain exactly three semantic statements."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.frontend_application_release.statement : statement.actions
+      if statement.sid == "ListFrontendReleaseBucket"
+    ])) == toset(["s3:ListBucket"])
+    error_message = "Bucket access must contain only ListBucket."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.frontend_application_release.statement : statement.resources
+      if statement.sid == "ListFrontendReleaseBucket"
+    ])) == toset([module.frontend_hosting.frontend_bucket_arn])
+    error_message = "ListBucket must target only the frontend bucket."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.frontend_application_release.statement : statement.actions
+      if statement.sid == "PublishAndRestoreFrontendObjects"
+      ])) == toset([
+      "s3:GetObject",
+      "s3:GetObjectVersion",
+      "s3:PutObject",
+    ])
+    error_message = "Object access must contain only the approved publish and rollback actions."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.frontend_application_release.statement : statement.resources
+      if statement.sid == "PublishAndRestoreFrontendObjects"
+    ])) == toset(["${module.frontend_hosting.frontend_bucket_arn}/*"])
+    error_message = "Object permissions must target only frontend bucket objects."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.frontend_application_release.statement : statement.actions
+      if statement.sid == "InvalidateFrontendDistribution"
+      ])) == toset([
+      "cloudfront:CreateInvalidation",
+      "cloudfront:GetInvalidation",
+    ])
+    error_message = "CloudFront access must contain only invalidation creation and reads."
+  }
+
+  assert {
+    condition = toset(one([
+      for statement in data.aws_iam_policy_document.frontend_application_release.statement : statement.resources
+      if statement.sid == "InvalidateFrontendDistribution"
+    ])) == toset([module.frontend_hosting.frontend_cloudfront_distribution_arn])
+    error_message = "CloudFront permissions must target only the frontend distribution."
+  }
+
+  assert {
+    condition = alltrue(flatten([
+      for statement in data.aws_iam_policy_document.frontend_application_release.statement : [
+        for action in statement.actions : action != "s3:DeleteObject" && !endswith(action, ":*")
+      ]
+    ]))
+    error_message = "The frontend release policy must not grant DeleteObject or wildcard actions."
+  }
+
+  assert {
+    condition = (
+      output.frontend_bucket_name == "serverless-student-manager-dev-frontend-123456789012" &&
+      output.frontend_cloudfront_distribution_id == "E1234567890ABC" &&
+      output.frontend_cloudfront_distribution_arn == "arn:aws:cloudfront::123456789012:distribution/E1234567890ABC" &&
+      output.frontend_cloudfront_domain_name == "d1234567890abc.cloudfront.net" &&
+      output.frontend_url == "https://d1234567890abc.cloudfront.net"
+    )
+    error_message = "The dev root must expose the approved frontend hosting outputs."
   }
 }
 
