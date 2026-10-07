@@ -86,8 +86,16 @@ declara o projeto inteiro como 100% concluído.
 
 ### DEVOPS_DEFERRED
 
+No fechamento funcional de 2026-10-04, permaneceram deferred:
+
 - CI específico para `frontend/**`;
 - Playwright/E2E automatizado;
 - pipeline automatizado de deploy frontend.
 
-Esses itens permanecem separados e não impedem o fechamento funcional do frontend.
+O pipeline automatizado de deploy foi implementado e exercitado posteriormente,
+sem reabrir este milestone funcional. O primeiro release real em `dev` foi
+concluído com sucesso em 2026-10-07 e está registrado em
+[Frontend Release Milestone Closure](FRONTEND-RELEASE-MILESTONE-CLOSURE.md).
+
+CI específico para `frontend/**` e Playwright/E2E automatizado amplo continuam
+separados deste fechamento, salvo evidência posterior específica.

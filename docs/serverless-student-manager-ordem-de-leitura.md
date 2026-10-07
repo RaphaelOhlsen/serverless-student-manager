@@ -1,6 +1,6 @@
 # Serverless Student Manager — Ordem canônica de leitura
 
-**Versão:** 3.3 — Frontend Release Automation Implemented
+**Versão:** 3.4 — Frontend First Release Completed
 
 Antes de qualquer implementação, o Codex deve ler `../AGENTS.md`.
 
@@ -10,6 +10,12 @@ Antes de qualquer implementação, o Codex deve ler `../AGENTS.md`.
 2. `DOCUMENTATION-VERSION.md`
 3. `ENGINEERING-READINESS.md`
 4. `overview.md`
+
+Fechamentos de frontend:
+
+- `FRONTEND-MILESTONE-CLOSURE.md` — fechamento funcional;
+- `FRONTEND-RELEASE-MILESTONE-CLOSURE.md` — hosting, automação e primeiro
+  release real em `dev`.
 
 ## 2. Requisitos e governança
 
