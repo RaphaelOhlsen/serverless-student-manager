@@ -145,6 +145,7 @@ variables {
 
   cors_allow_origins = [
     "http://localhost:5173",
+    "https://d1234567890abc.cloudfront.net",
   ]
 
   cors_allow_methods = [
@@ -201,11 +202,24 @@ run "plans_http_api" {
   }
 
   assert {
-    condition = contains(
+    condition = alltrue([
+      for origin in [
+        "http://localhost:5173",
+        "https://d1234567890abc.cloudfront.net",
+        ] : contains(
+        one(aws_apigatewayv2_api.this.cors_configuration).allow_origins,
+        origin
+      )
+    ])
+    error_message = "The HTTP API CORS configuration must allow local and CloudFront frontend origins."
+  }
+
+  assert {
+    condition = !contains(
       one(aws_apigatewayv2_api.this.cors_configuration).allow_origins,
-      "http://localhost:5173"
+      "*"
     )
-    error_message = "The HTTP API CORS configuration must allow the configured frontend origin."
+    error_message = "The HTTP API CORS configuration must not allow a wildcard origin."
   }
 
   assert {
