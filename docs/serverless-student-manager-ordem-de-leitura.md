@@ -1,6 +1,6 @@
 # Serverless Student Manager — Ordem canônica de leitura
 
-**Versão:** 3.1 — OpenAPI API Contract
+**Versão:** 3.3 — Frontend Release Automation Implemented
 
 Antes de qualquer implementação, o Codex deve ler `../AGENTS.md`.
 

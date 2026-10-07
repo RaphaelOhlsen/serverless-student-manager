@@ -1,7 +1,7 @@
-# Manifesto do pacote canônico v3.2 — Frontend Hosting Infrastructure Declared
+# Manifesto do pacote canônico v3.3 — Frontend Release Automation Implemented
 
 **Projeto:** Serverless Student Manager
-**Versão:** 3.2
+**Versão:** 3.3
 **Data:** 2026-10-06
 **Arquivos listados:** 67
 
@@ -15,14 +15,14 @@ O próprio `MANIFEST.md` não é listado para evitar hash autorreferencial.
 | `CLAUDE.md` | `8d0c661384c9b8c101c9a64e688576ad6a08ac187c984d0ff114ca44cf410260` |
 | `RESTORE-INSTRUCTIONS.md` | `9f7d55d96f112e2bb50f73995f2ca42fbb5a4bbb5ba4b32fb54ba2beb6438e8d` |
 | `docs/AUDIT-REPORT.md` | `60eb194a127c553fcf6b9ebe991ab8ba403deebeead4bd49c284b00794e7e13f` |
-| `docs/DOCUMENTATION-VERSION.md` | `1ec52c819a464fc18ce6bb43ac55ab5304614a8f66c321156dd52a60832549ac` |
+| `docs/DOCUMENTATION-VERSION.md` | `4f638f12efbc922fb1c0504f12d8d802fb0be171fe26e64531636f080c85678f` |
 | `docs/ENGINEERING-READINESS.md` | `1a890640dbd850a116d57311e9afc5b2197b0b3c1bd6b6f8e30bfab90ebac36a` |
 | `docs/FRONTEND-MILESTONE-CLOSURE.md` | `906ee878757b087e3458460194ad5cc9516d7c654eb53b43d022af47c4330984` |
-| `docs/README.md` | `ab59d84c24369e6941cb980f7805fd7a84a58efc09992789eda28aaed216eb04` |
+| `docs/README.md` | `d879802b3a2477253138c433cd1f24de6b5e79f0f747b6aa8f178665ad2bc580` |
 | `docs/api/openapi.yaml` | `13606d5b04b60c6821cce607d945a9b9f8d582cf6b22485817514b927c472989` |
 | `docs/architecture/architecture-overview.md` | `2d07a3425ba5896f04bd570fcd3ca6050e0492f1693e0a0e0eb640ccf382fefb` |
 | `docs/architecture/data-model.md` | `d1ad9aad9f8a6f2fc9370023f125f85f3861a96532e578324ce85da26232c9b1` |
-| `docs/architecture/deployment-and-cicd.md` | `cb32b0496b780434e38b3500f5810eb4612d0028c536218ed4003f81a8f1d999` |
+| `docs/architecture/deployment-and-cicd.md` | `1e5a8eef9fd0811ba9c9c447d1e5b730835de7dcfd0b13f557eff9d14664b3e4` |
 | `docs/architecture/diagrams.md` | `c6d18b9af0cb28f495bb1e86fb785b73da81a63cf508a13716dd9d706b1965cc` |
 | `docs/architecture/observability.md` | `164ea0d7a1c1a0e4005f58c6cb7d68e175b39d3b0f1d7bb65ad5c94f6f143f0b` |
 | `docs/architecture/security.md` | `afa0ce38f52e6981d24835d0bfb24a2970a33e6baf4f34e3cca10fd329d1a0f1` |
@@ -63,12 +63,12 @@ O próprio `MANIFEST.md` não é listado para evitar hash autorreferencial.
 | `docs/operations/first-admin-email-verification.md` | `f067eb2b1bbea6d453d542b67fbf6d9d8a86504c2c293f5e035786518480150d` |
 | `docs/operations/first-admin-invitation-resume.md` | `33213a038e5f7400b09cb88cba7f19c75be248ac860b1bccd6af762153f6679a` |
 | `docs/operations/non-http-idempotency.md` | `3734ceb6968b2c6ee998bcfbb690bb3899c5dd86551a309b05b21b72bb4d6a96` |
-| `docs/operations/rollback-strategy.md` | `49b7221a27f1d9930325fd0ef4a45ddd57c0eadc373d6bb39e16e3dfdcb36cd7` |
+| `docs/operations/rollback-strategy.md` | `3d73baa078208f268d3700ea3d558133ac92dc652754f67a2f47efabf6af191b` |
 | `docs/operations/sole-admin-mfa-recovery.md` | `30dce5d37c002be252e16509fd43afa0e26f38ad2e05453eb0656cee0ff24797` |
 | `docs/overview.md` | `99c0311d0a7f4993b3bf5e715e3da7e455b20959dc33d0e1d8f6968ca7e29e97` |
 | `docs/references.md` | `f86b0ea29df69ea0ba5e6bad78e6dc661cad6ee24dc45bcc63222fd6735ff236` |
 | `docs/requirements/srs.md` | `f9382e5a292d585d4703f2b335aa56c809506db096b7268ddede95a01217f96e` |
-| `docs/serverless-student-manager-ordem-de-leitura.md` | `81f5f9edc80aa7addee803f0b580080ae418f775a52eccf4faf176066220002d` |
+| `docs/serverless-student-manager-ordem-de-leitura.md` | `80dd3e443f66fa8765482a152c68bb9ec8fb72542dad6497b156b684185f18b6` |
 | `docs/serverless-student-manager-ordem-de-leitura.png` | `0243000a218ca8860a10c45b0eeb21a02195664f9c4da1eacb1f8abf9ceed611` |
 | `docs/decisions/adr/adr-031-agentic-development-harness.md` | `6d0215e41b58547365c7ceb7dd0c9724f1c28f71a9ac43ded7ecb0cbec7e0e5a` |
 | `docs/operations/agentic-development-harness-v1.md` | `835bdc169af5e0076f9618aa38e21129ff0a25cce7c5d14ec609ddbe5fbd6bb5` |

@@ -102,9 +102,20 @@ Nunca sobrescrever automaticamente a tabela ativa.
 
 ## Rollback automático por smoke failure
 
-Em `dev`, o futuro workflow de release executará rollback automático quando o
-smoke pós-deploy falhar. Essa automação foi decidida, mas ainda não está
-implementada nesta baseline de infraestrutura.
+Em `dev`, o workflow de release está implementado para executar rollback
+automático quando o smoke pós-deploy falhar. Ele captura a versão corrente de
+`index.html` antes do upload, publica o novo entry point por último, invalida
+somente `/` e `/index.html` e aguarda a conclusão antes do smoke.
+
+Quando há versão anterior, o rollback copia diretamente essa versão S3 para uma
+nova versão corrente, preservando seus metadados e sem rebuild. Depois repete a
+invalidação e o smoke. A falha inicial permanece como resultado final do workflow,
+mesmo se o rollback recuperar o serviço.
+
+No primeiro release, a ausência de `index.html` anterior é normal. Se o smoke
+falhar, o workflow registra `ROLLBACK_NOT_AVAILABLE_FIRST_RELEASE`, não apaga
+objetos e termina com falha. O workflow ainda não foi executado e nenhum conteúdo
+frontend foi publicado por esta baseline.
 
 Em `prod`, o rollback automático continua limitado a um deploy previamente
 aprovado:

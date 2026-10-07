@@ -1,9 +1,9 @@
 # Versão documental canônica
 
 **Projeto:** Serverless Student Manager  
-**Versão:** 3.2 — Frontend Hosting Infrastructure Declared
+**Versão:** 3.3 — Frontend Release Automation Implemented
 **Data:** 2026-10-06
-**Status:** Canônica — hosting frontend declarado em Terraform; release ainda não implementada
+**Status:** Canônica — hosting dev implantado; release automatizada ainda não executada
 
 ## Escopo desta versão
 
@@ -33,28 +33,35 @@ Esta versão consolida:
 - hosting frontend de `dev` declarado com S3 privado, CloudFront, OAC, security
   headers gerenciados, fallback controlado de SPA e cache por classe de objeto;
 - IAM mínimo para publicação e rollback futuro do frontend, sem permissão de
-  exclusão de objetos.
+  exclusão de objetos;
+- infraestrutura de hosting aplicada e convergente em `dev`;
+- workflow e helper testável de release, smoke e rollback automático do frontend.
 
-## Mudanças principais em relação à v3.1
+## Mudanças principais em relação à v3.2
 
-1. O módulo `frontend_hosting` declara S3 privado e versionado, CloudFront com
-   OAC, HTTPS, security headers e fallback SPA sem mascarar assets ausentes.
-2. O root `dev` expõe os outputs de release e limita a role OIDC existente ao
-   bucket e à distribuição exatos, sem `s3:DeleteObject`.
-3. O Terraform CI passa a validar e testar explicitamente o novo módulo.
-4. Rollback automático em `dev` após falha de smoke está decidido, mas o
-   workflow de release e o primeiro deploy permanecem para fases posteriores.
-5. CSP específica, domínio próprio e hosting de produção permanecem adiados.
-6. O marco funcional do frontend permanece encerrado e não foi reaberto.
+1. O hosting S3 privado + CloudFront/OAC foi aplicado em `dev`; o plan
+   pós-apply confirmou convergência sem drift.
+2. O workflow lê alvos e configurações públicas diretamente dos outputs
+   Terraform, compila o SHA exato e publica `index.html` por último.
+3. Assets fingerprinted recebem cache imutável; entry point e arquivos públicos
+   não fingerprinted usam cache conservador. Nenhum objeto é excluído.
+4. Smoke valida root, asset, security headers e `GET /health`.
+5. Falha pós-publicação restaura a versão S3 anterior de `index.html` quando ela
+   existe, mas mantém o workflow como failed. O primeiro release sem versão
+   anterior falha de forma explícita sem rollback destrutivo.
+6. O workflow está implementado, mas não foi executado e nenhum conteúdo foi
+   publicado. CSP específica, domínio próprio, produção e CI/Playwright amplo
+   permanecem adiados.
+7. O marco funcional do frontend permanece encerrado e não foi reaberto.
 
 ## Estado de implementação desta baseline
 
 O frontend funcional permanece 100% concluído, o contrato público da API está
-versionado e a infraestrutura de hosting em `dev` está declarada, mas ainda não
-foi aplicada. O workflow de release também ainda não foi implementado. Isso não
-declara o projeto inteiro como 100% concluído; a engenharia do projeto e os itens
-adiados continuam.
+versionado e o hosting de `dev` está implantado. A automação de release está
+implementada e testada localmente, porém seu primeiro deploy permanece pendente
+de gate operacional próprio. Isso não declara o projeto inteiro como 100%
+concluído; a engenharia do projeto e os itens adiados continuam.
 
 ## Regra de precedência
 
-Esta versão substitui documentalmente a v3.1 como fonte de verdade para a engenharia.
+Esta versão substitui documentalmente a v3.2 como fonte de verdade para a engenharia.
