@@ -1,6 +1,6 @@
 # Runbook — Rollback e recuperação de deploy
 
-**Status:** Approved  
+**Status:** Approved
 **Data:** 2026-08-10
 
 ## Objetivo
@@ -102,20 +102,33 @@ Nunca sobrescrever automaticamente a tabela ativa.
 
 ## Rollback automático por smoke failure
 
-Em `dev`, o workflow de release está implementado para executar rollback
-automático quando o smoke pós-deploy falhar. Ele captura a versão corrente de
-`index.html` antes do upload, publica o novo entry point por último, invalida
-somente `/` e `/index.html` e aguarda a conclusão antes do smoke.
+Em `dev`, o workflow de release executa rollback automático quando o smoke
+pós-deploy falha e existe uma versão anterior utilizável. Ele captura a versão
+corrente de `index.html` antes do upload, publica o novo entry point por último,
+invalida somente `/` e `/index.html` e aguarda a conclusão antes do smoke.
 
 Quando há versão anterior, o rollback copia diretamente essa versão S3 para uma
 nova versão corrente, preservando seus metadados e sem rebuild. Depois repete a
-invalidação e o smoke. A falha inicial permanece como resultado final do workflow,
-mesmo se o rollback recuperar o serviço.
+invalidação e o smoke. A falha inicial permanece como resultado final do
+workflow, mesmo se o rollback recuperar o serviço.
 
 No primeiro release, a ausência de `index.html` anterior é normal. Se o smoke
 falhar, o workflow registra `ROLLBACK_NOT_AVAILABLE_FIRST_RELEASE`, não apaga
-objetos e termina com falha. O workflow ainda não foi executado e nenhum conteúdo
-frontend foi publicado por esta baseline.
+objetos e termina com falha.
+
+### Evidência operacional do primeiro release
+
+O primeiro release real do frontend em `dev` foi executado em 2026-10-07 pelo
+workflow oficial, run `37595125892`, commit
+`93aa33817088a7a7475d9848669d7b24dcf1ab2d`.
+
+A execução concluiu `SUCCESS`, com `PREVIOUS_INDEX_VERSION = NONE`, uploads,
+invalidação e smokes aprovados. Nenhum rollback foi necessário; portanto, o
+caminho de rollback real permaneceu não exercitado nessa execução.
+
+A invalidação CloudFront `I2DBEP9CTXHE403LPZT90C2PUE` concluiu usando apenas
+`/` e `/index.html`. Não houve upload S3 ou invalidação CloudFront manual,
+`DeleteObject`, `sync --delete`, Terraform apply ou alteração em produção.
 
 Em `prod`, o rollback automático continua limitado a um deploy previamente
 aprovado:

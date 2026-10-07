@@ -1,6 +1,6 @@
 # Infraestrutura, ambientes e CI/CD
 
-**Versão:** 3.3
+**Versão:** 3.4
 **Status:** Approved
 
 ## 1. Ambientes
@@ -171,28 +171,32 @@ O módulo `infra/modules/frontend_hosting` e sua composição em
   assets ausentes não são mascarados;
 - cache desabilitado para o entry point e rotas SPA, e cache de um ano para
   assets fingerprinted em `/assets/*`;
-- outputs de bucket, distribuição e URL para o pipeline futuro;
+- outputs de bucket, distribuição e URL para o pipeline;
 - policy mínima anexada à role existente
   `student-manager-github-dev-deploy`, limitada a publicação/restauração de
   objetos e invalidação da distribuição, sem `s3:DeleteObject`.
 
 O hosting foi aplicado em `dev` e o plan pós-apply confirmou convergência sem
-drift. O bucket permanece privado e pode continuar vazio até o primeiro release.
+drift. O bucket permanece privado e contém o primeiro release oficial publicado
+pela automação em 2026-10-07.
 
 ### 5.2 Release frontend automatizada em `dev`
 
-O workflow `.github/workflows/frontend-release.yml` está implementado e ainda
-não foi executado. Ele dispara automaticamente apenas para mudanças em
-`frontend/**` enviadas à `main` e também oferece `workflow_dispatch` na própria
-`main`. Alterações no workflow, helper, documentação ou Terraform não disparam o
-primeiro deploy por si só.
+O workflow `.github/workflows/frontend-release.yml` está implementado e foi
+exercitado com sucesso no primeiro release real em `dev`. Ele dispara
+automaticamente apenas para mudanças reais em `frontend/**` enviadas à `main`
+e também oferece `workflow_dispatch` na própria `main`. Markdown dentro de
+`frontend/**`, alterações isoladas no workflow/helper, documentação ou
+Terraform não disparam release por si só.
 
 O job usa OIDC com a role existente `student-manager-github-dev-deploy`. Não usa
 GitHub Environment porque o trust atual dessa role restringe o subject à ref
 `refs/heads/main`; associar um Environment mudaria o subject OIDC. O nome do
-bucket de state deve ser fornecido pela repository variable
-`TERRAFORM_STATE_BUCKET`. Depois do `terraform init`, todos os alvos de aplicação
-e as configurações públicas do Vite são obtidos por `terraform output`:
+bucket de state é fornecido pela repository variable `TERRAFORM_STATE_BUCKET`,
+configurada como
+`serverless-student-manager-tfstate-590183756378-us-east-1`. Depois do
+`terraform init`, todos os alvos de aplicação e as configurações públicas do
+Vite são obtidos por `terraform output`:
 
 - `frontend_bucket_name`;
 - `frontend_cloudfront_distribution_id`;
@@ -215,10 +219,22 @@ somente `/` e `/index.html`, aguarda a invalidação e valida frontend, asset,
 security headers e `GET /health`.
 
 Se o smoke falhar e existir uma versão anterior, o helper copia essa versão S3
-de `index.html` para uma nova versão corrente, repete invalidação e smoke e mantém
-o workflow como failed. No primeiro release, a ausência de versão anterior é
-registrada como `ROLLBACK_NOT_AVAILABLE_FIRST_RELEASE`, sem excluir conteúdo.
-O primeiro release permanece reservado a gate operacional separado.
+de `index.html` para uma nova versão corrente, repete invalidação e smoke e
+mantém o workflow como failed. No primeiro release, a ausência de versão
+anterior é registrada como `ROLLBACK_NOT_AVAILABLE_FIRST_RELEASE` se houver
+falha, sem excluir conteúdo.
+
+O primeiro release foi executado em 2026-10-07 por `workflow_dispatch` na
+`main`, workflow run `37595125892`, commit
+`93aa33817088a7a7475d9848669d7b24dcf1ab2d`. A execução concluiu `SUCCESS`:
+OIDC, descoberta dos Terraform outputs, build, uploads, invalidação, smoke do
+frontend, smoke do asset, security headers e `GET /health` passaram.
+`PREVIOUS_INDEX_VERSION = NONE` foi esperado, e nenhum rollback foi necessário.
+
+A invalidação `I2DBEP9CTXHE403LPZT90C2PUE` concluiu com somente `/` e
+`/index.html`. O release não executou upload ou invalidação manual, não usou
+`DeleteObject` ou `sync --delete`, não executou Terraform apply e não tocou
+produção.
 
 CSP específica, domínio próprio, ACM, Route 53, WAF e hosting de `prod`
 permanecem fora deste incremento. A policy gerenciada de security headers é a
@@ -245,7 +261,6 @@ infrastructure-management
 deployment-automation
 ```
 
-
 ## 7. Rollback
 
 Conforme ADR-020:
@@ -259,7 +274,11 @@ Conforme ADR-020:
 - mudanças de dados devem preferir `expand-contract`;
 - rollback automático pós-smoke é limitado à release da aplicação dentro de workflow já aprovado.
 
-Para `dev`, o workflow implementado restaura automaticamente a versão anterior
-de `index.html` após falha de smoke, invalida os entry points e executa novo
-smoke. A release original continua marcada como failed mesmo quando a restauração
-recupera o serviço. O workflow ainda não foi executado nesta baseline.
+Para `dev`, o workflow restaura automaticamente a versão anterior de
+`index.html` após falha de smoke quando uma versão anterior existe, invalida os
+entry points e executa novo smoke. A release original continua marcada como
+failed mesmo quando a restauração recupera o serviço.
+
+O primeiro release real concluiu com sucesso e, portanto, não exercitou o
+caminho de rollback. A capacidade permanece implementada e testada, mas sua
+execução real depende de uma falha pós-publicação em release com versão anterior.

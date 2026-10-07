@@ -1,8 +1,8 @@
 # Serverless Student Manager — Documentação canônica
 
-**Versão:** 3.3 — Frontend Release Automation Implemented
-**Data:** 2026-10-06
-**Status:** Hosting frontend implantado em dev — release automatizada ainda não executada
+**Versão:** 3.4 — Frontend First Release Completed
+**Data:** 2026-10-07
+**Status:** Frontend funcional, hosting e primeiro release dev concluídos
 
 ## Objetivo
 
@@ -15,6 +15,8 @@ Este diretório é a fonte de verdade documental do **Serverless Student Manager
 - [Requisitos](requirements/srs.md)
 - [ADRs e registro de decisões](decisions/decision-register.md)
 - [Contrato público OpenAPI 3.1](api/openapi.yaml)
+- [Fechamento funcional do frontend](FRONTEND-MILESTONE-CLOSURE.md)
+- [Fechamento de hosting e release do frontend](FRONTEND-RELEASE-MILESTONE-CLOSURE.md)
 
 O diretório `docs/` pode ser aberto como um Vault do Obsidian opcional; os
 arquivos Markdown versionados continuam sendo a fonte canônica.
@@ -60,28 +62,28 @@ Estão concluídos e aprovados:
 - ADR-001 a ADR-030.
 
 O **Frontend Functional Milestone** está `COMPLETE` na baseline
-`5f6794974ff7ce062cde8ee949f97862f50abc4b`. As evidências, o escopo concluído e
-os itens de polish/DevOps explicitamente adiados estão no
-[registro formal de fechamento](FRONTEND-MILESTONE-CLOSURE.md).
+`5f6794974ff7ce062cde8ee949f97862f50abc4b`. As evidências e o escopo funcional
+estão no [registro formal de fechamento](FRONTEND-MILESTONE-CLOSURE.md).
 
-A engenharia do projeto continua além do marco funcional do frontend.
+O **Frontend Hosting and Release Milestone** também está `COMPLETE` em `dev`.
+O hosting S3 privado + CloudFront está implantado e convergente, a automação de
+release está operacional e o primeiro deploy real foi concluído com sucesso pelo
+workflow oficial no run `37595125892`, release SHA
+`93aa33817088a7a7475d9848669d7b24dcf1ab2d`. As evidências estão no
+[registro de fechamento de hosting/release](FRONTEND-RELEASE-MILESTONE-CLOSURE.md).
+
+A engenharia do projeto continua além desses marcos.
 
 As 18 operações HTTP públicas atualmente implementadas estão versionadas em
 [`api/openapi.yaml`](api/openapi.yaml). O contrato representa os envelopes de
 erro legados e canônicos que coexistem no runtime, sem normalização retroativa.
 
-A infraestrutura de hosting do frontend em `dev` está implantada e convergente:
-bucket S3 privado e versionado, CloudFront com OAC, HTTPS, security headers
-gerenciados, cache separado para assets fingerprinted e fallback controlado de
-SPA. O workflow de release, smoke e rollback automático está implementado, mas
-o primeiro deploy de conteúdo ainda não foi executado e o bucket pode permanecer
-vazio.
-
 ## Próximo marco
 
-1. executar o primeiro deploy, smoke e validação de rollback em gate separado;
-2. adicionar CI do frontend e Playwright;
-3. continuar os marcos operacionais sem reabrir o fechamento funcional.
+1. selecionar o próximo bloco de engenharia sem reabrir os milestones fechados;
+2. adicionar CI frontend dedicado e Playwright/E2E automatizado amplo quando
+   priorizados;
+3. continuar os marcos operacionais e de produção separadamente.
 
 ## Estrutura documental
 
@@ -92,6 +94,7 @@ docs/
 │   └── openapi.yaml
 ├── DOCUMENTATION-VERSION.md
 ├── FRONTEND-MILESTONE-CLOSURE.md
+├── FRONTEND-RELEASE-MILESTONE-CLOSURE.md
 ├── ENGINEERING-READINESS.md
 ├── AUDIT-REPORT.md
 ├── MANIFEST.md
