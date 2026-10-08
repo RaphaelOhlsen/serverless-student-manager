@@ -631,6 +631,7 @@ module "http_api" {
 
   cors_allow_origins = [
     "http://localhost:5173",
+    module.frontend_hosting.frontend_url,
   ]
 
   cors_allow_methods = [
